@@ -1,0 +1,25 @@
+# Node agent configuration
+nodeId: thinkcentre-01
+controllerAddr: "192.168.1.100:9090"
+
+tls:
+  caFile: /etc/kcode/ca.crt
+  certFile: /etc/kcode/node.crt
+  keyFile: /etc/kcode/node.key
+
+# Network name to bridge name mapping
+networks:
+  default: br0
+
+# Storage driver configuration
+storage:
+  drivers:
+    local-dir:
+      type: local-dir
+      parameters:
+        path: /var/lib/kcode/disks
+    local-lvm:
+      type: local-lvm
+      parameters:
+        volumeGroup: vg0
+

@@ -1,0 +1,35 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetpack-io/devbox/main/.schema/devbox.schema.json",
+  "packages": [
+    "go@1.22",
+    "protobuf@25",
+    "gnumake",
+    "podman"
+  ],
+  "shell": {
+    "init_hook": [
+      "export PATH=\"$HOME/go/bin:$PATH\"",
+      "# Install Go protobuf plugins if not present",
+      "if ! command -v protoc-gen-go &> /dev/null; then go install google.golang.org/protobuf/cmd/protoc-gen-go@latest; fi",
+      "if ! command -v protoc-gen-go-grpc &> /dev/null; then go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; fi"
+    ],
+    "scripts": {
+      "build-node-agent": [
+        "echo 'Building node-agent for Linux/amd64 using Podman...'",
+        "podman run --rm --platform linux/amd64 \\",
+        "  -v $(pwd):/work \\",
+        "  -w /work \\",
+        "  -e CGO_ENABLED=1 \\",
+        "  -e GOOS=linux \\",
+        "  -e GOARCH=amd64 \\",
+        "  docker.io/golang:1.22 bash -c 'apt-get update -qq && apt-get install -y -qq libvirt-dev pkg-config gcc && make node-agent-podman'"
+      ],
+      "proto": [
+        "make proto"
+      ],
+      "controller": [
+        "make controller"
+      ]
+    }
+  }
+}

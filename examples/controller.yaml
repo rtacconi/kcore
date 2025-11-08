@@ -1,0 +1,13 @@
+# Controller configuration
+databasePath: ./kcore.db
+listenAddr: ":9090"
+
+tls:
+  caFile: ./certs/ca.crt
+  certFile: ./certs/controller.crt
+  keyFile: ./certs/controller.key
+
+# Network name to bridge name mapping
+nodeNetworks:
+  default: br0
+

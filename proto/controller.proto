@@ -1,0 +1,44 @@
+syntax = "proto3";
+
+package kcore.controller;
+
+option go_package = "github.com/kcore/kcore/api/controller";
+
+// Controller service for node registration
+service Controller {
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string hostname = 2;
+  string address = 3; // gRPC endpoint address
+  NodeCapacity capacity = 4;
+  repeated string labels = 5; // e.g., "dc=dc-a", "rack=rack-1"
+}
+
+message RegisterNodeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  NodeUsage usage = 2;
+}
+
+message HeartbeatResponse {
+  bool success = 1;
+}
+
+message NodeCapacity {
+  int32 cpu_cores = 1;
+  int64 memory_bytes = 2;
+}
+
+message NodeUsage {
+  int32 cpu_cores_used = 1;
+  int64 memory_bytes_used = 2;
+}
+
