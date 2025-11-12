@@ -1,0 +1,18 @@
+apiVersion: kcore.dev/v1
+kind: VirtualMachine
+metadata:
+  name: basic-vm
+  labels:
+    environment: test
+    tier: frontend
+spec:
+  cpu: 2
+  memory: 4Gi
+  disks:
+    - name: root
+      size: 20Gi
+      storageClass: local-dir
+  networks:
+    - name: default
+      bridge: br0
+

@@ -1,0 +1,23 @@
+apiVersion: kcore.dev/v1
+kind: VirtualMachine
+metadata:
+  name: multi-disk-vm
+  labels:
+    environment: test
+    tier: database
+spec:
+  cpu: 4
+  memory: 8Gi
+  disks:
+    - name: root
+      size: 40Gi
+      storageClass: local-dir
+    - name: data
+      size: 100Gi
+      storageClass: local-lvm
+  networks:
+    - name: default
+      bridge: br0
+    - name: storage
+      bridge: br1
+

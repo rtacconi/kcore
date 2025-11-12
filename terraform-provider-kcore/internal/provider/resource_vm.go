@@ -274,4 +274,3 @@ func resourceVMDelete(ctx context.Context, d *schema.ResourceData, meta interfac
 	d.SetId("")
 	return diags
 }
-

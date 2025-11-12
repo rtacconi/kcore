@@ -36,4 +36,3 @@ func testAccPreCheck(t *testing.T) {
 		t.Fatal("KCORE_CONTROLLER_ADDRESS must be set for acceptance tests")
 	}
 }
-

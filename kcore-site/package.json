@@ -1,0 +1,26 @@
+{
+  "name": "kcore-site",
+  "version": "1.0.0",
+  "description": "Marketing website for kcore.ai - AI-powered virtualization platform",
+  "scripts": {
+    "dev": "python3 -m http.server 8000",
+    "serve": "python3 -m http.server 8000",
+    "deploy:vercel": "vercel --prod",
+    "deploy:netlify": "netlify deploy --prod"
+  },
+  "keywords": [
+    "kcore",
+    "virtualization",
+    "infrastructure",
+    "ai",
+    "terraform"
+  ],
+  "author": "kcore team",
+  "license": "MIT",
+  "devDependencies": {},
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kcore/kcore"
+  }
+}
+

@@ -2,14 +2,17 @@ package controller
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
@@ -50,8 +53,39 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Load TLS credentials for connecting to nodes
+	cert, err := tls.LoadX509KeyPair("certs/controller.crt", "certs/controller.key")
+	if err != nil {
+		return &ctrlpb.RegisterNodeResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to load client cert: %v", err),
+		}, nil
+	}
+
+	caCert, err := os.ReadFile("certs/ca.crt")
+	if err != nil {
+		return &ctrlpb.RegisterNodeResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to read CA cert: %v", err),
+		}, nil
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		return &ctrlpb.RegisterNodeResponse{
+			Success: false,
+			Message: "failed to append CA cert",
+		}, nil
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            certPool,
+		InsecureSkipVerify: true, // Skip verification for now (IPs not in cert SANs)
+	}
+
 	// Connect to node
-	conn, err := grpc.Dial(req.Address, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.Dial(req.Address, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	if err != nil {
 		return &ctrlpb.RegisterNodeResponse{
 			Success: false,

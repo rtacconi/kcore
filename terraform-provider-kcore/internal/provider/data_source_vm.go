@@ -162,4 +162,3 @@ func dataSourceVMRead(ctx context.Context, d *schema.ResourceData, meta interfac
 
 	return diags
 }
-

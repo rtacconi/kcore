@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore Documentation - Get started with the AI-powered virtualization platform">
+    <title>Documentation - kcore.ai</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .docs-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .docs-layout {
+            display: grid;
+            grid-template-columns: 250px 1fr;
+            gap: 3rem;
+            margin-top: 80px;
+        }
+
+        .docs-sidebar {
+            position: sticky;
+            top: 100px;
+            height: fit-content;
+        }
+
+        .docs-nav {
+            list-style: none;
+        }
+
+        .docs-nav-section {
+            margin-bottom: 2rem;
+        }
+
+        .docs-nav-section h4 {
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .docs-nav ul {
+            list-style: none;
+        }
+
+        .docs-nav li {
+            margin-bottom: 0.5rem;
+        }
+
+        .docs-nav a {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            display: block;
+            padding: 0.25rem 0;
+            transition: color 0.2s ease;
+        }
+
+        .docs-nav a:hover,
+        .docs-nav a.active {
+            color: var(--accent-primary);
+        }
+
+        .docs-content {
+            max-width: 800px;
+        }
+
+        .docs-content h1 {
+            margin-bottom: 1rem;
+        }
+
+        .docs-content h2 {
+            margin-top: 3rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-primary);
+        }
+
+        .docs-content h3 {
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+        }
+
+        .docs-content p {
+            margin-bottom: 1rem;
+            line-height: 1.8;
+            color: var(--text-secondary);
+        }
+
+        .docs-content pre {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+            overflow-x: auto;
+        }
+
+        .docs-content code {
+            font-family: var(--font-mono);
+            font-size: 0.9rem;
+        }
+
+        .docs-content p code {
+            background: var(--bg-card);
+            padding: 0.2rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.85rem;
+            color: var(--accent-primary);
+        }
+
+        .alert {
+            padding: 1rem 1.5rem;
+            border-radius: 0.5rem;
+            margin: 1.5rem 0;
+            border-left: 3px solid;
+        }
+
+        .alert-info {
+            background: rgba(59, 130, 246, 0.1);
+            border-color: var(--info);
+        }
+
+        .alert-warning {
+            background: rgba(245, 158, 11, 0.1);
+            border-color: var(--warning);
+        }
+
+        .alert-success {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: var(--success);
+        }
+
+        .docs-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.5rem;
+            padding: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        .breadcrumb {
+            color: var(--text-tertiary);
+            font-size: 0.875rem;
+            margin-bottom: 2rem;
+        }
+
+        .breadcrumb a {
+            color: var(--text-secondary);
+        }
+
+        .next-prev {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 4rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-primary);
+        }
+
+        .next-prev a {
+            display: flex;
+            flex-direction: column;
+            padding: 1rem;
+            border: 1px solid var(--border-primary);
+            border-radius: 0.5rem;
+            transition: all 0.2s ease;
+        }
+
+        .next-prev a:hover {
+            border-color: var(--accent-primary);
+            background: var(--bg-card);
+        }
+
+        .next-prev span {
+            font-size: 0.875rem;
+            color: var(--text-tertiary);
+        }
+
+        @media (max-width: 968px) {
+            .docs-layout {
+                grid-template-columns: 1fr;
+            }
+
+            .docs-sidebar {
+                position: static;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">.ai</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="index.html#features">Features</a></li>
+                <li><a href="index.html#platform">Platform</a></li>
+                <li><a href="index.html#ai">AI Integration</a></li>
+                <li><a href="docs.html">Docs</a></li>
+                <li><a href="index.html#get-started" class="btn-primary">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="docs-container">
+        <div class="docs-layout">
+            <!-- Sidebar -->
+            <aside class="docs-sidebar">
+                <nav class="docs-nav">
+                    <div class="docs-nav-section">
+                        <h4>Getting Started</h4>
+                        <ul>
+                            <li><a href="#introduction" class="active">Introduction</a></li>
+                            <li><a href="#installation">Installation</a></li>
+                            <li><a href="#quickstart">Quick Start</a></li>
+                            <li><a href="#architecture">Architecture</a></li>
+                        </ul>
+                    </div>
+                    <div class="docs-nav-section">
+                        <h4>Core Concepts</h4>
+                        <ul>
+                            <li><a href="#vms">Virtual Machines</a></li>
+                            <li><a href="#storage">Storage Classes</a></li>
+                            <li><a href="#networking">Networking</a></li>
+                            <li><a href="#nodes">Node Management</a></li>
+                        </ul>
+                    </div>
+                    <div class="docs-nav-section">
+                        <h4>CLI Reference</h4>
+                        <ul>
+                            <li><a href="#kctl">kctl Commands</a></li>
+                            <li><a href="#config">Configuration</a></li>
+                        </ul>
+                    </div>
+                    <div class="docs-nav-section">
+                        <h4>Terraform</h4>
+                        <ul>
+                            <li><a href="#provider">Provider Setup</a></li>
+                            <li><a href="#resources">Resources</a></li>
+                            <li><a href="#examples">Examples</a></li>
+                        </ul>
+                    </div>
+                    <div class="docs-nav-section">
+                        <h4>AI Integration</h4>
+                        <ul>
+                            <li><a href="#mcp">MCP Server</a></li>
+                            <li><a href="#agents">AI Agents</a></li>
+                            <li><a href="#automation">Automation</a></li>
+                        </ul>
+                    </div>
+                </nav>
+            </aside>
+
+            <!-- Main Content -->
+            <main class="docs-content">
+                <div class="breadcrumb">
+                    <a href="index.html">Home</a> / <a href="docs.html">Documentation</a> / Getting Started
+                </div>
+
+                <h1 id="introduction">Introduction to kcore</h1>
+                
+                <p>
+                    kcore is a next-generation virtualization platform that combines the reliability of 
+                    traditional VM management with modern infrastructure-as-code practices and AI-powered automation.
+                </p>
+
+                <div class="alert alert-info">
+                    <strong>Note:</strong> kcore requires a Linux host with KVM/libvirt support. 
+                    See the installation guide for system requirements.
+                </div>
+
+                <h2 id="installation">Installation</h2>
+
+                <h3>System Requirements</h3>
+                <ul style="color: var(--text-secondary); line-height: 2;">
+                    <li>Linux host (x86_64)</li>
+                    <li>KVM-enabled CPU (Intel VT-x or AMD-V)</li>
+                    <li>4GB+ RAM (8GB+ recommended)</li>
+                    <li>20GB+ free disk space</li>
+                    <li>libvirt installed and running</li>
+                </ul>
+
+                <h3>Quick Install</h3>
+                <p>Install kcore with a single command:</p>
+
+                <pre><code>curl -sSL https://get.kcore.ai | sh</code></pre>
+
+                <p>Or download and install manually:</p>
+
+                <pre><code><span class="code-comment"># Download the latest release</span>
+wget https://github.com/kcore/kcore/releases/latest/download/kcore-linux-amd64.tar.gz
+
+<span class="code-comment"># Extract</span>
+tar -xzf kcore-linux-amd64.tar.gz
+
+<span class="code-comment"># Install binaries</span>
+sudo mv kcore-controller /usr/local/bin/
+sudo mv kcore-node-agent /usr/local/bin/
+sudo mv kctl /usr/local/bin/
+
+<span class="code-comment"># Verify installation</span>
+kctl version</code></pre>
+
+                <h2 id="quickstart">Quick Start</h2>
+
+                <h3>1. Start the Controller</h3>
+                <p>The controller manages the overall state of your infrastructure:</p>
+
+                <pre><code><span class="code-comment"># Create a controller configuration</span>
+cat &lt;&lt;EOF &gt; controller.yaml
+<span class="code-property">listen_address</span>: <span class="code-string">"0.0.0.0:50051"</span>
+<span class="code-property">database</span>: <span class="code-string">"./kcore.db"</span>
+EOF
+
+<span class="code-comment"># Start the controller</span>
+kcore-controller --config controller.yaml</code></pre>
+
+                <h3>2. Configure kctl</h3>
+                <p>Set up your CLI to connect to the controller:</p>
+
+                <pre><code><span class="code-comment"># Create kctl config</span>
+cat &lt;&lt;EOF &gt; ~/.kcore/config.yaml
+<span class="code-property">controller_address</span>: <span class="code-string">"localhost:50051"</span>
+<span class="code-property">insecure</span>: <span class="code-boolean">true</span>  <span class="code-comment"># For local development</span>
+EOF</code></pre>
+
+                <h3>3. Create Your First VM</h3>
+
+                <div class="docs-card">
+                    <p><strong>Using YAML definition:</strong></p>
+                    <pre><code><span class="code-comment"># vm.yaml</span>
+<span class="code-property">apiVersion</span>: <span class="code-string">v1</span>
+<span class="code-property">kind</span>: <span class="code-string">VirtualMachine</span>
+<span class="code-property">metadata</span>:
+  <span class="code-property">name</span>: <span class="code-string">my-first-vm</span>
+<span class="code-property">spec</span>:
+  <span class="code-property">memory</span>: <span class="code-number">2048</span>
+  <span class="code-property">vcpu</span>: <span class="code-number">2</span>
+  <span class="code-property">disks</span>:
+    - <span class="code-property">size</span>: <span class="code-string">20GB</span></code></pre>
+
+                    <pre><code>kctl apply -f vm.yaml</code></pre>
+                </div>
+
+                <div class="alert alert-success">
+                    <strong>Success!</strong> Your VM should now be running. Check its status with <code>kctl get vms</code>
+                </div>
+
+                <h2 id="architecture">Architecture Overview</h2>
+
+                <p>kcore consists of three main components:</p>
+
+                <div class="docs-card">
+                    <h4>Controller</h4>
+                    <p>
+                        Central management server that maintains the desired state, handles scheduling, 
+                        and provides the API interface for clients and the AI agent.
+                    </p>
+                </div>
+
+                <div class="docs-card">
+                    <h4>Node Agent</h4>
+                    <p>
+                        Runs on each compute node, manages local VMs using libvirt, reports status 
+                        to the controller, and handles storage provisioning.
+                    </p>
+                </div>
+
+                <div class="docs-card">
+                    <h4>CLI (kctl)</h4>
+                    <p>
+                        Command-line interface for interacting with kcore. Create, manage, and monitor 
+                        VMs and other resources with familiar kubectl-like commands.
+                    </p>
+                </div>
+
+                <h2 id="vms">Working with Virtual Machines</h2>
+
+                <h3>Creating VMs</h3>
+
+                <pre><code><span class="code-comment"># Quick create with CLI</span>
+kctl create vm web-server \
+  --memory 4096 \
+  --vcpu 4 \
+  --disk size=50GB
+
+<span class="code-comment"># List all VMs</span>
+kctl get vms
+
+<span class="code-comment"># Get detailed info</span>
+kctl describe vm web-server
+
+<span class="code-comment"># Delete a VM</span>
+kctl delete vm web-server</code></pre>
+
+                <h3>VM Lifecycle</h3>
+
+                <pre><code><span class="code-comment"># Start a VM</span>
+kctl start vm web-server
+
+<span class="code-comment"># Stop a VM</span>
+kctl stop vm web-server
+
+<span class="code-comment"># Restart a VM</span>
+kctl restart vm web-server</code></pre>
+
+                <h2 id="provider">Terraform Provider</h2>
+
+                <p>kcore provides a native Terraform provider for infrastructure-as-code deployments:</p>
+
+                <pre><code><span class="code-keyword">terraform</span> {
+  <span class="code-keyword">required_providers</span> {
+    <span class="code-property">kcore</span> = {
+      <span class="code-property">source</span>  = <span class="code-string">"kcore/kcore"</span>
+      <span class="code-property">version</span> = <span class="code-string">"~> 1.0"</span>
+    }
+  }
+}
+
+<span class="code-keyword">provider</span> <span class="code-string">"kcore"</span> {
+  <span class="code-property">controller_address</span> = <span class="code-string">"localhost:50051"</span>
+}
+
+<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"app"</span> {
+  <span class="code-property">name</span>   = <span class="code-string">"production-app"</span>
+  <span class="code-property">memory</span> = <span class="code-number">8192</span>
+  <span class="code-property">vcpu</span>   = <span class="code-number">4</span>
+  
+  <span class="code-keyword">disk</span> {
+    <span class="code-property">size</span> = <span class="code-string">"100GB"</span>
+  }
+}</code></pre>
+
+                <h2 id="mcp">AI Integration with MCP</h2>
+
+                <p>
+                    kcore includes a built-in Model Context Protocol (MCP) server that allows AI agents 
+                    to interact with your infrastructure using natural language.
+                </p>
+
+                <div class="alert alert-info">
+                    <strong>Coming Soon:</strong> Full MCP documentation and examples will be available 
+                    in the next release.
+                </div>
+
+                <h3>Example Agent Interaction</h3>
+
+                <pre><code><span class="code-comment"># Agent prompt</span>
+"Create a web application cluster with 3 VMs, 
+ 4GB RAM each, with a load balancer"
+
+<span class="code-comment"># Agent generates and executes:</span>
+<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"web_cluster"</span> {
+  <span class="code-property">count</span>  = <span class="code-number">3</span>
+  <span class="code-property">name</span>   = <span class="code-string">"web-${count.index + 1}"</span>
+  <span class="code-property">memory</span> = <span class="code-number">4096</span>
+  <span class="code-property">vcpu</span>   = <span class="code-number">2</span>
+}</code></pre>
+
+                <div class="next-prev">
+                    <a href="index.html">
+                        <span>← Previous</span>
+                        <strong>Home</strong>
+                    </a>
+                    <a href="#quickstart">
+                        <span>Next →</span>
+                        <strong>Quick Start Guide</strong>
+                    </a>
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer" style="margin-top: 4rem;">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>kcore</h4>
+                    <p>Next-generation virtualization platform powered by AI</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Product</h4>
+                    <ul>
+                        <li><a href="index.html#features">Features</a></li>
+                        <li><a href="index.html#platform">Platform</a></li>
+                        <li><a href="index.html#ai">AI Integration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="docs.html">Documentation</a></li>
+                        <li><a href="#">API Reference</a></li>
+                        <li><a href="#">GitHub</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Company</h4>
+                    <ul>
+                        <li><a href="#">About</a></li>
+                        <li><a href="#">Blog</a></li>
+                        <li><a href="#">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 kcore.ai. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script>
+        // Smooth scroll for sidebar links
+        document.querySelectorAll('.docs-nav a').forEach(link => {
+            link.addEventListener('click', function(e) {
+                if (this.getAttribute('href').startsWith('#')) {
+                    e.preventDefault();
+                    const target = document.querySelector(this.getAttribute('href'));
+                    if (target) {
+                        window.scrollTo({
+                            top: target.offsetTop - 100,
+                            behavior: 'smooth'
+                        });
+                        
+                        // Update active state
+                        document.querySelectorAll('.docs-nav a').forEach(a => a.classList.remove('active'));
+                        this.classList.add('active');
+                    }
+                }
+            });
+        });
+    </script>
+</body>
+</html>
+

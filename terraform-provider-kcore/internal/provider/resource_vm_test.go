@@ -80,4 +80,3 @@ resource "kcore_vm" "test" {
 }
 `
 }
-

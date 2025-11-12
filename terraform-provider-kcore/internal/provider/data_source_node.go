@@ -206,4 +206,3 @@ func dataSourceNodesRead(ctx context.Context, d *schema.ResourceData, meta inter
 
 	return diags
 }
-

@@ -70,6 +70,26 @@ build: controller node-agent
 test:
 	@go test ./...
 
+# Run integration tests
+test-integration:
+	@./scripts/run-integration-tests.sh
+
+# Run specific integration test suites
+test-controller:
+	@go test ./test/integration/controller/... -v
+
+test-e2e:
+	@./test/integration/e2e/full_workflow_test.sh
+
+test-multi-node:
+	@./test/integration/e2e/multi_node_test.sh
+
+test-kctl:
+	@./test/integration/kctl/kctl_test.sh
+
+# Run all tests (unit + integration)
+test-all: test test-integration
+
 # Clean build artifacts
 clean:
 	@rm -rf bin/ api/
@@ -142,7 +162,13 @@ help:
 	@echo "  make build                - Build controller + node-agent"
 	@echo ""
 	@echo "🧪 Testing:"
-	@echo "  make test               - Run Go tests"
+	@echo "  make test               - Run Go unit tests"
+	@echo "  make test-integration   - Run all integration tests"
+	@echo "  make test-controller    - Run controller integration tests"
+	@echo "  make test-e2e           - Run end-to-end tests"
+	@echo "  make test-multi-node    - Run multi-node tests"
+	@echo "  make test-kctl          - Run kctl tests"
+	@echo "  make test-all           - Run all tests (unit + integration)"
 	@echo ""
 	@echo "☁️  Node Management (requires NODE_IP=<ip>):"
 	@echo "  make test-node          - Test node connectivity"

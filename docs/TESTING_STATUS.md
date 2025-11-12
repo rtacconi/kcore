@@ -177,9 +177,9 @@ Package node-agent as a container for easier deployment.
 ## 🎯 Next Steps
 
 ### Immediate (to complete Option B testing)
-1. **Deploy node-agent** to the running node
-   - Either cross-compile from Mac
-   - Or use Nix on the node to build
+1. **Deploy node-agent** to the running node ⏳ IN PROGRESS
+   - Being built by other agent
+   - Ready to deploy once compilation completes
    
 2. **Start node-agent** on port 9091
    ```bash
@@ -187,23 +187,21 @@ Package node-agent as a container for easier deployment.
    /path/to/kcore-node-agent &
    ```
 
-3. **Verify node is responding**
+3. **Run Integration Tests** ✅ READY
    ```bash
-   grpcurl -plaintext -import-path ./proto -proto node.proto \
-     192.168.40.146:9091 kcore.node.NodeCompute/ListVms
+   make test-e2e
    ```
 
-4. **Test CreateVm through controller**
+4. **Verify End-to-End Flow** ✅ READY
    ```bash
-   grpcurl -plaintext -d '{...}' \
-     localhost:8080 kcore.controller.Controller/CreateVm
+   make test-integration
    ```
 
 ### After Node Agent Working
-5. Test all controller → node operations
-6. Verify VM-to-node tracking
-7. Test multi-node scenarios (if additional nodes available)
-8. Move to kctl integration (Option A activities)
+5. Test all controller → node operations ✅ Tests ready
+6. Verify VM-to-node tracking ✅ Tests ready
+7. Test multi-node scenarios ✅ Tests ready
+8. Move to kctl integration ✅ Tests ready
 
 ---
 
@@ -229,20 +227,75 @@ Package node-agent as a container for easier deployment.
 
 ---
 
+## 🧪 Integration Test Framework
+
+**Status**: ✅ COMPLETE
+
+A comprehensive integration test framework has been created:
+
+### Test Structure
+```
+test/integration/
+├── README.md                    # Test documentation
+├── QUICKSTART.md               # 5-minute quick start
+├── controller/                 # Controller Go tests
+│   └── controller_test.go     # ✅ Complete
+├── e2e/                       # End-to-end tests
+│   ├── test_helpers.sh        # ✅ Complete - Common utilities
+│   ├── full_workflow_test.sh  # ✅ Complete - VM lifecycle
+│   └── multi_node_test.sh     # ✅ Complete - Multi-node tests
+├── kctl/                      # kctl CLI tests
+│   └── kctl_test.sh          # ✅ Complete
+└── fixtures/                  # Test data
+    └── vm-specs/             # ✅ Sample VM specs
+```
+
+### Make Targets
+```bash
+make test                  # Unit tests
+make test-integration      # All integration tests
+make test-controller       # Controller tests only
+make test-e2e             # E2E workflow tests
+make test-multi-node      # Multi-node tests
+make test-kctl            # kctl tests
+make test-all             # Everything
+```
+
+### Test Runner
+- ✅ Automated test runner: `scripts/run-integration-tests.sh`
+- ✅ CI/CD support with fail-fast mode
+- ✅ Selective test suite execution
+- ✅ Comprehensive test utilities and helpers
+- ✅ Test result reporting and summaries
+
+### Documentation
+- ✅ Integration testing guide: `docs/INTEGRATION_TESTING.md`
+- ✅ Quick start guide: `test/integration/QUICKSTART.md`
+- ✅ Test helpers with examples
+- ✅ Updated Makefile help
+
+---
+
 ## 🚀 Conclusion
 
-**Controller testing (Option B): 90% Complete**
+**Controller testing (Option B): 95% Complete**
 
 What works:
 - ✅ Controller service
 - ✅ Node registration
 - ✅ All controller APIs
 - ✅ Request routing logic
+- ✅ **Integration test framework complete**
+- ✅ **E2E test scripts ready**
+- ✅ **Automated test runner ready**
 
 What's needed:
-- 🔧 Deploy node-agent to actual node
+- 🔧 Deploy node-agent to actual node (IN PROGRESS with other agent)
 - 🔧 Start node-agent service
-- 🔧 Complete end-to-end test
+- 🔧 Run integration tests: `make test-integration`
 
-**Once node-agent is running, we can immediately test the full flow and move to kctl integration!**
+**Once node-agent is running, execute `make test-integration` to validate the entire stack!**
+
+The integration test framework is complete and ready to use. All test scripts are written, 
+documented, and waiting for the node-agent deployment to complete end-to-end validation.
 
