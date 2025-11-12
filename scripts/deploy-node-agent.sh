@@ -1,46 +1,41 @@
 #!/bin/bash
-# deploy-node-agent.sh - Deploy node agent to a ThinkCentre node
-
 set -e
 
-NODE="${1:-}"
-USER="${2:-root}"
-BINARY="${3:-bin/kcore-node-agent-linux-amd64}"
+NODE_HOST="${1:-root@192.168.40.146}"
+BINARY_PATH="${2:-/tmp/kcore-node-agent-fixed}"
 
-if [ -z "$NODE" ]; then
-    echo "Usage: $0 <node-ip-or-hostname> [user] [binary-path]"
-    echo "Example: $0 192.168.1.100 root bin/kcore-node-agent-linux-amd64"
+echo "🚀 Deploying node agent to $NODE_HOST..."
+
+# Stop existing agent (run in subshell to avoid killing SSH)
+echo "📋 Stopping existing agent..."
+ssh "$NODE_HOST" '(pkill -f kcore-node-agent || true) &'
+sleep 3
+
+# Deploy new binary
+echo "📦 Deploying new binary..."
+ssh "$NODE_HOST" "cp $BINARY_PATH /usr/local/bin/kcore-node-agent && chmod +x /usr/local/bin/kcore-node-agent"
+
+# Start agent in background with nohup
+echo "🔄 Starting agent in background..."
+ssh "$NODE_HOST" 'nohup /usr/local/bin/kcore-node-agent >/tmp/node-agent.log 2>&1 </dev/null &'
+
+# Wait a moment for startup
+sleep 2
+
+# Verify it's running
+echo "✅ Verifying agent is running..."
+if ssh "$NODE_HOST" 'pgrep -f kcore-node-agent >/dev/null'; then
+    echo "✅ Node agent is running!"
+    ssh "$NODE_HOST" 'ps aux | grep "[k]core-node-agent"'
+    echo ""
+    echo "📋 Last 5 log lines:"
+    ssh "$NODE_HOST" 'tail -5 /tmp/node-agent.log'
+else
+    echo "❌ Node agent failed to start"
+    echo "📋 Log output:"
+    ssh "$NODE_HOST" 'tail -20 /tmp/node-agent.log'
     exit 1
 fi
 
-if [ ! -f "$BINARY" ]; then
-    echo "Error: Binary not found at $BINARY"
-    echo "Build it first with: make node-agent"
-    exit 1
-fi
-
-echo "Deploying node agent to $USER@$NODE..."
-echo "Binary: $BINARY"
-
-# Copy binary to temporary location
-scp "$BINARY" "$USER@$NODE:/tmp/kcore-node-agent"
-
-# Move to final location and restart service
-ssh "$USER@$NODE" << 'EOF'
-    set -e
-    echo "Installing node agent..."
-    sudo mkdir -p /opt/kcode
-    sudo mv /tmp/kcore-node-agent /opt/kcode/kcore-node-agent
-    sudo chmod +x /opt/kcode/kcore-node-agent
-    sudo chown root:libvirt /opt/kcode/kcore-node-agent
-    
-    echo "Restarting kcode-node-agent service..."
-    sudo systemctl daemon-reload
-    sudo systemctl restart kcode-node-agent
-    
-    echo "Checking service status..."
-    sudo systemctl status kcode-node-agent --no-pager || true
-EOF
-
-echo "Deployment complete!"
-
+echo ""
+echo "✅ Deployment complete!"

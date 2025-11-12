@@ -1,5 +1,5 @@
 .PHONY: all build controller kctl install-kctl-local install-kctl-system node-agent proto test clean deploy
-.PHONY: build-iso create-vm delete-vm test-node list-services deploy-node write-usb help
+.PHONY: build-iso create-vm delete-vm test-node list-services deploy-node deploy-node-agent write-usb help
 
 all: proto build
 
@@ -139,6 +139,11 @@ list-services:
 # Usage: NODE_IP=192.168.40.146 make deploy-node
 deploy-node:
 	@./scripts/deploy-node.sh
+
+# Deploy node agent binary to running node
+# Usage: make deploy-node-agent NODE_HOST=root@192.168.40.146
+deploy-node-agent:
+	@./scripts/deploy-node-agent.sh $(NODE_HOST)
 
 # Write ISO to USB drive
 # Usage: USB_DEVICE=/dev/disk4 make write-usb (macOS)
