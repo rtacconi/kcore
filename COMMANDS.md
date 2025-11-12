@@ -1,6 +1,8 @@
 # KCORE Command Reference
 
-All commands are available via devbox. Run `devbox run help` for a quick overview.
+All commands are available via Make. Run `make help` for a quick overview.
+
+**Note:** You can also use devbox shortcuts: `devbox run <command>` which calls the corresponding make target.
 
 ---
 
@@ -8,30 +10,37 @@ All commands are available via devbox. Run `devbox run help` for a quick overvie
 
 ### Generate Protobuf Code
 ```bash
-devbox run proto
+make proto
 ```
-Generates Go code from `.proto` files in `api/`.
+Generates Go code from `.proto` files in `api/`.  
+Script: `scripts/` (inline in Makefile)
 
 ### Build Node Agent
 ```bash
-devbox run build-node-agent
+make node-agent-nix
 ```
-Builds `kcore-node-agent` for Linux/amd64 using Podman container with libvirt support.
+Builds `kcore-node-agent` for kcore nodes using Nix (recommended).  
+Script: `scripts/` (inline in Makefile)
+
+**Note:** The node-agent is automatically included in the kcore ISO. This build is only needed for updates/development.
 
 ### Build Controller
 ```bash
-devbox run build-controller
+make controller
 ```
-Builds `controller` binary for your current platform.
+Builds `controller` binary for your current platform.  
+Script: `scripts/` (inline in Makefile)
 
 ### Build ISO
 ```bash
-devbox run build-iso
+make build-iso
 ```
-Builds the bootable NixOS ISO with kcore node-agent embedded.
+Builds the bootable kcore ISO with node-agent embedded.
 - Takes 10-30 minutes
 - Output: `result/iso/*.iso`
-- Size: ~1GB
+- Size: ~1GB  
+- Includes: libvirtd, virtlogd, kcore-node-agent, all dependencies  
+Script: `scripts/build-iso.sh`
 
 ---
 
@@ -39,12 +48,13 @@ Builds the bootable NixOS ISO with kcore node-agent embedded.
 
 ### Start Controller
 ```bash
-devbox run start-controller
+make start-controller
+# Or: ./controller -config examples/controller.yaml
 ```
-Starts the controller using `examples/controller.yaml` config.
+Starts the kcore controller using `examples/controller.yaml` config.
 
 **Prerequisites:**
-- Controller binary built (`devbox run build-controller`)
+- Controller binary built (`make controller`)
 - `examples/controller.yaml` configured with correct paths
 - Certificates in `certs/` directory
 
@@ -56,53 +66,58 @@ All node management commands require `NODE_IP` environment variable:
 
 ### Test Node Connectivity
 ```bash
-NODE_IP=192.168.40.146 devbox run test-node
+NODE_IP=192.168.40.146 make test-node
 ```
 Tests:
 - TCP connection to port 9091
 - gRPC service availability
-- Certificate authentication
+- Certificate authentication  
+Script: `scripts/test-node.sh`
 
 ### List Node Services
 ```bash
-NODE_IP=192.168.40.146 devbox run list-node-services
+NODE_IP=192.168.40.146 make list-services
 ```
-Lists all available gRPC services on the node.
+Lists all available gRPC services on the kcore node.  
+Script: `scripts/list-services.sh`
 
 ### Deploy Node Agent
 ```bash
-NODE_IP=192.168.40.146 devbox run deploy-node
+NODE_IP=192.168.40.146 make deploy-node
 ```
-Deploys to an existing node:
+Deploys to an existing kcore node (for updates):
 - Copies node-agent binary to `/opt/kcode/bin/`
 - Copies certificates to `/etc/kcode/`
 - Copies `node-agent.yaml` config
 
-**Note:** Requires node-agent to be built first.
+**Note:** This is for updating nodes. Fresh installs get node-agent automatically from the ISO.  
+Script: `scripts/deploy-node.sh`
 
 ### Create VM
 ```bash
-NODE_IP=192.168.40.146 devbox run create-vm
+NODE_IP=192.168.40.146 make create-vm
 ```
-Creates a test VM with:
+Creates a test VM on kcore node with:
 - Random UUID
 - Name: `test-vm`
 - 2 CPUs
 - 2GB RAM
 
-Returns VM ID and state.
+Returns VM ID and state.  
+Script: `scripts/create-vm.sh`
 
 ### Delete VM
 ```bash
-NODE_IP=192.168.40.146 VM_ID=<uuid> devbox run delete-vm
+NODE_IP=192.168.40.146 VM_ID=<uuid> make delete-vm
 ```
-Deletes a VM by ID.
+Deletes a VM by ID from kcore node.  
+Script: `scripts/delete-vm.sh`
 
 **Example:**
 ```bash
 NODE_IP=192.168.40.146 \
   VM_ID=5fc2b3d5-57e0-4991-bc1e-349ee5ec3784 \
-  devbox run delete-vm
+  make delete-vm
 ```
 
 ---
@@ -111,8 +126,10 @@ NODE_IP=192.168.40.146 \
 
 ### Write ISO to USB
 ```bash
-USB_DEVICE=/dev/disk4 devbox run write-usb
+USB_DEVICE=/dev/disk4 make write-usb
 ```
+Writes the kcore ISO to a USB drive for installation.  
+Script: `scripts/write-usb.sh`
 
 **macOS:**
 ```bash
@@ -123,7 +140,7 @@ diskutil list
 diskutil unmountDisk /dev/disk4
 
 # Write ISO
-USB_DEVICE=/dev/disk4 devbox run write-usb
+USB_DEVICE=/dev/disk4 make write-usb
 ```
 
 **Linux:**
@@ -132,7 +149,7 @@ USB_DEVICE=/dev/disk4 devbox run write-usb
 lsblk
 
 # Write ISO
-USB_DEVICE=/dev/sdb devbox run write-usb
+USB_DEVICE=/dev/sdb make write-usb
 ```
 
 **Safety Features:**
@@ -146,7 +163,7 @@ USB_DEVICE=/dev/sdb devbox run write-usb
 
 ### Show All Commands
 ```bash
-devbox run help
+make help
 ```
 
 ### Documentation Files
@@ -161,32 +178,30 @@ devbox run help
 
 ### 1. Full Development Setup
 ```bash
-# Enter devbox shell
+# Enter devbox shell (sets up environment)
 devbox shell
 
 # Generate protobuf
-devbox run proto
+make proto
 
 # Build components
-devbox run build-controller
-devbox run build-node-agent
+make controller
+make node-agent-nix
 
 # Build ISO
-devbox run build-iso
+make build-iso
 ```
 
-### 2. Deploy to New Node
+### 2. Deploy New kcore Node
 ```bash
 # Write ISO to USB
-USB_DEVICE=/dev/disk4 devbox run write-usb
+USB_DEVICE=/dev/disk4 make write-usb
 
-# Boot node from USB, run install-to-disk, reboot
+# Boot node from USB, login (root/kcore), run:
+install-to-disk
 
-# Test connectivity
-NODE_IP=192.168.40.146 devbox run test-node
-
-# Deploy if needed (usually automatic after install-to-disk)
-NODE_IP=192.168.40.146 devbox run deploy-node
+# After reboot, test connectivity
+NODE_IP=192.168.40.146 make test-node
 ```
 
 ### 3. VM Management
@@ -195,29 +210,29 @@ NODE_IP=192.168.40.146 devbox run deploy-node
 export NODE_IP=192.168.40.146
 
 # Create VM
-devbox run create-vm
+make create-vm
 # Output: VM ID: 5fc2b3d5-57e0-4991-bc1e-349ee5ec3784
 
-# List VMs (on node)
+# List VMs on kcore node
 ssh root@$NODE_IP virsh list --all
 
 # Delete VM
-VM_ID=5fc2b3d5-57e0-4991-bc1e-349ee5ec3784 devbox run delete-vm
+VM_ID=5fc2b3d5-57e0-4991-bc1e-349ee5ec3784 make delete-vm
 ```
 
-### 4. Update Existing Node
+### 4. Update Existing kcore Node
 ```bash
 # Rebuild node-agent
-devbox run build-node-agent
+make node-agent-nix
 
 # Deploy to node
-NODE_IP=192.168.40.146 devbox run deploy-node
+NODE_IP=192.168.40.146 make deploy-node
 
-# Restart service on node
+# Restart service on kcore node
 ssh root@192.168.40.146 systemctl restart kcode-node-agent
 
 # Verify
-NODE_IP=192.168.40.146 devbox run test-node
+NODE_IP=192.168.40.146 make test-node
 ```
 
 ---
@@ -226,7 +241,7 @@ NODE_IP=192.168.40.146 devbox run test-node
 
 | Variable | Required By | Description | Example |
 |----------|-------------|-------------|---------|
-| `NODE_IP` | Most node commands | IP address of KVM node | `192.168.40.146` |
+| `NODE_IP` | Most node commands | IP address of kcore node | `192.168.40.146` |
 | `VM_ID` | `delete-vm` | UUID of VM to delete | `5fc2b3d5-57e0-4991-bc1e-349ee5ec3784` |
 | `USB_DEVICE` | `write-usb` | Device path for USB drive | `/dev/disk4` (macOS), `/dev/sdb` (Linux) |
 
@@ -239,19 +254,19 @@ NODE_IP=192.168.40.146 devbox run test-node
 # Set once, use many times
 export NODE_IP=192.168.40.146
 
-devbox run test-node
-devbox run create-vm
-devbox run list-node-services
+make test-node
+make create-vm
+make list-services
 ```
 
 ### Chain Commands
 ```bash
 # Build and deploy in one go
-devbox run build-node-agent && \
-  NODE_IP=192.168.40.146 devbox run deploy-node
+make node-agent-nix && \
+  NODE_IP=192.168.40.146 make deploy-node
 ```
 
-### Check Logs on Node
+### Check Logs on kcore Node
 ```bash
 NODE_IP=192.168.40.146
 
@@ -267,7 +282,7 @@ ssh root@$NODE_IP systemctl status kcode-node-agent libvirtd virtlogd
 
 ### Quick VM Status
 ```bash
-# On your Mac
+# On your Mac/workstation
 alias kcore-vms='ssh root@192.168.40.146 "virsh list --all"'
 
 kcore-vms
@@ -365,17 +380,17 @@ grpcurl -insecure \
 
 ```bash
 # Most Common Commands
-devbox run help                                    # Show help
-devbox run build-iso                              # Build ISO
-USB_DEVICE=/dev/disk4 devbox run write-usb       # Write to USB
-NODE_IP=192.168.40.146 devbox run test-node      # Test node
-NODE_IP=192.168.40.146 devbox run create-vm      # Create VM
-NODE_IP=192.168.40.146 devbox run deploy-node    # Update node
+make help                                    # Show help
+make build-iso                              # Build ISO
+USB_DEVICE=/dev/disk4 make write-usb       # Write to USB
+NODE_IP=192.168.40.146 make test-node      # Test node
+NODE_IP=192.168.40.146 make create-vm      # Create VM
+NODE_IP=192.168.40.146 make deploy-node    # Update node
 
 # Development
-devbox run proto                                  # Generate code
-devbox run build-controller                       # Build controller
-devbox run build-node-agent                       # Build agent
-devbox run start-controller                       # Start controller
+make proto                                  # Generate code
+make controller                             # Build controller
+make node-agent-nix                         # Build agent
+./controller -config examples/controller.yaml  # Start controller
 ```
 

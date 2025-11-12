@@ -1,8 +1,8 @@
-# KCORE Quick Start Guide
+# kcore Quick Start Guide
 
 ## From USB to Running VM - Fully Automated
 
-This guide covers the complete process from creating a bootable USB to managing VMs via the kcore API.
+This guide covers the complete process from creating a bootable kcore USB to managing VMs via the API.
 
 ---
 
@@ -11,24 +11,37 @@ This guide covers the complete process from creating a bootable USB to managing 
 - USB drive (4GB+)
 - Target machine with KVM support (Intel VT-x or AMD-V)
 - macOS or Linux workstation for controller
+- Nix installed with flakes enabled
 
 ---
 
-## Step 1: Build the ISO
+## Step 1: Build the kcore ISO
 
 ```bash
 cd /path/to/kcore
-nix build '.#nixosConfigurations.kvm-node-iso.config.system.build.isoImage' \
-  --extra-experimental-features "nix-command flakes"
+
+# Using Make
+make build-iso
 
 # ISO will be in: result/iso/
 ```
+
+The ISO includes:
+- kcore node agent
+- libvirtd + virtlogd
+- All required dependencies
+- Automated installer
 
 ---
 
 ## Step 2: Write to USB
 
 ```bash
+# Using Make (recommended - includes safety checks)
+USB_DEVICE=/dev/disk4 make write-usb   # macOS
+USB_DEVICE=/dev/sdb make write-usb     # Linux
+
+# Or manually:
 # macOS
 sudo dd if=result/iso/*.iso of=/dev/rdiskX bs=4m status=progress
 
@@ -97,13 +110,15 @@ The installer will:
   - Wipe the disk
   - Create GPT partitions (EFI + root)
   - Format filesystems
-  - Install NixOS with:
+  - Install kcore with:
     - libvirtd enabled and running
     - virtlogd enabled and running
+    - kcode-node-agent enabled and running
     - SSH enabled (port 22)
     - node-agent port open (9091)
     - All required packages (qemu, libvirt, lvm2, parted)
     - Your SSH keys (if present on live ISO)
+    - `/etc/kcode/` config and certs (if present on live ISO)
 
 After installation completes:
 ```bash
@@ -112,9 +127,11 @@ reboot
 
 Remove the USB drive when the system restarts.
 
+**Note:** kcore is based on NixOS for reproducible and reliable deployments.
+
 ---
 
-## Step 6: Setup node-agent
+## Step 6: Verify kcore Node
 
 After the system boots from the installed disk:
 
@@ -122,49 +139,41 @@ After the system boots from the installed disk:
 # SSH into the node
 ssh root@<node-ip>  # password: kcore (or use your SSH key)
 
-# Verify libvirtd is running
-systemctl status libvirtd
-virsh version
+# Verify all services are running
+systemctl status libvirtd virtlogd kcode-node-agent
 
-# Copy node-agent binary and config
-# (Transfer from your workstation or build on the node)
-mkdir -p /root/node-agent-bin/bin /etc/kcode
-scp /path/to/node-agent root@<node-ip>:/root/node-agent-bin/bin/
-scp /path/to/certs/*.{crt,key} root@<node-ip>:/etc/kcode/
-scp /path/to/node-agent.yaml root@<node-ip>:/etc/kcode/
+# Check node-agent logs
+journalctl -u kcode-node-agent -n 20
 
-# Start node-agent
-cd /root/node-agent-bin/bin
-./node-agent > /tmp/node-agent.log 2>&1 &
+# Expected output:
+# ✅ "Starting kcore node agent (node ID: kvm-node-01)"
+# ✅ "Registered with controller at <controller-ip>:9090"
+# ✅ "Starting heartbeat loop"
 ```
+
+**Everything is automated!** No manual setup required.
 
 ---
 
-## Step 7: Create VMs from Controller
+## Step 7: Create VMs
 
 On your Mac/workstation:
 
 ```bash
 cd /path/to/kcore
 
-# Using grpcurl with nix-shell
-VM_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')
+# Using Make (easiest)
+NODE_IP=192.168.40.146 make create-vm
 
-nix-shell -p grpcurl --run "grpcurl -insecure \
-  -cert ./certs/node.crt -key ./certs/node.key \
-  -import-path ./proto -proto node.proto \
-  -d '{\"spec\": {\"id\": \"'$VM_ID'\", \"name\": \"my-vm\", \"cpu\": 4, \"memory_bytes\": 4294967296}}' \
-  <node-ip>:9091 kcore.node.NodeCompute/CreateVm"
-```
-
-Expected output:
-```json
-{
-  "status": {
-    "id": "38551bb2-3838-4c04-933b-99465acf34cb",
-    "state": "VM_STATE_RUNNING"
-  }
-}
+# Expected output:
+# 🚀 Creating VM on node...
+# Creating VM with ID: 38551bb2-3838-4c04-933b-99465acf34cb
+# {
+#   "status": {
+#     "id": "38551bb2-3838-4c04-933b-99465acf34cb",
+#     "state": "VM_STATE_RUNNING"
+#   }
+# }
 ```
 
 ---
@@ -184,11 +193,7 @@ virsh dominfo <vm-name>
 
 # Delete a VM (via API)
 # On your workstation:
-nix-shell -p grpcurl --run "grpcurl -insecure \
-  -cert ./certs/node.crt -key ./certs/node.key \
-  -import-path ./proto -proto node.proto \
-  -d '{\"id\": \"'$VM_ID'\"}' \
-  <node-ip>:9091 kcore.node.NodeCompute/DeleteVm"
+NODE_IP=192.168.40.146 VM_ID=<uuid> make delete-vm
 ```
 
 ---

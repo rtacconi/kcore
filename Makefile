@@ -1,4 +1,5 @@
 .PHONY: all build controller node-agent proto test clean deploy
+.PHONY: build-iso create-vm delete-vm test-node list-services deploy-node write-usb help
 
 all: proto build
 
@@ -65,4 +66,84 @@ deploy:
 	echo "Deploying to $$NODE as $$USER..."; \
 	scp bin/kcore-node-agent-linux-amd64 $$USER@$$NODE:/tmp/kcore-node-agent; \
 	ssh $$USER@$$NODE 'sudo mv /tmp/kcore-node-agent /opt/kcode/kcore-node-agent && sudo chmod +x /opt/kcode/kcore-node-agent && sudo systemctl restart kcode-node-agent'
+
+#
+# ISO and Node Management
+#
+
+# Build bootable NixOS ISO with kcore embedded
+# Usage: make build-iso
+build-iso:
+	@./scripts/build-iso.sh
+
+# Create a test VM on node
+# Usage: NODE_IP=192.168.40.146 make create-vm
+create-vm:
+	@./scripts/create-vm.sh
+
+# Delete a VM from node
+# Usage: NODE_IP=192.168.40.146 VM_ID=<uuid> make delete-vm
+delete-vm:
+	@./scripts/delete-vm.sh
+
+# Test node connectivity and gRPC service
+# Usage: NODE_IP=192.168.40.146 make test-node
+test-node:
+	@./scripts/test-node.sh
+
+# List available gRPC services on node
+# Usage: NODE_IP=192.168.40.146 make list-services
+list-services:
+	@./scripts/list-services.sh
+
+# Deploy node-agent binary and config to node
+# Usage: NODE_IP=192.168.40.146 make deploy-node
+deploy-node:
+	@./scripts/deploy-node.sh
+
+# Write ISO to USB drive
+# Usage: USB_DEVICE=/dev/disk4 make write-usb (macOS)
+# Usage: USB_DEVICE=/dev/sdb make write-usb (Linux)
+write-usb:
+	@./scripts/write-usb.sh
+
+# Show help with all available commands
+help:
+	@echo "🔧 KCORE Makefile Targets"
+	@echo ""
+	@echo "📦 Building:"
+	@echo "  make proto              - Generate protobuf code"
+	@echo "  make controller         - Build controller (macOS/Linux)"
+	@echo "  make node-agent         - Build node-agent (Podman)"
+	@echo "  make node-agent-nix     - Build node-agent (Nix)"
+	@echo "  make build-iso          - Build bootable NixOS ISO"
+	@echo "  make build              - Build controller + node-agent"
+	@echo ""
+	@echo "🧪 Testing:"
+	@echo "  make test               - Run Go tests"
+	@echo ""
+	@echo "☁️  Node Management (requires NODE_IP=<ip>):"
+	@echo "  make test-node          - Test node connectivity"
+	@echo "  make list-services      - List gRPC services on node"
+	@echo "  make deploy-node        - Deploy node-agent to node"
+	@echo "  make create-vm          - Create test VM on node"
+	@echo "  make delete-vm          - Delete VM (requires VM_ID=<uuid>)"
+	@echo ""
+	@echo "💾 Installation:"
+	@echo "  make write-usb          - Write ISO to USB (requires USB_DEVICE=/dev/diskX)"
+	@echo ""
+	@echo "🗑️  Cleanup:"
+	@echo "  make clean              - Remove build artifacts"
+	@echo ""
+	@echo "Examples:"
+	@echo "  make build-iso"
+	@echo "  NODE_IP=192.168.40.146 make create-vm"
+	@echo "  NODE_IP=192.168.40.146 VM_ID=<uuid> make delete-vm"
+	@echo "  USB_DEVICE=/dev/disk4 make write-usb"
+	@echo ""
+	@echo "📚 Documentation:"
+	@echo "  QUICKSTART.md    - Installation guide"
+	@echo "  ARCHITECTURE.md  - System design"
+	@echo "  COMMANDS.md      - Command reference"
+	@echo "  FIXES.md         - Troubleshooting"
 
