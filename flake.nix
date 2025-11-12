@@ -388,6 +388,18 @@
                     SSH_KEYS=$(cat /root/.ssh/authorized_keys | sed 's/^/      "/' | sed 's/$/"/' | paste -sd '\n')
                   fi
                   
+                  # Copy node-agent binary to installed system
+                  echo "📋 Copying node-agent binary..."
+                  mkdir -p /mnt/opt/kcode/bin
+                  cp ${nodeAgent}/bin/kcore-node-agent /mnt/opt/kcode/bin/
+                  
+                  # Copy kcode config and certs if they exist
+                  if [ -d /etc/kcode ]; then
+                    echo "📋 Copying kcode configuration and certificates..."
+                    mkdir -p /mnt/etc/kcode
+                    cp -r /etc/kcode/* /mnt/etc/kcode/ 2>/dev/null || true
+                  fi
+                  
                   cat > /mnt/etc/nixos/configuration.nix << EOF
 { config, pkgs, ... }:
 {
@@ -430,6 +442,54 @@ $SSH_KEYS
     wantedBy = [ "multi-user.target" ];
     before = [ "libvirtd.service" ];
   };
+  
+  # kcore node-agent service
+  systemd.services.kcode-node-agent = {
+    description = "kcore Node Agent";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" "libvirtd.service" "virtlogd.service" ];
+    wants = [ "network-online.target" ];
+    requires = [ "libvirtd.service" ];
+    
+    serviceConfig = {
+      Type = "simple";
+      ExecStart = "/opt/kcode/bin/kcore-node-agent";
+      Restart = "always";
+      RestartSec = "10s";
+      
+      # Security hardening
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ReadWritePaths = [ "/var/lib/kcode" "/var/run/libvirt" ];
+      ReadOnlyPaths = [ "/etc/kcode" ];
+      
+      # Capabilities for libvirt/KVM and networking
+      CapabilityBoundingSet = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
+      AmbientCapabilities = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
+      
+      User = "root";
+      Group = "libvirt";
+      
+      # Resource limits
+      LimitNOFILE = 65536;
+      LimitNPROC = 4096;
+    };
+    
+    environment = {
+      PATH = "/run/current-system/sw/bin";
+    };
+  };
+  
+  # Create required directories
+  systemd.tmpfiles.rules = [
+    "d /var/lib/kcode 0755 root root -"
+    "d /var/lib/kcode/disks 0755 root root -"
+    "d /opt/kcode 0755 root root -"
+    "d /opt/kcode/bin 0755 root root -"
+    "d /etc/kcode 0755 root root -"
+  ];
   
   environment.systemPackages = with pkgs; [
     vim htop curl wget iproute2 qemu_kvm libvirt lvm2 parted
