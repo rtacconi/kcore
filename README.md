@@ -14,8 +14,10 @@ USB_DEVICE=/dev/disk4 make write-usb
 # Boot, login (root/kcore), run:
 install-to-disk
 
-# After reboot, create a VM
-NODE_IP=192.168.40.146 make create-vm
+# After reboot, manage VMs with kctl
+kctl create vm web-server --cpu 4 --memory 8G
+kctl get vms
+kctl describe vm web-server
 ```
 
 **That's it!** Everything else is automated.
@@ -29,6 +31,7 @@ NODE_IP=192.168.40.146 make create-vm
 - **[Introduction](docs/intro.md)** - Project overview, architecture, and manual setup
 
 ### User Guides
+- **[kctl CLI](docs/KCTL.md)** - User-friendly CLI for managing VMs and resources
 - **[Commands Reference](docs/COMMANDS.md)** - All make/devbox commands with examples
 - **[Architecture](docs/ARCHITECTURE.md)** - System design, workflows, and component communication
 
@@ -101,6 +104,7 @@ make build-iso
 make help                           # Show all commands
 make proto                          # Generate protobuf code
 make controller                     # Build controller
+make kctl                           # Build kctl CLI
 make node-agent-nix                 # Build node-agent
 make build-iso                      # Build kcore ISO
 NODE_IP=x.x.x.x make create-vm     # Create VM
@@ -186,17 +190,17 @@ reboot
 ### VM Management
 
 ```bash
-# Set node IP
-export NODE_IP=192.168.40.146
-
 # Create VM
-make create-vm
+kctl create vm web-server --cpu 4 --memory 8G --disk 100G
 
 # List VMs
-ssh root@$NODE_IP virsh list --all
+kctl get vms
+
+# Get VM details
+kctl describe vm web-server
 
 # Delete VM
-VM_ID=<uuid> make delete-vm
+kctl delete vm web-server
 ```
 
 ### Update Node

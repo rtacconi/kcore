@@ -11,10 +11,16 @@ proto:
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/*.proto
 
-# Build control plane (macOS)
+# Build controller (macOS)
 controller:
-	@echo "Building control plane..."
+	@echo "Building controller..."
 	@go build -o bin/kcore-controller ./cmd/controller
+
+# Build kctl CLI (macOS ARM64)
+kctl:
+	@echo "Building kctl for macOS ARM64..."
+	@GOOS=darwin GOARCH=arm64 go build -o bin/kctl ./cmd/kctl
+	@echo "✅ kctl built successfully: bin/kctl"
 
 # Build node agent (Linux/amd64) - requires CGO, use Podman for cross-compilation
 # NOTE: Podman on macOS has emulation issues. For best results, build on Linux or use Nix.
@@ -114,6 +120,7 @@ help:
 	@echo "📦 Building:"
 	@echo "  make proto              - Generate protobuf code"
 	@echo "  make controller         - Build controller (macOS/Linux)"
+	@echo "  make kctl               - Build kctl CLI (macOS ARM64)"
 	@echo "  make node-agent         - Build node-agent (Podman)"
 	@echo "  make node-agent-nix     - Build node-agent (Nix)"
 	@echo "  make build-iso          - Build bootable kcore ISO"

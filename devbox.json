@@ -17,8 +17,9 @@
     ],
     "scripts": {
       "proto": "make proto",
-      "build-node-agent": "make node-agent",
       "build-controller": "make controller",
+      "build-kctl": "make kctl",
+      "build-node-agent": "make node-agent",
       "build-iso": "make build-iso",
       "start-controller": "./controller -config examples/controller.yaml",
       "create-vm": "make create-vm",
