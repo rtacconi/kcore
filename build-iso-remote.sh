@@ -136,11 +136,15 @@ echo ""
 echo -e "${YELLOW}🔨 Building ISO on remote server (this will take 30-60 minutes)...${NC}"
 echo -e "${BLUE}Build directory: $REMOTE_DIR${NC}"
 echo -e "${BLUE}Nix store: $NIX_STORE${NC}"
+echo -e "${BLUE}Temp directory: /mnt/md126/tmp (root / is 99% full!)${NC}"
 echo -e "${BLUE}This runs natively on AMD64 Linux, so it will be much faster than macOS emulation.${NC}"
 echo ""
 
-ssh -i "$SSH_KEY" "$SSH_HOST" "cd $REMOTE_DIR && \
+ssh -i "$SSH_KEY" "$SSH_HOST" "mkdir -p /mnt/md126/tmp && cd $REMOTE_DIR && \
     export NIXPKGS_ALLOW_UNFREE=1 && \
+    export TMPDIR=/mnt/md126/tmp && \
+    export TEMP=/mnt/md126/tmp && \
+    export TMP=/mnt/md126/tmp && \
     source ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || true && \
     nix --extra-experimental-features nix-command \
         --extra-experimental-features flakes \
@@ -157,8 +161,8 @@ if [ $BUILD_EXIT -eq 0 ]; then
     echo -e "${GREEN}╚══════════════════════════════════════════════════════════╝${NC}"
     echo ""
     
-    # Find ISO on remote
-    echo -e "${YELLOW}📥 Downloading ISO from remote server...${NC}"
+    # Find and verify ISO on remote
+    echo -e "${YELLOW}📥 Locating ISO file...${NC}"
     ISO_PATH=$(ssh -i "$SSH_KEY" "$SSH_HOST" "find $REMOTE_DIR/result-iso -name '*.iso' -type f 2>/dev/null | head -1")
     
     if [ -z "$ISO_PATH" ]; then
@@ -172,11 +176,29 @@ if [ $BUILD_EXIT -eq 0 ]; then
         ssh -i "$SSH_KEY" "$SSH_HOST" "ls -lh $REMOTE_DIR/result-iso/ 2>/dev/null || echo 'Directory not found'"
     else
         echo "Found ISO: $ISO_PATH"
+        
+        # Show ISO info (sanity checks only)
+        echo -e "${YELLOW}🔍 Verifying ISO metadata...${NC}"
+        ssh -i "$SSH_KEY" "$SSH_HOST" "
+            set -e
+            echo 'ISO metadata:'
+            file -b '$ISO_PATH' || true
+            echo ''
+            echo 'ISO size:'
+            ls -lh '$ISO_PATH'
+            echo ''
+            echo 'Partition table (first 20 lines):'
+            command -v fdisk >/dev/null 2>&1 && sudo fdisk -l '$ISO_PATH' 2>/dev/null | sed -n '1,20p' || echo 'fdisk not available'
+        "
+        
+        echo ""
+        echo -e "${YELLOW}📥 Downloading hybrid ISO from remote server...${NC}"
         scp -i "$SSH_KEY" "$SSH_HOST:$ISO_PATH" "$LOCAL_DIR/kcode.iso"
-        echo -e "${GREEN}✅ ISO downloaded to: $LOCAL_DIR/kcode.iso${NC}"
+        echo -e "${GREEN}✅ Hybrid ISO downloaded to: $LOCAL_DIR/kcode.iso${NC}"
         echo ""
         echo "Next step: Write ISO to USB stick with:"
-        echo "  ./write-usb.sh kcode.iso"
+        echo "  ./write-usb.sh kcode.iso /dev/diskN    (macOS)"
+        echo "  ./write-usb.sh kcode.iso /dev/sdX      (Linux)"
     fi
 else
     echo ""

@@ -219,14 +219,32 @@
               # Allow unfree packages (needed for some firmware)
               nixpkgs.config.allowUnfree = true;
               
+              # Don't force GRUB - let iso-image.nix use isolinux for legacy boot
+              # GRUB is only needed for installed systems, not ISOs
+              # iso-image.nix handles boot configuration automatically
+              
               boot.kernelModules = [ "kvm" "kvm_intel" "kvm_amd" "br_netfilter" "tap" ];
               services.qemuGuest.enable = true;
+              
+              # Simple networking for live ISO - auto-detect all interfaces
               networking.hostName = "kvm-node";
-              networking.useDHCP = false;
-              networking.interfaces.enp1s0.useDHCP = true;
-              networking.bridges.br0.interfaces = [ "enp1s0" ];
+              networking.useDHCP = true;  # Enable DHCP on all interfaces automatically
               networking.firewall.enable = true;
-              networking.firewall.allowedTCPPorts = [ 9091 ];
+              networking.firewall.allowedTCPPorts = [ 22 9091 ]; # SSH first, then node-agent
+              
+              # Root user with password for console login
+              users.users.root.initialPassword = "kcore";
+              users.mutableUsers = true; # Allow changing password after boot
+              
+              # Enable SSH for remote access
+              services.openssh = {
+                enable = true;
+                settings = {
+                  PermitRootLogin = "yes";
+                  PasswordAuthentication = true;
+                };
+              };
+              
               virtualisation.kvmgt.enable = false;
               virtualisation.libvirtd.enable = false;
               # QEMU is included in systemPackages below
@@ -267,6 +285,136 @@
               ];
               environment.systemPackages = with pkgs; [
                 qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq nodeAgent
+                # Tools needed for install-to-disk script
+                parted util-linux dosfstools e2fsprogs gawk
+                (pkgs.writeScriptBin "install-to-disk" ''
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+                  
+                  echo "╔══════════════════════════════════════════════════════════╗"
+                  echo "║        KCORE Node - Automated Disk Installer            ║"
+                  echo "╚══════════════════════════════════════════════════════════╝"
+                  echo ""
+                  echo "⚠️  This will ERASE the selected disk and install NixOS!"
+                  echo ""
+                  
+                  # Show available disks
+                  echo "Available disks:"
+                  lsblk -d -o NAME,SIZE,TYPE,MODEL | grep disk
+                  echo ""
+                  
+                  # Ask for target disk
+                  read -p "Enter target disk (e.g., sda, nvme0n1, vda): " DISK
+                  DISK_PATH="/dev/$DISK"
+                  
+                  if [ ! -b "$DISK_PATH" ]; then
+                    echo "Error: $DISK_PATH is not a valid block device"
+                    exit 1
+                  fi
+                  
+                  echo ""
+                  echo "Selected: $DISK_PATH"
+                  lsblk "$DISK_PATH"
+                  echo ""
+                  read -p "⚠️  THIS WILL ERASE ALL DATA ON $DISK_PATH! Type 'yes' to continue: " CONFIRM
+                  
+                  if [ "$CONFIRM" != "yes" ]; then
+                    echo "Installation cancelled."
+                    exit 0
+                  fi
+                  
+                  echo ""
+                  echo "🔧 Partitioning disk..."
+                  
+                  # Wipe any existing partition table
+                  wipefs -a "$DISK_PATH" || true
+                  
+                  # Create GPT partition table with UEFI + root partitions
+                  parted -s "$DISK_PATH" mklabel gpt
+                  parted -s "$DISK_PATH" mkpart ESP fat32 1MiB 512MiB
+                  parted -s "$DISK_PATH" set 1 esp on
+                  parted -s "$DISK_PATH" mkpart primary ext4 512MiB 100%
+                  
+                  # Wait for kernel to recognize partitions
+                  sleep 2
+                  partprobe "$DISK_PATH" || true
+                  sleep 2
+                  
+                  # Determine partition names (handle both /dev/sda1 and /dev/nvme0n1p1 styles)
+                  if [[ "$DISK" == nvme* ]] || [[ "$DISK" == mmcblk* ]]; then
+                    BOOT_PART="''${DISK_PATH}p1"
+                    ROOT_PART="''${DISK_PATH}p2"
+                  else
+                    BOOT_PART="''${DISK_PATH}1"
+                    ROOT_PART="''${DISK_PATH}2"
+                  fi
+                  
+                  echo "🔧 Formatting partitions..."
+                  mkfs.fat -F 32 -n BOOT "$BOOT_PART"
+                  mkfs.ext4 -F -L nixos "$ROOT_PART"
+                  
+                  echo "🔧 Mounting partitions..."
+                  mount "$ROOT_PART" /mnt
+                  mkdir -p /mnt/boot
+                  mount "$BOOT_PART" /mnt/boot
+                  
+                  echo "🔧 Generating NixOS configuration..."
+                  nixos-generate-config --root /mnt
+                  
+                  # Copy the current flake configuration
+                  echo "🔧 Copying kcore configuration..."
+                  cat > /mnt/etc/nixos/configuration.nix << 'EOF'
+{ config, pkgs, ... }:
+{
+  imports = [ ./hardware-configuration.nix ];
+  
+  boot.loader.systemd-boot.enable = true;
+  boot.loader.efi.canTouchEfiVariables = true;
+  boot.kernelModules = [ "kvm" "kvm_intel" "kvm_amd" "br_netfilter" "tap" ];
+  
+  # Simple networking - auto-detect all interfaces with DHCP
+  networking.hostName = "kvm-node";
+  networking.useDHCP = true;
+  networking.firewall.enable = true;
+  networking.firewall.allowedTCPPorts = [ 22 9091 ];  # SSH + node-agent
+  
+  users.users.root.initialPassword = "kcore";
+  users.mutableUsers = true;
+  
+  services.openssh = {
+    enable = true;
+    settings = {
+      PermitRootLogin = "yes";
+      PasswordAuthentication = true;
+    };
+  };
+  
+  virtualisation.libvirtd.enable = false;
+  
+  environment.systemPackages = with pkgs; [
+    vim htop curl wget iproute2 qemu_kvm libvirt lvm2
+  ];
+  
+  system.stateVersion = "25.05";
+}
+EOF
+                  
+                  echo "🔧 Installing NixOS (this will take 10-20 minutes)..."
+                  nixos-install --no-root-password
+                  
+                  echo ""
+                  echo "╔══════════════════════════════════════════════════════════╗"
+                  echo "║  ✅ Installation complete!                               ║"
+                  echo "╚══════════════════════════════════════════════════════════╝"
+                  echo ""
+                  echo "Login credentials:"
+                  echo "  Username: root"
+                  echo "  Password: kcore"
+                  echo ""
+                  echo "The system is ready. Remove the USB drive and type:"
+                  echo "  reboot"
+                  echo ""
+                '')
               ];
               environment.etc."kcode/node-agent.yaml.example" = {
                 text = ''
@@ -296,6 +444,13 @@
               
               # Ensure libvirt group exists for node agent
               users.groups.libvirt = {};
+              
+              # Set ISO volume ID
+              isoImage.volumeID = "KCORE";
+              
+              # Ensure the ISO is USB-bootable (hybrid MBR) and UEFI-bootable
+              isoImage.makeUsbBootable = true;
+              isoImage.makeEfiBootable = true;
             })
         ];
       };

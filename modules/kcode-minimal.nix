@@ -47,22 +47,18 @@
   ];
 
   # Remove unnecessary kernel modules
+  # NOTE: Do NOT blacklist usbhid, hid, hid-generic, usbmouse, usbkbd - they're needed for keyboards/mice!
   boot.blacklistedKernelModules = [
-    # Desktop/peripheral hardware
+    # Audio (not needed for headless server)
     "snd"
     "soundcore"
-    "usbhid"
-    "hid"
-    "hid-generic"
-    "hid-apple"
-    "hid-microsoft"
-    "hid-logitech"
-    "hid-sony"
-    "hid-steelseries"
-    "hid-wacom"
-    "usbmouse"
-    "usbkbd"
-    "usb-storage" # Keep for USB boot/install, but can be removed if not needed
+    # Uncomment specific vendor HID drivers if you want to save space (but test first!)
+    # "hid-apple"
+    # "hid-microsoft"
+    # "hid-logitech"
+    # "hid-sony"
+    # "hid-steelseries"
+    # "hid-wacom"
   ];
 
   # Keep essential kernel modules
