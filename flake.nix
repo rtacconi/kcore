@@ -285,8 +285,8 @@
               ];
               environment.systemPackages = with pkgs; [
                 qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq nodeAgent
-                # Tools needed for install-to-disk script
-                parted util-linux dosfstools e2fsprogs gawk
+                # Tools needed for install-to-disk script (parted is main missing one)
+                parted
                 (pkgs.writeScriptBin "install-to-disk" ''
                   #!/usr/bin/env bash
                   set -euo pipefail
@@ -324,10 +324,27 @@
                   fi
                   
                   echo ""
+                  echo "🔧 Preparing disk (deactivating LVM and unmounting)..."
+                  
+                  # Deactivate any LVM volume groups on this disk
+                  for vg in $(vgs --noheadings -o vg_name 2>/dev/null || true); do
+                    echo "Deactivating volume group: $vg"
+                    vgchange -an "$vg" 2>/dev/null || true
+                  done
+                  
+                  # Unmount any partitions on this disk
+                  for part in "$DISK_PATH"*; do
+                    if [ -b "$part" ]; then
+                      umount "$part" 2>/dev/null || true
+                    fi
+                  done
+                  
                   echo "🔧 Partitioning disk..."
                   
-                  # Wipe any existing partition table
-                  wipefs -a "$DISK_PATH" || true
+                  # Wipe any existing partition table (with retries)
+                  for i in {1..3}; do
+                    wipefs -a "$DISK_PATH" && break || sleep 2
+                  done
                   
                   # Create GPT partition table with UEFI + root partitions
                   parted -s "$DISK_PATH" mklabel gpt
@@ -363,7 +380,15 @@
                   
                   # Copy the current flake configuration
                   echo "🔧 Copying kcore configuration..."
-                  cat > /mnt/etc/nixos/configuration.nix << 'EOF'
+                  
+                  # Detect SSH authorized keys from live environment
+                  SSH_KEYS=""
+                  if [ -f /root/.ssh/authorized_keys ]; then
+                    echo "📋 Found SSH authorized keys, adding to installed system..."
+                    SSH_KEYS=$(cat /root/.ssh/authorized_keys | sed 's/^/      "/' | sed 's/$/"/' | paste -sd '\n')
+                  fi
+                  
+                  cat > /mnt/etc/nixos/configuration.nix << EOF
 { config, pkgs, ... }:
 {
   imports = [ ./hardware-configuration.nix ];
@@ -378,7 +403,12 @@
   networking.firewall.enable = true;
   networking.firewall.allowedTCPPorts = [ 22 9091 ];  # SSH + node-agent
   
-  users.users.root.initialPassword = "kcore";
+  users.users.root = {
+    initialPassword = "kcore";
+    openssh.authorizedKeys.keys = [
+$SSH_KEYS
+    ];
+  };
   users.mutableUsers = true;
   
   services.openssh = {
@@ -389,10 +419,20 @@
     };
   };
   
-  virtualisation.libvirtd.enable = false;
+  # Enable libvirtd for VM management
+  virtualisation.libvirtd = {
+    enable = true;
+    qemu.runAsRoot = true;
+  };
+  
+  # Ensure virtlogd starts with libvirtd
+  systemd.services.virtlogd = {
+    wantedBy = [ "multi-user.target" ];
+    before = [ "libvirtd.service" ];
+  };
   
   environment.systemPackages = with pkgs; [
-    vim htop curl wget iproute2 qemu_kvm libvirt lvm2
+    vim htop curl wget iproute2 qemu_kvm libvirt lvm2 parted
   ];
   
   system.stateVersion = "25.05";
