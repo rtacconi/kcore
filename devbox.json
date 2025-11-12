@@ -5,7 +5,8 @@
     "protobuf@25",
     "gnumake",
     "podman",
-    "cdrtools"
+    "cdrtools",
+    "grpcurl"
   ],
   "shell": {
     "init_hook": [
@@ -15,8 +16,12 @@
       "if ! command -v protoc-gen-go-grpc &> /dev/null; then go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; fi"
     ],
     "scripts": {
+      "proto": [
+        "echo '🔨 Generating protobuf code...'",
+        "make proto"
+      ],
       "build-node-agent": [
-        "echo 'Building node-agent for Linux/amd64 using Podman...'",
+        "echo '🔨 Building node-agent for Linux/amd64 using Podman...'",
         "podman run --rm --platform linux/amd64 \\",
         "  -v $(pwd):/work \\",
         "  -w /work \\",
@@ -25,11 +30,138 @@
         "  -e GOARCH=amd64 \\",
         "  docker.io/golang:1.22 bash -c 'apt-get update -qq && apt-get install -y -qq libvirt-dev pkg-config gcc && make node-agent-podman'"
       ],
-      "proto": [
-        "make proto"
-      ],
-      "controller": [
+      "build-controller": [
+        "echo '🔨 Building controller...'",
         "make controller"
+      ],
+      "build-iso": [
+        "echo '🔨 Building kcore ISO (this will take 10-30 minutes)...'",
+        "nix build '.#nixosConfigurations.kvm-node-iso.config.system.build.isoImage' \\",
+        "  --extra-experimental-features 'nix-command flakes'",
+        "echo '✅ ISO built successfully!'",
+        "echo '📦 ISO location: result/iso/*.iso'",
+        "ls -lh result/iso/"
+      ],
+      "start-controller": [
+        "echo '🚀 Starting kcore controller...'",
+        "echo 'Make sure you have controller.yaml configured!'",
+        "./controller -config examples/controller.yaml"
+      ],
+      "create-vm": [
+        "echo '🚀 Creating VM on node...'",
+        "echo 'Usage: Requires NODE_IP environment variable'",
+        "echo 'Example: NODE_IP=192.168.40.146 devbox run create-vm'",
+        "if [ -z \"$NODE_IP\" ]; then echo '❌ Error: NODE_IP not set'; exit 1; fi",
+        "VM_ID=$(uuidgen | tr '[:upper:]' '[:lower:]')",
+        "echo \"Creating VM with ID: $VM_ID\"",
+        "grpcurl -insecure \\",
+        "  -cert ./certs/node.crt -key ./certs/node.key \\",
+        "  -import-path ./proto -proto node.proto \\",
+        "  -d '{\"spec\": {\"id\": \"'$VM_ID'\", \"name\": \"test-vm\", \"cpu\": 2, \"memory_bytes\": 2147483648}}' \\",
+        "  $NODE_IP:9091 kcore.node.NodeCompute/CreateVm"
+      ],
+      "list-node-services": [
+        "echo '📋 Listing gRPC services on node...'",
+        "echo 'Usage: Requires NODE_IP environment variable'",
+        "if [ -z \"$NODE_IP\" ]; then echo '❌ Error: NODE_IP not set'; exit 1; fi",
+        "grpcurl -insecure \\",
+        "  -cert ./certs/node.crt -key ./certs/node.key \\",
+        "  $NODE_IP:9091 list"
+      ],
+      "delete-vm": [
+        "echo '🗑️  Deleting VM from node...'",
+        "echo 'Usage: Requires NODE_IP and VM_ID environment variables'",
+        "echo 'Example: NODE_IP=192.168.40.146 VM_ID=<uuid> devbox run delete-vm'",
+        "if [ -z \"$NODE_IP\" ]; then echo '❌ Error: NODE_IP not set'; exit 1; fi",
+        "if [ -z \"$VM_ID\" ]; then echo '❌ Error: VM_ID not set'; exit 1; fi",
+        "grpcurl -insecure \\",
+        "  -cert ./certs/node.crt -key ./certs/node.key \\",
+        "  -import-path ./proto -proto node.proto \\",
+        "  -d '{\"id\": \"'$VM_ID'\"}' \\",
+        "  $NODE_IP:9091 kcore.node.NodeCompute/DeleteVm"
+      ],
+      "test-node": [
+        "echo '🔍 Testing node connectivity...'",
+        "echo 'Usage: Requires NODE_IP environment variable'",
+        "if [ -z \"$NODE_IP\" ]; then echo '❌ Error: NODE_IP not set'; exit 1; fi",
+        "echo 'Testing TCP connection to port 9091...'",
+        "nc -zv $NODE_IP 9091 || echo '❌ Cannot connect to node'",
+        "echo 'Testing gRPC service list...'",
+        "grpcurl -insecure \\",
+        "  -cert ./certs/node.crt -key ./certs/node.key \\",
+        "  $NODE_IP:9091 list || echo '❌ gRPC service not responding'"
+      ],
+      "deploy-node": [
+        "echo '📦 Deploying node-agent and certs to node...'",
+        "echo 'Usage: Requires NODE_IP environment variable'",
+        "echo 'Example: NODE_IP=192.168.40.146 devbox run deploy-node'",
+        "if [ -z \"$NODE_IP\" ]; then echo '❌ Error: NODE_IP not set'; exit 1; fi",
+        "echo 'Copying node-agent binary...'",
+        "ssh root@$NODE_IP 'mkdir -p /opt/kcode/bin /etc/kcode'",
+        "if [ -f ./result/bin/kcore-node-agent ]; then",
+        "  scp ./result/bin/kcore-node-agent root@$NODE_IP:/opt/kcode/bin/",
+        "else",
+        "  echo '❌ node-agent binary not found. Run: devbox run build-node-agent'",
+        "  exit 1",
+        "fi",
+        "echo 'Copying certificates...'",
+        "scp certs/*.crt certs/*.key root@$NODE_IP:/etc/kcode/",
+        "echo 'Copying config...'",
+        "scp examples/node-agent.yaml root@$NODE_IP:/etc/kcode/",
+        "echo '✅ Deployment complete! Restart node-agent: systemctl restart kcode-node-agent'"
+      ],
+      "write-usb": [
+        "echo '💾 Writing ISO to USB drive...'",
+        "echo 'Usage: Requires USB_DEVICE environment variable'",
+        "echo 'Example: USB_DEVICE=/dev/disk4 devbox run write-usb (macOS)'",
+        "echo 'Example: USB_DEVICE=/dev/sdb devbox run write-usb (Linux)'",
+        "if [ -z \"$USB_DEVICE\" ]; then echo '❌ Error: USB_DEVICE not set'; exit 1; fi",
+        "if [ ! -f result/iso/*.iso ]; then echo '❌ ISO not found. Run: devbox run build-iso'; exit 1; fi",
+        "ISO_FILE=$(ls result/iso/*.iso | head -1)",
+        "echo \"Writing $ISO_FILE to $USB_DEVICE...\"",
+        "echo '⚠️  This will ERASE all data on the USB drive!'",
+        "read -p 'Type YES to continue: ' confirm",
+        "if [ \"$confirm\" != \"YES\" ]; then echo 'Cancelled.'; exit 0; fi",
+        "if [[ \"$OSTYPE\" == \"darwin\"* ]]; then",
+        "  # macOS",
+        "  sudo dd if=$ISO_FILE of=$USB_DEVICE bs=4m status=progress",
+        "else",
+        "  # Linux",
+        "  sudo dd if=$ISO_FILE of=$USB_DEVICE bs=4M status=progress oflag=sync",
+        "fi",
+        "echo '✅ USB drive written successfully!'"
+      ],
+      "help": [
+        "echo '🔧 KCORE Development Commands'",
+        "echo ''",
+        "echo '📦 Building:'",
+        "echo '  proto              - Generate protobuf code'",
+        "echo '  build-node-agent   - Build node-agent for Linux'",
+        "echo '  build-controller   - Build controller'",
+        "echo '  build-iso          - Build bootable NixOS ISO'",
+        "echo ''",
+        "echo '🚀 Running:'",
+        "echo '  start-controller   - Start the controller'",
+        "echo ''",
+        "echo '☁️  Node Management (requires NODE_IP=<ip>):'",
+        "echo '  test-node          - Test node connectivity'",
+        "echo '  list-node-services - List available gRPC services'",
+        "echo '  deploy-node        - Deploy node-agent to node'",
+        "echo '  create-vm          - Create a test VM'",
+        "echo '  delete-vm          - Delete VM (requires VM_ID=<uuid>)'",
+        "echo ''",
+        "echo '💾 Installation:'",
+        "echo '  write-usb          - Write ISO to USB (requires USB_DEVICE=/dev/diskX)'",
+        "echo ''",
+        "echo '📚 Documentation:'",
+        "echo '  See QUICKSTART.md for installation guide'",
+        "echo '  See ARCHITECTURE.md for system design'",
+        "echo '  See FIXES.md for troubleshooting'",
+        "echo ''",
+        "echo 'Examples:'",
+        "echo '  devbox run build-iso'",
+        "echo '  NODE_IP=192.168.40.146 devbox run create-vm'",
+        "echo '  USB_DEVICE=/dev/disk4 devbox run write-usb'"
       ]
     }
   }
