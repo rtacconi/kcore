@@ -44,6 +44,7 @@ kctl describe vm web-server
 - **[Building Node Agent](docs/BUILD_NODE_AGENT.md)** - How to build node-agent
 - **[Cross Compilation](docs/CROSS_COMPILATION.md)** - Cross-compiling node-agent for Linux
 - **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Codebase organization
+- **[Commit Standards](docs/COMMIT_STANDARDS.md)** - Conventional commits guidelines
 
 ### Additional Resources
 - **[Build ISO Remote](docs/BUILD_ISO_REMOTE.md)** - Remote ISO building
@@ -250,9 +251,31 @@ See [Project Structure](docs/PROJECT_STRUCTURE.md) for details.
 Contributions welcome! Please:
 
 1. Read the documentation in `docs/`
-2. Follow the script standards in `docs/scripts.md`
-3. Test changes on both macOS and Linux where applicable
-4. Use kcore branding in user-facing text
+2. Follow [Conventional Commits](docs/COMMIT_STANDARDS.md) for commit messages
+3. Follow the script standards in `docs/scripts.md`
+4. Test changes on both macOS and Linux where applicable
+5. Use kcore branding in user-facing text
+
+### Commit Message Format
+
+We use [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+<type>[scope]: <description>
+
+[optional body]
+
+[optional footer]
+```
+
+Examples:
+```bash
+feat(kctl): add VM deletion command
+fix(installer): resolve LVM detection issue
+docs: update quickstart guide
+```
+
+See [docs/COMMIT_STANDARDS.md](docs/COMMIT_STANDARDS.md) for complete guidelines.
 
 ---
 
