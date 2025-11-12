@@ -4,29 +4,29 @@ Get the kcore.ai marketing site running locally in 30 seconds.
 
 ## Start Local Server
 
-### Option 1: Using the serve script (easiest)
+This project uses devbox for environment management.
+
+### Option 1: Using devbox script (easiest)
 ```bash
+# From the project root
+devbox run serve-site
+```
+
+### Option 2: Using devbox shell
+```bash
+devbox shell
 cd kcore-site
 ./serve.sh
 ```
 
-### Option 2: Python
+### Option 3: Direct Python (in devbox shell)
 ```bash
+devbox shell
 cd kcore-site
 python3 -m http.server 8000
 ```
 
-### Option 3: Node.js
-```bash
-cd kcore-site
-npx http-server -p 8000
-```
-
-### Option 4: PHP
-```bash
-cd kcore-site
-php -S localhost:8000
-```
+> **Note**: Python 3 is provided by devbox. Make sure you're in a devbox shell or use `devbox run`.
 
 ## View the Site
 

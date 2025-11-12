@@ -136,9 +136,24 @@ grpc_call() {
     
     # Use proto files instead of reflection
     local proto_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../proto" && pwd)"
+    local certs_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../certs" && pwd)"
     
-    grpcurl -plaintext -import-path "$proto_dir" -proto controller.proto -proto node.proto \
-        -d "$data" "$target" "$service/$method"
+    # Check if target is node or controller and use appropriate certs
+    if [[ "$target" == *"9091"* ]]; then
+        # Node connection - use TLS
+        grpcurl -cacert "$certs_dir/ca.crt" \
+                -cert "$certs_dir/controller.crt" \
+                -key "$certs_dir/controller.key" \
+                -import-path "$proto_dir" \
+                -proto controller.proto -proto node.proto \
+                -d "$data" "$target" "$service/$method"
+    else
+        # Controller connection - use plaintext for now
+        grpcurl -plaintext \
+                -import-path "$proto_dir" \
+                -proto controller.proto -proto node.proto \
+                -d "$data" "$target" "$service/$method"
+    fi
 }
 
 controller_call() {
@@ -228,8 +243,11 @@ create_test_vm() {
     local memory="${3:-4294967296}"  # 4GB default
     local target_node="${4:-}"
     
+    # Generate a proper UUID for the VM
+    local vm_id=$(uuidgen | tr '[:upper:]' '[:lower:]')
+    
     local spec=$(jq -n \
-        --arg id "$vm_name" \
+        --arg id "$vm_id" \
         --arg name "$vm_name" \
         --argjson cpu "$cpu" \
         --arg memory "$memory" \

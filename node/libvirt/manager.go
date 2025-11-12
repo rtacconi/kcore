@@ -201,13 +201,47 @@ func (m *Manager) CreateDomain(xml string) (*libvirt.Domain, error) {
 	return domain, nil
 }
 
-// GetDomain retrieves a domain by name
-func (m *Manager) GetDomain(name string) (*libvirt.Domain, error) {
-	domain, err := m.conn.LookupDomainByName(name)
-	if err != nil {
-		return nil, fmt.Errorf("domain not found: %w", err)
+// GetDomain retrieves a domain by name or UUID
+func (m *Manager) GetDomain(nameOrUUID string) (*libvirt.Domain, error) {
+	// Try by name first
+	domain, err := m.conn.LookupDomainByName(nameOrUUID)
+	if err == nil {
+		return domain, nil
 	}
-	return domain, nil
+
+	// Try by UUID
+	domain, err = m.conn.LookupDomainByUUIDString(nameOrUUID)
+	if err == nil {
+		return domain, nil
+	}
+
+	// Try to find by searching all domains for matching name
+	domains, err := m.ListAllDomains()
+	if err != nil {
+		return nil, fmt.Errorf("domain not found: %s", nameOrUUID)
+	}
+
+	for _, dom := range domains {
+		// Check if name matches
+		name, err := dom.GetName()
+		if err != nil {
+			continue
+		}
+		if name == nameOrUUID {
+			return &dom, nil
+		}
+
+		// Check if UUID matches
+		uuid, err := dom.GetUUIDString()
+		if err != nil {
+			continue
+		}
+		if uuid == nameOrUUID {
+			return &dom, nil
+		}
+	}
+
+	return nil, fmt.Errorf("domain not found: %s", nameOrUUID)
 }
 
 // ListAllDomains lists all domains (running and stopped)
@@ -280,6 +314,51 @@ func (m *Manager) GetDomainState(name string) (libvirt.DomainState, error) {
 
 	state, _, err := domain.GetState()
 	return state, err
+}
+
+// GetDomainInfo retrieves full domain information
+func (m *Manager) GetDomainInfo(nameOrUUID string) (*VMSpec, libvirt.DomainState, error) {
+	domain, err := m.GetDomain(nameOrUUID)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer domain.Free()
+
+	// Get basic info
+	info, err := domain.GetInfo()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get domain info: %w", err)
+	}
+
+	// Get UUID and name
+	uuid, err := domain.GetUUIDString()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get UUID: %w", err)
+	}
+
+	name, err := domain.GetName()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get name: %w", err)
+	}
+
+	// Get state
+	state, _, err := domain.GetState()
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to get state: %w", err)
+	}
+
+	// TODO: Parse XML to get disks and NICs
+	// For now, return basic info
+	spec := &VMSpec{
+		ID:          uuid,
+		Name:        name,
+		CPU:         int32(info.NrVirtCpu),
+		MemoryBytes: int64(info.MaxMem * 1024), // Convert from KiB to bytes
+		Disks:       []DiskSpec{},
+		NICs:        []NICSpec{},
+	}
+
+	return spec, state, nil
 }
 
 // UpdateDomain updates a domain's XML

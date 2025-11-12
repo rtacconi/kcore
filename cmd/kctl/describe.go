@@ -132,38 +132,38 @@ func describeVM(vmID, nodeAddr string, insecure bool, certFile, keyFile, caFile 
 	}
 
 	// Display VM details
-	fmt.Printf("Name:           %s\n", vmID)
+	fmt.Printf("Name:           %s\n", spec.Name)
 	fmt.Printf("ID:             %s\n", status.Id)
 	fmt.Printf("Status:         %s\n", status.State.String())
 	fmt.Printf("\n")
 
-	if spec != nil {
-		fmt.Printf("Resources:\n")
-		fmt.Printf("  CPU:          %d cores\n", spec.Cpu)
-		fmt.Printf("  Memory:       %s\n", formatBytes(spec.MemoryBytes))
+	fmt.Printf("Resources:\n")
+	fmt.Printf("  CPU:          %d cores\n", spec.Cpu)
+	fmt.Printf("  Memory:       %s\n", formatBytes(spec.MemoryBytes))
+	fmt.Printf("\n")
+
+	if len(spec.Disks) > 0 {
+		fmt.Printf("Disks:\n")
+		for _, disk := range spec.Disks {
+			fmt.Printf("  - %s (%s): %s\n", disk.Device, disk.Bus, disk.BackendHandle)
+		}
 		fmt.Printf("\n")
-
-		if len(spec.Disks) > 0 {
-			fmt.Printf("Disks:\n")
-			for _, disk := range spec.Disks {
-				fmt.Printf("  - %s (%s): %s\n", disk.Device, disk.Bus, disk.BackendHandle)
-			}
-			fmt.Printf("\n")
-		}
-
-		if len(spec.Nics) > 0 {
-			fmt.Printf("Network:\n")
-			for _, nic := range spec.Nics {
-				fmt.Printf("  Network:      %s\n", nic.Network)
-				if nic.MacAddress != "" {
-					fmt.Printf("  MAC Address:  %s\n", nic.MacAddress)
-				}
-				fmt.Printf("  Model:        %s\n", nic.Model)
-			}
-			fmt.Printf("\n")
-		}
 	} else {
-		fmt.Printf("Note: Full VM spec not available from node API yet\n\n")
+		fmt.Printf("Disks:          (none)\n\n")
+	}
+
+	if len(spec.Nics) > 0 {
+		fmt.Printf("Network:\n")
+		for _, nic := range spec.Nics {
+			fmt.Printf("  Network:      %s\n", nic.Network)
+			if nic.MacAddress != "" {
+				fmt.Printf("  MAC Address:  %s\n", nic.MacAddress)
+			}
+			fmt.Printf("  Model:        %s\n", nic.Model)
+		}
+		fmt.Printf("\n")
+	} else {
+		fmt.Printf("Network:        (none)\n\n")
 	}
 
 	if status.CreatedAt != nil || status.UpdatedAt != nil {

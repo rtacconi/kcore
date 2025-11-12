@@ -30,7 +30,7 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    Next-Gen Virtualization<br>
+                    Next-Gen Declarative Virtualization<br>
                     <span class="gradient-text">Powered by AI</span>
                 </h1>
                 <p class="hero-subtitle">
@@ -182,6 +182,43 @@
                     </ul>
                 </div>
                 <div class="platform-visual">
+                    <!-- AI Chat Window -->
+                    <div class="chat-window" style="margin-bottom: 1.5rem;">
+                        <div class="chat-header">
+                            <span class="status-dot"></span>
+                            <span>AI Infrastructure Assistant</span>
+                        </div>
+                        <div class="chat-body" style="max-height: 300px; padding: 1rem;">
+                            <div class="message user">
+                                <p>Show me the current state of our infrastructure. Any issues?</p>
+                            </div>
+                            <div class="message assistant">
+                                <p><strong>Infrastructure Overview:</strong></p>
+                                <p style="margin: 0.5rem 0; font-size: 0.9rem;">
+                                    ✓ <strong>3 VMs running</strong> across 2 nodes<br>
+                                    ✓ <strong>Total resources:</strong> 14 vCPUs, 14GB RAM<br>
+                                    ⚠️ <strong>Node-02:</strong> CPU usage at 78%<br>
+                                    ✓ <strong>Storage:</strong> 128GB used / 500GB available
+                                </p>
+                                <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-tertiary);">
+                                    💡 Recommendation: Consider scaling node-02 or redistributing workload.
+                                </p>
+                            </div>
+                            <div class="message user">
+                                <p>What's running on node-01?</p>
+                            </div>
+                            <div class="message assistant">
+                                <p style="font-size: 0.9rem;">
+                                    <strong>Node-01 workloads:</strong><br>
+                                    • production-app (4GB, 4 vCPU) - running<br>
+                                    • dev-web (2GB, 2 vCPU) - stopped<br><br>
+                                    Current load: 32% CPU, 6GB/16GB RAM
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Terminal Window -->
                     <div class="terminal-window">
                         <div class="terminal-header">
                             <span class="terminal-button"></span>

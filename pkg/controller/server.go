@@ -23,9 +23,9 @@ import (
 // Server implements the Controller service
 type Server struct {
 	ctrlpb.UnimplementedControllerServer
-	nodes      map[string]*NodeInfo  // nodeID -> NodeInfo
-	vmToNode   map[string]string     // vmID -> nodeID
-	mu         sync.RWMutex
+	nodes    map[string]*NodeInfo // nodeID -> NodeInfo
+	vmToNode map[string]string    // vmID -> nodeID
+	mu       sync.RWMutex
 }
 
 type NodeInfo struct {
@@ -540,4 +540,3 @@ func convertVmStatus(status *nodepb.VmStatus) *ctrlpb.VmStatus {
 		UpdatedAt: status.UpdatedAt,
 	}
 }
-

@@ -286,16 +286,45 @@ func (s *Server) GetVm(ctx context.Context, req *node.GetVmRequest) (*node.GetVm
 		return nil, status.Error(codes.InvalidArgument, "vm_id is required")
 	}
 
-	vmName := req.VmId
-	state, err := s.libvirtMgr.GetDomainState(vmName)
+	// Get full domain info from libvirt
+	vmSpec, state, err := s.libvirtMgr.GetDomainInfo(req.VmId)
 	if err != nil {
 		return nil, status.Errorf(codes.NotFound, "vm not found: %v", err)
 	}
 
-	// TODO: Retrieve full VM spec from libvirt domain XML
+	// Convert disks
+	disks := make([]*node.Disk, 0, len(vmSpec.Disks))
+	for _, disk := range vmSpec.Disks {
+		disks = append(disks, &node.Disk{
+			Name:          disk.Name,
+			BackendHandle: disk.BackendHandle,
+			Bus:           disk.Bus,
+			Device:        disk.Device,
+		})
+	}
+
+	// Convert NICs
+	nics := make([]*node.Nic, 0, len(vmSpec.NICs))
+	for _, nic := range vmSpec.NICs {
+		nics = append(nics, &node.Nic{
+			Network:    nic.Network,
+			Model:      nic.Model,
+			MacAddress: nic.MACAddress,
+		})
+	}
+
+	// Build response with full spec
 	return &node.GetVmResponse{
+		Spec: &node.VmSpec{
+			Id:          vmSpec.ID,
+			Name:        vmSpec.Name,
+			Cpu:         vmSpec.CPU,
+			MemoryBytes: vmSpec.MemoryBytes,
+			Disks:       disks,
+			Nics:        nics,
+		},
 		Status: &node.VmStatus{
-			Id:    req.VmId,
+			Id:    vmSpec.ID,
 			State: libvirtDomainStateToProto(state),
 		},
 	}, nil

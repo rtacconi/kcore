@@ -6,7 +6,8 @@
     "gnumake",
     "podman",
     "cdrtools",
-    "grpcurl"
+    "grpcurl",
+    "python3"
   ],
   "shell": {
     "init_hook": [
@@ -28,7 +29,8 @@
       "test-node": "make test-node",
       "deploy-node": "make deploy-node",
       "write-usb": "make write-usb",
-      "help": "make help"
+      "help": "make help",
+      "serve-site": "cd kcore-site && python3 -m http.server 8000"
     }
   }
 }

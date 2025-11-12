@@ -168,26 +168,21 @@ func listVMs(output, configPath, controllerFlag string, insecureFlag bool) error
 		return fmt.Errorf("failed to list VMs: %w", err)
 	}
 
-	// Print header
-	fmt.Printf("%-20s %-12s %-6s %-10s %-10s\n", "NAME", "STATUS", "CPU", "MEMORY", "ID")
+	// Print header (ID first for easy copy-paste)
+	fmt.Printf("%-36s  %-20s %-12s %-6s %-10s\n", "ID", "NAME", "STATUS", "CPU", "MEMORY")
 	
 	// Print VMs
 	for _, vm := range vms {
 		status := vm.State.String()[9:] // Remove "VM_STATE_" prefix
 		memory := formatBytes(vm.MemoryBytes)
 		
-		// Truncate UUID for display
-		id := vm.Id
-		if len(id) > 10 {
-			id = id[:8]
-		}
-		
-		fmt.Printf("%-20s %-12s %-6d %-10s %-10s\n",
+		// Show full UUID for easy copy-paste to delete/describe commands
+		fmt.Printf("%-36s  %-20s %-12s %-6d %-10s\n",
+			vm.Id,
 			vm.Name,
 			status,
 			vm.Cpu,
 			memory,
-			id,
 		)
 	}
 

@@ -52,20 +52,33 @@ kcore-site/
 
 ### Local Development
 
-Simply open `index.html` in a modern web browser, or use a local server:
+This project uses [devbox](https://www.jetpack.io/devbox/) for environment management.
+
+#### Quickest Way (Recommended)
+
+From the project root:
 
 ```bash
-# Using Python
-python -m http.server 8000
+devbox run serve-site
+```
 
-# Using Node.js (npx http-server)
-npx http-server -p 8000
+#### Alternative Methods
 
-# Using PHP
-php -S localhost:8000
+```bash
+# Using devbox shell
+devbox shell
+cd kcore-site
+./serve.sh
+
+# Or manually with Python
+devbox shell
+cd kcore-site
+python3 -m http.server 8000
 ```
 
 Then visit `http://localhost:8000` in your browser.
+
+See [DEVBOX_SETUP.md](DEVBOX_SETUP.md) for more details.
 
 ### Customization
 

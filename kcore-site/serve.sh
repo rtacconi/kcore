@@ -8,6 +8,11 @@ PORT=8000
 echo "🚀 Starting kcore.ai development server on port $PORT..."
 echo ""
 
+# Check if we're in a devbox shell
+if [ -n "$DEVBOX_SHELL_ENABLED" ]; then
+    echo "✓ Running in devbox shell"
+fi
+
 # Try Python 3
 if command -v python3 &> /dev/null; then
     echo "Using Python 3..."
@@ -37,7 +42,14 @@ if command -v npx &> /dev/null; then
 fi
 
 echo "❌ Error: No suitable server found."
-echo "Please install one of the following:"
+echo ""
+echo "This project uses devbox for environment management."
+echo ""
+echo "Please run one of the following:"
+echo "  1. devbox run serve-site            (from project root)"
+echo "  2. devbox shell && cd kcore-site && ./serve.sh"
+echo ""
+echo "Or install one of these manually:"
 echo "  - Python 3 (recommended)"
 echo "  - PHP"
 echo "  - Node.js"

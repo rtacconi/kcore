@@ -11,6 +11,7 @@ source "$SCRIPT_DIR/test_helpers.sh"
 TEST_VM_NAME="test-vm-$(date +%s)"
 TEST_VM_CPU=2
 TEST_VM_MEMORY=4294967296  # 4GB
+TEST_VM_ID=""  # Will be set after VM creation
 
 echo "═════════════════════════════════════════════════════"
 echo "kcore End-to-End Workflow Test"
@@ -71,10 +72,9 @@ test_create_vm() {
         return 1
     fi
     
-    local vm_id
-    vm_id=$(echo "$result" | jq -r '.vmId')
+    TEST_VM_ID=$(echo "$result" | jq -r '.vmId')
     
-    log_success "VM created: $vm_id"
+    log_success "VM created: $TEST_VM_ID"
     return 0
 }
 
@@ -105,10 +105,10 @@ test_list_vms() {
 
 # Test 4: Get VM details
 test_get_vm_details() {
-    log_info "Getting VM details for $TEST_VM_NAME..."
+    log_info "Getting VM details for $TEST_VM_NAME (ID: $TEST_VM_ID)..."
     
     local data
-    data=$(jq -n --arg id "$TEST_VM_NAME" '{vm_id: $id}')
+    data=$(jq -n --arg id "$TEST_VM_ID" '{vm_id: $id}')
     
     local result
     result=$(controller_call "GetVm" "$data")
@@ -145,10 +145,10 @@ test_list_vms_on_node() {
 
 # Test 6: Delete VM
 test_delete_vm() {
-    log_info "Deleting VM: $TEST_VM_NAME..."
+    log_info "Deleting VM: $TEST_VM_NAME (ID: $TEST_VM_ID)..."
     
     local result
-    result=$(delete_test_vm "$TEST_VM_NAME" "$NODE_ADDR")
+    result=$(delete_test_vm "$TEST_VM_ID" "$NODE_ADDR")
     
     if ! echo "$result" | jq -e '.success == true' &>/dev/null; then
         log_error "VM deletion failed: $result"
@@ -162,7 +162,7 @@ test_delete_vm() {
     local vms
     vms=$(get_vms 2>/dev/null || echo "")
     
-    if echo "$vms" | jq -e ".name == \"$TEST_VM_NAME\"" &>/dev/null; then
+    if echo "$vms" | jq -e ".id == \"$TEST_VM_ID\"" &>/dev/null; then
         log_error "VM still exists after deletion"
         return 1
     fi
