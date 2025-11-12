@@ -301,6 +301,56 @@ func (s *Server) GetVm(ctx context.Context, req *node.GetVmRequest) (*node.GetVm
 	}, nil
 }
 
+func (s *Server) ListVms(ctx context.Context, req *node.ListVmsRequest) (*node.ListVmsResponse, error) {
+	domains, err := s.libvirtMgr.ListAllDomains()
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list domains: %v", err)
+	}
+
+	vms := make([]*node.VmInfo, 0, len(domains))
+	for _, domain := range domains {
+		name, err := domain.GetName()
+		if err != nil {
+			log.Printf("Warning: failed to get domain name: %v", err)
+			continue
+		}
+
+		uuid, err := domain.GetUUIDString()
+		if err != nil {
+			log.Printf("Warning: failed to get domain UUID: %v", err)
+			continue
+		}
+
+		state, _, err := domain.GetState()
+		if err != nil {
+			log.Printf("Warning: failed to get domain state: %v", err)
+			continue
+		}
+
+		// Get VM info (CPU, memory)
+		info, err := domain.GetInfo()
+		if err != nil {
+			log.Printf("Warning: failed to get domain info: %v", err)
+			continue
+		}
+
+		vmInfo := &node.VmInfo{
+			Id:          uuid,
+			Name:        name,
+			State:       libvirtDomainStateToProto(state),
+			Cpu:         int32(info.NrVirtCpu),
+			MemoryBytes: int64(info.MaxMem * 1024), // Convert from KiB to bytes
+		}
+
+		vms = append(vms, vmInfo)
+		domain.Free()
+	}
+
+	return &node.ListVmsResponse{
+		Vms: vms,
+	}, nil
+}
+
 // NodeStorage implementation
 
 func (s *Server) CreateVolume(ctx context.Context, req *node.CreateVolumeRequest) (*node.CreateVolumeResponse, error) {

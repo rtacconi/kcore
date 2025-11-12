@@ -210,6 +210,15 @@ func (m *Manager) GetDomain(name string) (*libvirt.Domain, error) {
 	return domain, nil
 }
 
+// ListAllDomains lists all domains (running and stopped)
+func (m *Manager) ListAllDomains() ([]libvirt.Domain, error) {
+	domains, err := m.conn.ListAllDomains(libvirt.CONNECT_LIST_DOMAINS_ACTIVE | libvirt.CONNECT_LIST_DOMAINS_INACTIVE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list domains: %w", err)
+	}
+	return domains, nil
+}
+
 // StartDomain starts a domain
 func (m *Manager) StartDomain(name string) error {
 	domain, err := m.GetDomain(name)

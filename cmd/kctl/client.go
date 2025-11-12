@@ -110,6 +110,15 @@ func (c *NodeClient) GetVM(ctx context.Context, vmID string) (*pb.VmSpec, *pb.Vm
 	return resp.Spec, resp.Status, nil
 }
 
+// ListVMs lists all VMs on the node
+func (c *NodeClient) ListVMs(ctx context.Context) ([]*pb.VmInfo, error) {
+	resp, err := c.compute.ListVms(ctx, &pb.ListVmsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Vms, nil
+}
+
 // DeleteVM deletes a VM
 func (c *NodeClient) DeleteVM(ctx context.Context, vmID string) error {
 	_, err := c.compute.DeleteVm(ctx, &pb.DeleteVmRequest{

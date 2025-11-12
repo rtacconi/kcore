@@ -15,6 +15,7 @@ service NodeCompute {
   rpc StopVm(StopVmRequest) returns (StopVmResponse);
   rpc RebootVm(RebootVmRequest) returns (RebootVmResponse);
   rpc GetVm(GetVmRequest) returns (GetVmResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
 }
 
 // NodeStorage service handles volume operations
@@ -131,6 +132,22 @@ message GetVmRequest {
 message GetVmResponse {
   VmSpec spec = 1;
   VmStatus status = 2;
+}
+
+// ListVms
+message ListVmsRequest {}
+
+message ListVmsResponse {
+  repeated VmInfo vms = 1;
+}
+
+message VmInfo {
+  string id = 1;
+  string name = 2;
+  VmState state = 3;
+  int32 cpu = 4;
+  int64 memory_bytes = 5;
+  google.protobuf.Timestamp created_at = 6;
 }
 
 // CreateVolume

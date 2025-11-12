@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -57,12 +59,17 @@ Examples:
   # Get VM in JSON format
   kctl get vm web-server -o json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Get connection info
+			configPath, _ := cmd.Flags().GetString("config")
+			controllerFlag, _ := cmd.Flags().GetString("controller")
+			insecureFlag, _ := cmd.Flags().GetBool("insecure")
+
 			if len(args) == 0 {
 				// List all VMs
-				return listVMs(*output)
+				return listVMs(*output, configPath, controllerFlag, insecureFlag)
 			}
 			// Get specific VM
-			return getVM(args[0], *output)
+			return getVM(args[0], *output, configPath, controllerFlag, insecureFlag)
 		},
 	}
 }
@@ -136,27 +143,108 @@ Examples:
 	}
 }
 
-// Implementation functions (TODO: connect to controller gRPC API)
+// Implementation functions
 
-func listVMs(output string) error {
-	fmt.Println("NAME          STATUS    NODE           CPU    MEMORY    AGE")
-	fmt.Println("web-server    Running   kvm-node-01    4      8G        2d")
-	fmt.Println("db-server     Running   kvm-node-02    8      16G       5d")
-	fmt.Println("cache-01      Stopped   kvm-node-01    2      4G        1d")
+func listVMs(output, configPath, controllerFlag string, insecureFlag bool) error {
+	// Get connection info
+	nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+	if err != nil {
+		return err
+	}
+
+	// Create client
+	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	if err != nil {
+		return fmt.Errorf("failed to connect to node: %w", err)
+	}
+	defer client.Close()
+
+	// List VMs
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	vms, err := client.ListVMs(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list VMs: %w", err)
+	}
+
+	// Print header
+	fmt.Printf("%-20s %-12s %-6s %-10s %-10s\n", "NAME", "STATUS", "CPU", "MEMORY", "ID")
+	
+	// Print VMs
+	for _, vm := range vms {
+		status := vm.State.String()[9:] // Remove "VM_STATE_" prefix
+		memory := formatBytes(vm.MemoryBytes)
+		
+		// Truncate UUID for display
+		id := vm.Id
+		if len(id) > 10 {
+			id = id[:8]
+		}
+		
+		fmt.Printf("%-20s %-12s %-6d %-10s %-10s\n",
+			vm.Name,
+			status,
+			vm.Cpu,
+			memory,
+			id,
+		)
+	}
+
 	return nil
 }
 
-func getVM(name, output string) error {
+func getVM(name, output, configPath, controllerFlag string, insecureFlag bool) error {
+	// Get connection info
+	nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+	if err != nil {
+		return err
+	}
+
+	// Create client
+	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	if err != nil {
+		return fmt.Errorf("failed to connect to node: %w", err)
+	}
+	defer client.Close()
+
+	// Get VM
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	spec, status, err := client.GetVM(ctx, name)
+	if err != nil {
+		return fmt.Errorf("failed to get VM: %w", err)
+	}
+
+	// Print VM details
 	fmt.Printf("Name:         %s\n", name)
-	fmt.Printf("Status:       Running\n")
-	fmt.Printf("Node:         kvm-node-01\n")
-	fmt.Printf("CPU:          4 cores\n")
-	fmt.Printf("Memory:       8GB\n")
-	fmt.Printf("Disk:         100GB\n")
-	fmt.Printf("Network:      default\n")
-	fmt.Printf("IP Address:   192.168.1.100\n")
-	fmt.Printf("Autostart:    false\n")
-	fmt.Printf("Age:          2d\n")
+	fmt.Printf("ID:           %s\n", status.Id)
+	fmt.Printf("Status:       %s\n", status.State.String()[9:])
+	
+	if spec != nil {
+		fmt.Printf("CPU:          %d cores\n", spec.Cpu)
+		fmt.Printf("Memory:       %s\n", formatBytes(spec.MemoryBytes))
+		
+		if len(spec.Disks) > 0 {
+			fmt.Printf("Disks:\n")
+			for _, disk := range spec.Disks {
+				fmt.Printf("  - %s: %s\n", disk.Device, disk.BackendHandle)
+			}
+		}
+		
+		if len(spec.Nics) > 0 {
+			fmt.Printf("Network:\n")
+			for _, nic := range spec.Nics {
+				fmt.Printf("  - %s (%s)\n", nic.Network, nic.MacAddress)
+			}
+		}
+	}
+	
+	if status.CreatedAt != nil {
+		fmt.Printf("Created:      %s\n", status.CreatedAt.AsTime().Format(time.RFC3339))
+	}
+
 	return nil
 }
 
