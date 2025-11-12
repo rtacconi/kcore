@@ -1,4 +1,4 @@
-.PHONY: all build controller node-agent proto test clean deploy
+.PHONY: all build controller kctl install-kctl-local install-kctl-system node-agent proto test clean deploy
 .PHONY: build-iso create-vm delete-vm test-node list-services deploy-node write-usb help
 
 all: proto build
@@ -21,6 +21,19 @@ kctl:
 	@echo "Building kctl for macOS ARM64..."
 	@GOOS=darwin GOARCH=arm64 go build -o bin/kctl ./cmd/kctl
 	@echo "✅ kctl built successfully: bin/kctl"
+	@echo ""
+	@echo "To use kctl:"
+	@echo "  ./bin/kctl [command]              # Run directly"
+	@echo "  make install-kctl-local           # Install to ~/.local/bin"
+	@echo "  make install-kctl-system          # Install to /usr/local/bin"
+
+# Install kctl to user's local bin
+install-kctl-local: kctl
+	@./scripts/install-kctl.sh --local
+
+# Install kctl to system bin (requires sudo)
+install-kctl-system: kctl
+	@./scripts/install-kctl.sh --system
 
 # Build node agent (Linux/amd64) - requires CGO, use Podman for cross-compilation
 # NOTE: Podman on macOS has emulation issues. For best results, build on Linux or use Nix.
@@ -118,13 +131,15 @@ help:
 	@echo "🔧 KCORE Makefile Targets"
 	@echo ""
 	@echo "📦 Building:"
-	@echo "  make proto              - Generate protobuf code"
-	@echo "  make controller         - Build controller (macOS/Linux)"
-	@echo "  make kctl               - Build kctl CLI (macOS ARM64)"
-	@echo "  make node-agent         - Build node-agent (Podman)"
-	@echo "  make node-agent-nix     - Build node-agent (Nix)"
-	@echo "  make build-iso          - Build bootable kcore ISO"
-	@echo "  make build              - Build controller + node-agent"
+	@echo "  make proto                - Generate protobuf code"
+	@echo "  make controller           - Build controller (macOS/Linux)"
+	@echo "  make kctl                 - Build kctl CLI (macOS ARM64)"
+	@echo "  make install-kctl-local   - Install kctl to ~/.local/bin"
+	@echo "  make install-kctl-system  - Install kctl to /usr/local/bin (sudo)"
+	@echo "  make node-agent           - Build node-agent (Podman)"
+	@echo "  make node-agent-nix       - Build node-agent (Nix)"
+	@echo "  make build-iso            - Build bootable kcore ISO"
+	@echo "  make build                - Build controller + node-agent"
 	@echo ""
 	@echo "🧪 Testing:"
 	@echo "  make test               - Run Go tests"
