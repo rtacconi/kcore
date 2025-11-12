@@ -116,7 +116,7 @@ help:
 	@echo "  make controller         - Build controller (macOS/Linux)"
 	@echo "  make node-agent         - Build node-agent (Podman)"
 	@echo "  make node-agent-nix     - Build node-agent (Nix)"
-	@echo "  make build-iso          - Build bootable NixOS ISO"
+	@echo "  make build-iso          - Build bootable kcore ISO"
 	@echo "  make build              - Build controller + node-agent"
 	@echo ""
 	@echo "🧪 Testing:"
