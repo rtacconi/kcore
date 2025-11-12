@@ -167,10 +167,11 @@ make help
 ```
 
 ### Documentation Files
-- `QUICKSTART.md` - Installation guide
-- `ARCHITECTURE.md` - System design and workflow
-- `FIXES.md` - Troubleshooting and manual fixes
-- `COMMANDS.md` - This file
+- [QUICKSTART.md](QUICKSTART.md) - Installation guide
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System design and workflow
+- [FIXES.md](FIXES.md) - Troubleshooting and manual fixes
+- [COMMANDS.md](COMMANDS.md) - This file
+- [scripts.md](scripts.md) - Scripts documentation
 
 ---
 

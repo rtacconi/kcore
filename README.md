@@ -1,222 +1,276 @@
 # kcore
 
-A modern, minimal virtualization platform focused on **datacenters and home labs**.
+A modern, minimal virtualization platform for datacenters and home labs.
 
-## Overview
-
-kcore is a clustered virtualization platform built with:
-
-- **Host OS**: NixOS-based "kcode" image (rebranded, minimal)
-- **Hypervisor**: KVM via libvirt
-- **Control Plane**: Go-based controller with SQLite state
-- **Node Agents**: Go-based agents running on kcode nodes
-- **Communication**: gRPC with mTLS
-
-## Architecture
-
-```
-┌─────────────────┐
-│  Control Plane  │  (macOS, SQLite)
-│   (Controller)  │
-└────────┬────────┘
-         │ gRPC (mTLS)
-         │
-    ┌────┴────┐
-    │        │
-┌───▼───┐ ┌──▼───┐
-│ Node  │ │ Node │  (kcode/NixOS, libvirt)
-│ Agent │ │ Agent│
-└───────┘ └──────┘
-```
-
-## Quick Start
-
-### Option 1: Using Devbox (Recommended)
-
-Devbox provides a reproducible development environment:
+## 🚀 Quick Start
 
 ```bash
-# Enter devbox shell (installs Go, protobuf, Podman, etc.)
+# Build the ISO
+make build-iso
+
+# Write to USB
+USB_DEVICE=/dev/disk4 make write-usb
+
+# Boot, login (root/kcore), run:
+install-to-disk
+
+# After reboot, create a VM
+NODE_IP=192.168.40.146 make create-vm
+```
+
+**That's it!** Everything else is automated.
+
+---
+
+## 📚 Documentation
+
+### Getting Started
+- **[Quick Start Guide](docs/QUICKSTART.md)** - Complete installation walkthrough from USB to running VMs
+- **[Introduction](docs/intro.md)** - Project overview, architecture, and manual setup
+
+### User Guides
+- **[Commands Reference](docs/COMMANDS.md)** - All make/devbox commands with examples
+- **[Architecture](docs/ARCHITECTURE.md)** - System design, workflows, and component communication
+
+### Operations
+- **[Fixes & Troubleshooting](docs/FIXES.md)** - Common issues and solutions
+- **[Scripts](docs/scripts.md)** - Automation scripts documentation
+
+### Development
+- **[Building ISO](docs/BUILD_ISO.md)** - How to build the kcore ISO
+- **[Building Node Agent](docs/BUILD_NODE_AGENT.md)** - How to build node-agent
+- **[Cross Compilation](docs/CROSS_COMPILATION.md)** - Cross-compiling node-agent for Linux
+- **[Project Structure](docs/PROJECT_STRUCTURE.md)** - Codebase organization
+
+### Additional Resources
+- **[Build ISO Remote](docs/BUILD_ISO_REMOTE.md)** - Remote ISO building
+- **[Write USB](docs/WRITE_USB.md)** - USB drive preparation
+- **[Next Steps](docs/NEXT_STEPS.md)** - Future development roadmap
+- **[Step 1 Status](docs/STEP1_STATUS.md)** - Initial development status
+
+---
+
+## 🎯 What is kcore?
+
+kcore is a clustered KVM virtualization platform that provides:
+
+- **Simple VM Management** - Create, manage, and delete VMs via API
+- **Automated Deployment** - Boot from USB, run one command, reboot
+- **Distributed Architecture** - Controller manages multiple compute nodes
+- **Modern Stack** - Go + gRPC + NixOS + KVM/libvirt
+
+### Key Components
+
+- **Controller** - Runs on your Mac/workstation, manages cluster state
+- **Node Agent** - Runs on each compute node, manages local VMs
+- **kcore ISO** - Bootable installer with everything included
+
+---
+
+## 💻 Development
+
+### Prerequisites
+
+- **Nix** with flakes enabled
+- **Go 1.22+**
+- **Make**
+- **Devbox** (optional but recommended)
+
+### Setup
+
+```bash
+# Clone repository
+git clone https://github.com/rtacconi/kcore.git
+cd kcore
+
+# Enter devbox shell (sets up environment)
 devbox shell
 
 # Generate protobuf code
 make proto
 
-# Build controller (macOS)
+# Build components
 make controller
-
-# Build node-agent (Linux/amd64) - uses Podman automatically
-make node-agent
+make node-agent-nix
+make build-iso
 ```
 
-### Option 2: Manual Setup
-
-1. **Install Dependencies**
-
-   - Go 1.22+
-   - Protocol Buffers compiler (`protoc`)
-   - Go protobuf plugins:
-     ```bash
-     go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
-     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
-     ```
-   - Podman (for cross-compiling node-agent)
-
-2. **Generate Protobuf Code**
+### Available Commands
 
 ```bash
-# Option 1: Use the script
-./scripts/generate-proto.sh
-
-# Option 2: Use make
-make proto
+make help                           # Show all commands
+make proto                          # Generate protobuf code
+make controller                     # Build controller
+make node-agent-nix                 # Build node-agent
+make build-iso                      # Build kcore ISO
+NODE_IP=x.x.x.x make create-vm     # Create VM
+NODE_IP=x.x.x.x make test-node     # Test node
 ```
 
-3. **Build the Project**
+See [Commands Reference](docs/COMMANDS.md) for full list.
 
-   ```bash
-   # Build control plane (macOS)
-   make controller
+---
 
-   # Build node agent (Linux/amd64) - requires Podman
-   make node-agent
-   ```
+## 🏗️ Architecture
 
-   **Note:** The node-agent requires CGO and libvirt, so cross-compilation from macOS uses Podman. See [CROSS_COMPILATION.md](CROSS_COMPILATION.md) for details.
+```
+┌─────────────────────┐
+│   Your Mac/Linux    │
+│  kcore-controller   │  ← Manages cluster state
+│   (port 9090)       │     SQLite database
+└──────────┬──────────┘
+           │ gRPC (mTLS)
+    ┌──────┴───────┬──────────────┐
+    │              │              │
+┌───▼────────┐ ┌──▼─────────┐ ┌──▼─────────┐
+│  kcore     │ │  kcore     │ │  kcore     │
+│  Node #1   │ │  Node #2   │ │  Node #N   │
+│            │ │            │ │            │
+│ node-agent │ │ node-agent │ │ node-agent │
+│ (port 9091)│ │ (port 9091)│ │ (port 9091)│
+│            │ │            │ │            │
+│ libvirtd   │ │ libvirtd   │ │ libvirtd   │
+│  VMs...    │ │  VMs...    │ │  VMs...    │
+└────────────┘ └────────────┘ └────────────┘
+```
 
-4. **Set Up Certificates**
+- **Controller** receives node registrations and sends VM management commands
+- **Node Agents** self-register with controller and manage local VMs via libvirtd
+- **Communication** via gRPC with mutual TLS authentication
 
-Create TLS certificates for mTLS communication:
+See [Architecture](docs/ARCHITECTURE.md) for detailed design.
+
+---
+
+## 🌟 Features
+
+✅ **Fully Automated**
+- Boot from USB → Run `install-to-disk` → Reboot
+- All services start automatically
+- Node auto-registers with controller
+
+✅ **Hardware Auto-Detection**
+- DHCP on all interfaces
+- Works with any NIC
+- No manual configuration
+
+✅ **Production Ready**
+- libvirtd + virtlogd managed by systemd
+- Automatic service restarts
+- Comprehensive logging
+
+✅ **Developer Friendly**
+- Make-based build system
+- Devbox environment management
+- Scripts in separate files (not inline)
+
+---
+
+## 📖 Common Tasks
+
+### Build and Deploy
 
 ```bash
-mkdir -p certs
-# Generate CA, controller cert, and node certs
-# (Use your preferred tool: openssl, cfssl, etc.)
+# Build ISO
+make build-iso
+
+# Write to USB
+USB_DEVICE=/dev/disk4 make write-usb
+
+# Boot node from USB, then:
+ssh root@<node-ip>  # password: kcore
+install-to-disk
+reboot
 ```
 
-### 3. Configure Controller
-
-Create `controller.yaml`:
-
-```yaml
-databasePath: ./kcore.db
-listenAddr: ":9090"
-tls:
-  caFile: ./certs/ca.crt
-  certFile: ./certs/controller.crt
-  keyFile: ./certs/controller.key
-nodeNetworks:
-  default: br0
-```
-
-### 5. Start Controller
+### VM Management
 
 ```bash
-./bin/kcore-controller
+# Set node IP
+export NODE_IP=192.168.40.146
+
+# Create VM
+make create-vm
+
+# List VMs
+ssh root@$NODE_IP virsh list --all
+
+# Delete VM
+VM_ID=<uuid> make delete-vm
 ```
 
-### 6. Deploy Node Agent
-
-On each ThinkCentre node:
-
-1. Install kcode (NixOS-based) using the flake
-2. Copy node agent binary to `/opt/kcode/kcore-node-agent`
-3. Create `/etc/kcode/node-agent.yaml`
-4. Start the service: `systemctl start kcode-node-agent`
-
-Or use the deployment script:
+### Update Node
 
 ```bash
-./scripts/deploy-node-agent.sh <node-ip> root
+# Rebuild node-agent
+make node-agent-nix
+
+# Deploy to node
+NODE_IP=192.168.40.146 make deploy-node
+
+# Restart service
+ssh root@192.168.40.146 systemctl restart kcode-node-agent
 ```
 
-### 7. Apply VM Specs
+---
 
-```bash
-# Create storage classes
-./bin/kcore-controller -apply-vm examples/storage-classes.yaml
-
-# Create a VM
-./bin/kcore-controller -apply-vm examples/vm.yaml
-```
-
-## NixOS Flake
-
-Build a kcode node image:
-
-```bash
-nix build .#images.kcode-node
-```
-
-This produces a bootable ISO/image that can be written to USB.
-
-## Project Structure
+## 🔧 Project Structure
 
 ```
 kcore/
 ├── cmd/
-│   ├── controller/     # Control plane binary
+│   ├── controller/      # Controller binary
 │   └── node-agent/      # Node agent binary
 ├── pkg/
-│   ├── config/          # Configuration types and YAML parsing
-│   └── sqlite/          # Database schema and access
-├── pkg/controller/      # Control plane reconciliation logic
+│   ├── config/          # Configuration parsing
+│   ├── controller/      # Controller logic
+│   └── sqlite/          # Database
 ├── node/
 │   ├── libvirt/         # Libvirt integration
 │   ├── storage/         # Storage drivers
-│   └── server.go         # gRPC server implementation
+│   └── server.go        # gRPC server
 ├── api/                 # Generated protobuf code
 ├── proto/               # Protobuf definitions
 ├── modules/             # NixOS modules
-│   ├── kcode-minimal.nix
-│   ├── kcode-branding.nix
-│   ├── kcode-node-agent.nix
-│   └── kcode-libvirt.nix
-├── examples/            # Example YAML specs
-└── scripts/             # Deployment scripts
+├── scripts/             # Automation scripts
+├── docs/                # Documentation
+└── examples/            # Example configs
 ```
 
-## Storage Drivers
+See [Project Structure](docs/PROJECT_STRUCTURE.md) for details.
 
-kcore supports multiple storage backends:
+---
 
-- **local-dir**: qcow2 files in a directory
-- **local-lvm**: LVM logical volumes
-- **linstor**: LINSTOR-backed volumes (planned)
-- **san-iscsi/san-fc**: SAN-backed volumes (planned)
+## 🤝 Contributing
 
-## Networking
+Contributions welcome! Please:
 
-Currently supports Linux bridges. Each network maps to a bridge name on the node.
+1. Read the documentation in `docs/`
+2. Follow the script standards in `docs/scripts.md`
+3. Test changes on both macOS and Linux where applicable
+4. Use kcore branding in user-facing text
 
-## Development
+---
 
-### Prerequisites
-
-- Go 1.22+
-- Nix (for building NixOS images)
-- protoc (for generating protobuf code)
-- libvirt development libraries (for node agent)
-
-### Running Tests
-
-```bash
-make test
-```
-
-### Cross-compilation
-
-The Makefile includes targets for cross-compiling the node agent:
-
-```bash
-make node-agent  # Builds for Linux/amd64
-```
-
-## License
+## 📝 License
 
 [Add your license here]
 
-## Contributing
+---
 
-[Add contribution guidelines here]
+## 🔗 Links
+
+- **Repository**: https://github.com/rtacconi/kcore
+- **Issues**: https://github.com/rtacconi/kcore/issues
+- **Documentation**: [docs/](docs/)
+
+---
+
+## 📞 Support
+
+For help:
+- Read [Quick Start Guide](docs/QUICKSTART.md)
+- Check [Fixes & Troubleshooting](docs/FIXES.md)
+- See [Commands Reference](docs/COMMANDS.md)
+- Review [Architecture](docs/ARCHITECTURE.md)
 

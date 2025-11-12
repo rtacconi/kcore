@@ -142,8 +142,8 @@ help:
 	@echo "  USB_DEVICE=/dev/disk4 make write-usb"
 	@echo ""
 	@echo "📚 Documentation:"
-	@echo "  QUICKSTART.md    - Installation guide"
-	@echo "  ARCHITECTURE.md  - System design"
-	@echo "  COMMANDS.md      - Command reference"
-	@echo "  FIXES.md         - Troubleshooting"
+	@echo "  docs/QUICKSTART.md    - Installation guide"
+	@echo "  docs/ARCHITECTURE.md  - System design"
+	@echo "  docs/COMMANDS.md      - Command reference"
+	@echo "  docs/FIXES.md         - Troubleshooting"
 
