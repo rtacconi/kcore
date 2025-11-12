@@ -39,7 +39,7 @@ Examples:
 	}
 
 	// Global flags
-	rootCmd.PersistentFlags().StringP("config", "c", "$HOME/.kcore/config", "Path to kctl config file")
+	rootCmd.PersistentFlags().StringP("config", "c", "~/.kcore/config", "Path to kctl config file")
 	rootCmd.PersistentFlags().StringP("controller", "s", "", "Controller address (overrides config)")
 	rootCmd.PersistentFlags().BoolP("insecure", "k", false, "Skip TLS certificate verification")
 

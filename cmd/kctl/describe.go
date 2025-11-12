@@ -43,16 +43,17 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			vmID := args[0]
 			
-			// Get node address
-			nodeAddr, _ := cmd.Flags().GetString("controller")
-			if nodeAddr == "" {
-				return fmt.Errorf("node address required: use --controller flag or set in config")
+			// Get connection info from flags or config
+			configPath, _ := cmd.Flags().GetString("config")
+			controllerFlag, _ := cmd.Flags().GetString("controller")
+			insecureFlag, _ := cmd.Flags().GetBool("insecure")
+
+			nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+			if err != nil {
+				return err
 			}
 
-			// Get TLS flags
-			insecure, _ := cmd.Flags().GetBool("insecure")
-
-			return describeVM(vmID, nodeAddr, insecure)
+			return describeVM(vmID, nodeAddr, insecure, certFile, keyFile, caFile)
 		},
 	}
 }
@@ -113,12 +114,8 @@ Examples:
 
 // Implementation functions
 
-func describeVM(vmID, nodeAddr string, insecure bool) error {
+func describeVM(vmID, nodeAddr string, insecure bool, certFile, keyFile, caFile string) error {
 	// Create client
-	certFile := "certs/controller.crt"
-	keyFile := "certs/controller.key"
-	caFile := "certs/ca.crt"
-
 	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
 	if err != nil {
 		return fmt.Errorf("failed to connect to node: %w", err)

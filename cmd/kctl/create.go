@@ -66,12 +66,6 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			// Get node address from flag or config
-			nodeAddr, _ := cmd.Flags().GetString("controller")
-			if nodeAddr == "" {
-				return fmt.Errorf("node address required: use --controller flag or set in config")
-			}
-
 			// Parse memory size
 			memoryBytes, err := parseMemorySize(memory)
 			if err != nil {
@@ -85,15 +79,17 @@ Examples:
 			}
 			_ = diskBytes // TODO: Implement disk size in volume creation
 
+			// Get connection info from flags or config
+			configPath, _ := cmd.Flags().GetString("config")
+			controllerFlag, _ := cmd.Flags().GetString("controller")
+			insecureFlag, _ := cmd.Flags().GetBool("insecure")
+
+			nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+			if err != nil {
+				return err
+			}
+
 			fmt.Printf("Creating VM '%s' on %s...\n", name, nodeAddr)
-
-			// Get TLS flags
-			insecure, _ := cmd.Flags().GetBool("insecure")
-
-			// Use controller certs for client authentication (mTLS)
-			certFile := "certs/controller.crt"
-			keyFile := "certs/controller.key"
-			caFile := "certs/ca.crt"
 
 			// Create client
 			client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)

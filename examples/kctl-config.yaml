@@ -1,0 +1,35 @@
+# kctl configuration file
+# Place this at: ~/.kcore/config
+
+# Current active context
+current-context: dev-node
+
+# Contexts define connections to kcore nodes/controllers
+contexts:
+  # Development node (direct connection)
+  dev-node:
+    controller: "192.168.40.146:9091"  # Node address (default port 9091)
+    insecure: true                      # Skip TLS verification for testing
+    
+  # Production controller (with mTLS)
+  prod-controller:
+    controller: "controller.example.com:9091"
+    insecure: false
+    cert: "certs/controller.crt"       # Client certificate
+    key: "certs/controller.key"        # Client key
+    ca: "certs/ca.crt"                 # CA certificate
+    
+  # Localhost for testing
+  localhost:
+    controller: "localhost"            # Port will default to 9091
+    insecure: true
+
+# Usage:
+#   kctl get vms                              # Uses current-context (dev-node)
+#   kctl create vm test --cpu 2 --memory 4G  # Uses current-context
+#   kctl delete vm test --force               # Uses current-context
+#
+# Override with flags:
+#   kctl get vms --controller 10.0.0.5:9091  # Temporarily use different node
+#   kctl create vm test --insecure            # Force insecure even if config says otherwise
+
