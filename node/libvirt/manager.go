@@ -194,10 +194,19 @@ type NICSpec struct {
 
 // CreateDomain creates a libvirt domain from XML
 func (m *Manager) CreateDomain(xml string) (*libvirt.Domain, error) {
-	domain, err := m.conn.DomainCreateXML(xml, libvirt.DOMAIN_NONE)
+	// Define the domain (makes it persistent)
+	domain, err := m.conn.DomainDefineXML(xml)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create domain: %w", err)
+		return nil, fmt.Errorf("failed to define domain: %w", err)
 	}
+	
+	// Optionally start the domain
+	if err := domain.Create(); err != nil {
+		// If start fails, clean up the definition
+		domain.Undefine()
+		return nil, fmt.Errorf("failed to start domain: %w", err)
+	}
+	
 	return domain, nil
 }
 
