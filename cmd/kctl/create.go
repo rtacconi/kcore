@@ -1,8 +1,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
+	pb "github.com/kcore/kcore/api/node"
+	"github.com/google/uuid"
 	"github.com/spf13/cobra"
 )
 
@@ -62,21 +66,71 @@ Examples:
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
 
-			// TODO: Implement VM creation via gRPC to controller
-			fmt.Printf("Creating VM '%s'...\n", name)
-			fmt.Printf("  CPU: %d cores\n", cpu)
-			fmt.Printf("  Memory: %s\n", memory)
-			fmt.Printf("  Disk: %s\n", disk)
-			if image != "" {
-				fmt.Printf("  Image: %s\n", image)
+			// Get node address from flag or config
+			nodeAddr, _ := cmd.Flags().GetString("controller")
+			if nodeAddr == "" {
+				return fmt.Errorf("node address required: use --controller flag or set in config")
 			}
-			if node != "" {
-				fmt.Printf("  Node: %s\n", node)
+
+			// Parse memory size
+			memoryBytes, err := parseMemorySize(memory)
+			if err != nil {
+				return fmt.Errorf("invalid memory size: %w", err)
 			}
-			fmt.Printf("  Network: %s\n", network)
-			fmt.Printf("  Autostart: %v\n", autostart)
+
+			// Parse disk size
+			diskBytes, err := parseDiskSize(disk)
+			if err != nil {
+				return fmt.Errorf("invalid disk size: %w", err)
+			}
+			_ = diskBytes // TODO: Implement disk size in volume creation
+
+			fmt.Printf("Creating VM '%s' on %s...\n", name, nodeAddr)
+
+			// Get TLS flags
+			insecure, _ := cmd.Flags().GetBool("insecure")
+
+			// Use controller certs for client authentication (mTLS)
+			certFile := "certs/controller.crt"
+			keyFile := "certs/controller.key"
+			caFile := "certs/ca.crt"
+
+			// Create client
+			client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+			if err != nil {
+				return fmt.Errorf("failed to connect to node: %w", err)
+			}
+			defer client.Close()
+
+			// Create VM spec with proper UUID
+			// Note: disks and nics are empty for now - they should be added via separate API calls
+			vmID := uuid.New().String()
+			spec := &pb.VmSpec{
+				Id:          vmID,
+				Name:        name,
+				Cpu:         int32(cpu),
+				MemoryBytes: memoryBytes,
+				Disks:       []*pb.Disk{},  // Empty - add disks separately
+				Nics:        []*pb.Nic{},   // Empty - add NICs separately
+			}
+
+			// Create VM
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			status, err := client.CreateVM(ctx, spec)
+			if err != nil {
+				return fmt.Errorf("failed to create VM: %w", err)
+			}
 
 			fmt.Printf("\n✅ VM '%s' created successfully\n", name)
+			fmt.Printf("  ID: %s\n", status.Id)
+			fmt.Printf("  Status: %s\n", status.State.String())
+			fmt.Printf("  CPU: %d cores\n", cpu)
+			fmt.Printf("  Memory: %s (%s)\n", memory, formatBytes(memoryBytes))
+			fmt.Printf("  Disk: %s\n", disk)
+			fmt.Printf("  Network: %s\n", network)
+
 			return nil
 		},
 	}

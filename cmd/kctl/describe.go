@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -39,8 +41,18 @@ Examples:
   kctl describe vm web-server`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
-			return describeVM(name)
+			vmID := args[0]
+			
+			// Get node address
+			nodeAddr, _ := cmd.Flags().GetString("controller")
+			if nodeAddr == "" {
+				return fmt.Errorf("node address required: use --controller flag or set in config")
+			}
+
+			// Get TLS flags
+			insecure, _ := cmd.Flags().GetBool("insecure")
+
+			return describeVM(vmID, nodeAddr, insecure)
 		},
 	}
 }
@@ -101,34 +113,72 @@ Examples:
 
 // Implementation functions
 
-func describeVM(name string) error {
-	fmt.Printf("Name:           %s\n", name)
-	fmt.Printf("ID:             5fc2b3d5-57e0-4991-bc1e-349ee5ec3784\n")
-	fmt.Printf("Status:         Running\n")
-	fmt.Printf("Node:           kvm-node-01\n")
+func describeVM(vmID, nodeAddr string, insecure bool) error {
+	// Create client
+	certFile := "certs/controller.crt"
+	keyFile := "certs/controller.key"
+	caFile := "certs/ca.crt"
+
+	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	if err != nil {
+		return fmt.Errorf("failed to connect to node: %w", err)
+	}
+	defer client.Close()
+
+	// Get VM details
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	spec, status, err := client.GetVM(ctx, vmID)
+	if err != nil {
+		return fmt.Errorf("failed to get VM: %w", err)
+	}
+
+	// Display VM details
+	fmt.Printf("Name:           %s\n", vmID)
+	fmt.Printf("ID:             %s\n", status.Id)
+	fmt.Printf("Status:         %s\n", status.State.String())
 	fmt.Printf("\n")
-	fmt.Printf("Resources:\n")
-	fmt.Printf("  CPU:          4 cores\n")
-	fmt.Printf("  Memory:       8GB\n")
-	fmt.Printf("  Disk:         100GB\n")
-	fmt.Printf("\n")
-	fmt.Printf("Network:\n")
-	fmt.Printf("  Network:      default\n")
-	fmt.Printf("  IP Address:   192.168.1.100\n")
-	fmt.Printf("  MAC Address:  52:54:00:12:34:56\n")
-	fmt.Printf("\n")
-	fmt.Printf("Configuration:\n")
-	fmt.Printf("  Autostart:    false\n")
-	fmt.Printf("  Boot Device:  hd\n")
-	fmt.Printf("\n")
-	fmt.Printf("Timestamps:\n")
-	fmt.Printf("  Created:      2025-11-10 14:30:00 UTC\n")
-	fmt.Printf("  Started:      2025-11-10 14:32:15 UTC\n")
-	fmt.Printf("  Age:          2d\n")
-	fmt.Printf("\n")
-	fmt.Printf("Events:\n")
-	fmt.Printf("  2m ago   Normal    Started      VM started successfully\n")
-	fmt.Printf("  1h ago   Normal    Migrated     VM migrated from kvm-node-02\n")
+
+	if spec != nil {
+		fmt.Printf("Resources:\n")
+		fmt.Printf("  CPU:          %d cores\n", spec.Cpu)
+		fmt.Printf("  Memory:       %s\n", formatBytes(spec.MemoryBytes))
+		fmt.Printf("\n")
+
+		if len(spec.Disks) > 0 {
+			fmt.Printf("Disks:\n")
+			for _, disk := range spec.Disks {
+				fmt.Printf("  - %s (%s): %s\n", disk.Device, disk.Bus, disk.BackendHandle)
+			}
+			fmt.Printf("\n")
+		}
+
+		if len(spec.Nics) > 0 {
+			fmt.Printf("Network:\n")
+			for _, nic := range spec.Nics {
+				fmt.Printf("  Network:      %s\n", nic.Network)
+				if nic.MacAddress != "" {
+					fmt.Printf("  MAC Address:  %s\n", nic.MacAddress)
+				}
+				fmt.Printf("  Model:        %s\n", nic.Model)
+			}
+			fmt.Printf("\n")
+		}
+	} else {
+		fmt.Printf("Note: Full VM spec not available from node API yet\n\n")
+	}
+
+	if status.CreatedAt != nil || status.UpdatedAt != nil {
+		fmt.Printf("Timestamps:\n")
+		if status.CreatedAt != nil {
+			fmt.Printf("  Created:      %s\n", status.CreatedAt.AsTime().Format(time.RFC3339))
+		}
+		if status.UpdatedAt != nil {
+			fmt.Printf("  Updated:      %s\n", status.UpdatedAt.AsTime().Format(time.RFC3339))
+		}
+	}
+
 	return nil
 }
 

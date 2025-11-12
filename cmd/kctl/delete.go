@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -50,10 +52,10 @@ Examples:
   kctl delete vm web-server --force`,
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			name := args[0]
+			vmID := args[0]
 
 			if !*force {
-				fmt.Printf("Are you sure you want to delete VM '%s'? (yes/no): ", name)
+				fmt.Printf("Are you sure you want to delete VM '%s'? (yes/no): ", vmID)
 				var confirm string
 				fmt.Scanln(&confirm)
 				if confirm != "yes" {
@@ -62,8 +64,38 @@ Examples:
 				}
 			}
 
-			fmt.Printf("Deleting VM '%s'...\n", name)
-			fmt.Printf("✅ VM '%s' deleted successfully\n", name)
+			// Get node address
+			nodeAddr, _ := cmd.Flags().GetString("controller")
+			if nodeAddr == "" {
+				return fmt.Errorf("node address required: use --controller flag or set in config")
+			}
+
+			// Get TLS flags
+			insecure, _ := cmd.Flags().GetBool("insecure")
+
+			// Create client
+			certFile := "certs/controller.crt"
+			keyFile := "certs/controller.key"
+			caFile := "certs/ca.crt"
+
+			client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+			if err != nil {
+				return fmt.Errorf("failed to connect to node: %w", err)
+			}
+			defer client.Close()
+
+			fmt.Printf("Deleting VM '%s'...\n", vmID)
+
+			// Delete VM
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			err = client.DeleteVM(ctx, vmID)
+			if err != nil {
+				return fmt.Errorf("failed to delete VM: %w", err)
+			}
+
+			fmt.Printf("✅ VM '%s' deleted successfully\n", vmID)
 			return nil
 		},
 	}
