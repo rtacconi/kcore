@@ -25,7 +25,8 @@ type TLSConfig struct {
 // NodeAgentConfig holds configuration for the node agent
 type NodeAgentConfig struct {
 	NodeID         string            `yaml:"nodeId"`
-	ControllerAddr string            `yaml:"controllerAddr"`
+	ListenAddr     string            `yaml:"listenAddr"`     // Address to listen on (e.g., ":9091" or "192.168.1.100:9091")
+	ControllerAddr string            `yaml:"controllerAddr"` // Controller address for registration and state sync
 	TLS            TLSConfig         `yaml:"tls"`
 	Networks       map[string]string `yaml:"networks"` // network name -> bridge name
 	Storage        StorageConfig     `yaml:"storage"`
@@ -60,7 +61,8 @@ func DefaultControllerConfig() *ControllerConfig {
 func DefaultNodeAgentConfig() *NodeAgentConfig {
 	return &NodeAgentConfig{
 		NodeID:         "",
-		ControllerAddr: "localhost:9090",
+		ListenAddr:     ":9091", // Listen on all interfaces, port 9091
+		ControllerAddr: "",      // Empty = no controller connection
 		TLS: TLSConfig{
 			CAFile:   "./certs/ca.crt",
 			CertFile: "./certs/node.crt",
@@ -74,7 +76,7 @@ func DefaultNodeAgentConfig() *NodeAgentConfig {
 				"local-dir": {
 					Type: "local-dir",
 					Parameters: map[string]string{
-						"path": "/var/lib/kcode/disks",
+						"path": "/var/lib/kcore/disks",
 					},
 				},
 			},

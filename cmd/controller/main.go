@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"log"
 	"net"
@@ -9,6 +11,7 @@ import (
 	"syscall"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 
 	ctrlpb "github.com/kcore/kcore/api/controller"
 	"github.com/kcore/kcore/pkg/controller"
@@ -16,13 +19,39 @@ import (
 
 func main() {
 	listenAddr := flag.String("listen", ":8080", "Address to listen on (default :8080)")
+	certFile := flag.String("cert", "certs/controller.crt", "TLS certificate file")
+	keyFile := flag.String("key", "certs/controller.key", "TLS key file")
+	caFile := flag.String("ca", "certs/ca.crt", "CA certificate file")
 	flag.Parse()
+
+	// Load TLS credentials
+	cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
+	if err != nil {
+		log.Fatalf("Failed to load server certificate: %v", err)
+	}
+
+	caCert, err := os.ReadFile(*caFile)
+	if err != nil {
+		log.Fatalf("Failed to read CA cert: %v", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caCert) {
+		log.Fatalf("Failed to append CA cert")
+	}
+
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    certPool,
+		MinVersion:   tls.VersionTLS12,
+	}
 
 	// Create controller server
 	server := controller.NewServer()
 
-	// Create gRPC server
-	grpcServer := grpc.NewServer()
+	// Create gRPC server with TLS
+	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
 	ctrlpb.RegisterControllerServer(grpcServer, server)
 
 	// Start listening

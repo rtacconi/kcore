@@ -113,12 +113,12 @@ The installer will:
   - Install kcore with:
     - libvirtd enabled and running
     - virtlogd enabled and running
-    - kcode-node-agent enabled and running
+    - kcore-node-agent enabled and running
     - SSH enabled (port 22)
     - node-agent port open (9091)
     - All required packages (qemu, libvirt, lvm2, parted)
     - Your SSH keys (if present on live ISO)
-    - `/etc/kcode/` config and certs (if present on live ISO)
+    - `/etc/kcore/` config and certs (if present on live ISO)
 
 After installation completes:
 ```bash
@@ -140,10 +140,10 @@ After the system boots from the installed disk:
 ssh root@<node-ip>  # password: kcore (or use your SSH key)
 
 # Verify all services are running
-systemctl status libvirtd virtlogd kcode-node-agent
+systemctl status libvirtd virtlogd kcore-node-agent
 
 # Check node-agent logs
-journalctl -u kcode-node-agent -n 20
+journalctl -u kcore-node-agent -n 20
 
 # Expected output:
 # ✅ "Starting kcore node agent (node ID: kvm-node-01)"

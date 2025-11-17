@@ -20,7 +20,7 @@
             src = ./.; # Include vendor directory
             vendorHash = null; # Will be computed from vendor directory
             subPackages = [ "cmd/node-agent" ];
-            CGO_ENABLED = 1;
+            env.CGO_ENABLED = "1";
             buildFlags = [ "-tags" "libvirt" ];
             # Link against libvirt (runtime)
             buildInputs = with pkgs; [ libvirt ];
@@ -33,9 +33,9 @@
       nixosConfigurations.kvm-node = nixpkgs.lib.nixosSystem {
         system = "x86_64-linux";
         modules = [
-          ./modules/kcode-minimal.nix
-          ./modules/kcode-branding.nix
-          ./modules/kcode-libvirt.nix
+          ./modules/kcore-minimal.nix
+          ./modules/kcore-branding.nix
+          ./modules/kcore-libvirt.nix
           ({ config, pkgs, lib, ... }:
             let
               # Build node agent in the same evaluation
@@ -54,7 +54,7 @@
                 vendorHash = null; # Will be set after first build
                 proxyVendor = true; # Use proxy for vendoring
                 subPackages = [ "cmd/node-agent" ];
-                CGO_ENABLED = 1;
+                env.CGO_ENABLED = "1";
                 buildFlags = [ "-tags" "libvirt" ];
                 buildInputs = with pkgs; [ libvirt pkg-config ];
               };
@@ -84,7 +84,7 @@
               };
 
               # Node agent service using the built binary
-              systemd.services.kcode-node-agent = {
+              systemd.services.kcore-node-agent = {
                 description = "kcore Node Agent";
                 wantedBy = [ "multi-user.target" ];
                 after = [ "network-online.target" ] ++ (lib.optional config.virtualisation.libvirtd.enable "libvirtd.service");
@@ -102,11 +102,11 @@
                   ProtectSystem = "strict";
                   ProtectHome = true;
                   ReadWritePaths = [
-                    "/var/lib/kcode"
+                    "/var/lib/kcore"
                     "/var/run/libvirt"
                   ];
                   ReadOnlyPaths = [
-                    "/etc/kcode"
+                    "/etc/kcore"
                   ];
                   CapabilityBoundingSet = [
                     "CAP_SYS_ADMIN" # Needed for libvirt/KVM
@@ -137,28 +137,30 @@
 
               # Create directories
               systemd.tmpfiles.rules = [
-                "d /var/lib/kcode 0755 root root -"
-                "d /var/lib/kcode/disks 0755 root root -"
-                "d /opt/kcode 0755 root root -"
-                "d /etc/kcode 0755 root root -"
+                "d /var/lib/kcore 0755 root root -"
+                "d /var/lib/kcore/disks 0755 root root -"
+                "d /opt/kcore 0755 root root -"
+                "d /etc/kcore 0755 root root -"
               ];
 
               # Placeholder node agent config (user must update with actual controller IP and certs)
-              environment.etc."kcode/node-agent.yaml.example" = {
+              environment.etc."kcore/node-agent.yaml.example" = {
                 text = ''
                   # Node agent configuration
-                  # Copy this to /etc/kcode/node-agent.yaml and update with your values
+                  # Copy this to /etc/kcore/node-agent.yaml and update with your values
                   nodeId: kvm-node-01
                   controllerAddr: "CHANGE_ME:9090"  # Replace with controller IP
 
                   tls:
-                    caFile: /etc/kcode/ca.crt
-                    certFile: /etc/kcode/node.crt
-                    keyFile: /etc/kcode/node.key
+                    caFile: /etc/kcore/ca.crt
+                    certFile: /etc/kcore/node.crt
+                    keyFile: /etc/kcore/node.key
 
-                  # Network name to bridge name mapping
+                  # Network name to bridge/libvirt network mapping
+                  # Use "default" for libvirt's default network (NAT with DHCP)
+                  # Use "br0", "br1", etc. for custom bridges
                   networks:
-                    default: br0
+                    default: default  # libvirt default network (NAT + DHCP)
 
                   # Storage driver configuration
                   storage:
@@ -166,7 +168,7 @@
                       local-dir:
                         type: local-dir
                         parameters:
-                          path: /var/lib/kcode/disks
+                          path: /var/lib/kcore/disks
                 '';
                 mode = "0644";
               };
@@ -194,18 +196,19 @@
         system = "x86_64-linux";
         modules = [
           "${nixpkgs}/nixos/modules/installer/cd-dvd/iso-image.nix"
-          ./modules/kcode-minimal.nix
-          ./modules/kcode-branding.nix
+          ./modules/kcore-minimal.nix
+          ./modules/kcore-branding.nix
           ({ config, pkgs, lib, ... }:
             let
               # Use Go 1.24 from nixos-25.05
               nodeAgent = (pkgs.buildGoModule.override { go = pkgs.go_1_24; }) {
                 pname = "kcore-node-agent";
                 version = "0.1.0";
-                src = self; # Include vendor directory
-                vendorHash = null; # Will be computed from vendor directory
+                src = self;
+                vendorHash = null; # Will be set after first build
+                proxyVendor = true; # Use proxy for vendoring
                 subPackages = [ "cmd/node-agent" ];
-                CGO_ENABLED = 1;
+                env.CGO_ENABLED = "1";
                 buildFlags = [ "-tags" "libvirt" ];
                 # Link against libvirt (runtime)
                 buildInputs = with pkgs; [ libvirt ];
@@ -239,6 +242,7 @@
               # Enable SSH for remote access
               services.openssh = {
                 enable = true;
+                listenAddresses = [ { addr = "0.0.0.0"; port = 22; } ]; # Listen on all interfaces
                 settings = {
                   PermitRootLogin = "yes";
                   PasswordAuthentication = true;
@@ -248,7 +252,7 @@
               virtualisation.kvmgt.enable = false;
               virtualisation.libvirtd.enable = false;
               # QEMU is included in systemPackages below
-              systemd.services.kcode-node-agent = {
+              systemd.services.kcore-node-agent = {
                 description = "kcore Node Agent";
                 wantedBy = [ "multi-user.target" ];
                 after = [ "network-online.target" ];
@@ -262,8 +266,8 @@
                   PrivateTmp = true;
                   ProtectSystem = "strict";
                   ProtectHome = true;
-                  ReadWritePaths = [ "/var/lib/kcode" "/var/run/libvirt" ];
-                  ReadOnlyPaths = [ "/etc/kcode" ];
+                  ReadWritePaths = [ "/var/lib/kcore" "/var/run/libvirt" ];
+                  ReadOnlyPaths = [ "/etc/kcore" ];
                   CapabilityBoundingSet = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
                   AmbientCapabilities = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
                   User = "root";
@@ -278,10 +282,10 @@
                 };
               };
               systemd.tmpfiles.rules = [
-                "d /var/lib/kcode 0755 root root -"
-                "d /var/lib/kcode/disks 0755 root root -"
-                "d /opt/kcode 0755 root root -"
-                "d /etc/kcode 0755 root root -"
+                "d /var/lib/kcore 0755 root root -"
+                "d /var/lib/kcore/disks 0755 root root -"
+                "d /opt/kcore 0755 root root -"
+                "d /etc/kcore 0755 root root -"
               ];
               environment.systemPackages = with pkgs; [
                 qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq nodeAgent
@@ -390,14 +394,14 @@
                   
                   # Copy node-agent binary to installed system
                   echo "📋 Copying node-agent binary..."
-                  mkdir -p /mnt/opt/kcode/bin
-                  cp ${nodeAgent}/bin/kcore-node-agent /mnt/opt/kcode/bin/
+                  mkdir -p /mnt/opt/kcore/bin
+                  cp ${nodeAgent}/bin/kcore-node-agent /mnt/opt/kcore/bin/
                   
-                  # Copy kcode config and certs if they exist
-                  if [ -d /etc/kcode ]; then
-                    echo "📋 Copying kcode configuration and certificates..."
-                    mkdir -p /mnt/etc/kcode
-                    cp -r /etc/kcode/* /mnt/etc/kcode/ 2>/dev/null || true
+                  # Copy kcore config and certs if they exist
+                  if [ -d /etc/kcore ]; then
+                    echo "📋 Copying kcore configuration and certificates..."
+                    mkdir -p /mnt/etc/kcore
+                    cp -r /etc/kcore/* /mnt/etc/kcore/ 2>/dev/null || true
                   fi
                   
                   cat > /mnt/etc/nixos/configuration.nix << EOF
@@ -425,6 +429,7 @@ $SSH_KEYS
   
   services.openssh = {
     enable = true;
+    listenAddresses = [ { addr = "0.0.0.0"; port = 22; } ]; # Listen on all interfaces (including br0)
     settings = {
       PermitRootLogin = "yes";
       PasswordAuthentication = true;
@@ -444,7 +449,7 @@ $SSH_KEYS
   };
   
   # kcore node-agent service
-  systemd.services.kcode-node-agent = {
+  systemd.services.kcore-node-agent = {
     description = "kcore Node Agent";
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" "libvirtd.service" "virtlogd.service" ];
@@ -453,7 +458,7 @@ $SSH_KEYS
     
     serviceConfig = {
       Type = "simple";
-      ExecStart = "/opt/kcode/bin/kcore-node-agent";
+      ExecStart = "/opt/kcore/bin/kcore-node-agent";
       Restart = "always";
       RestartSec = "10s";
       
@@ -462,8 +467,8 @@ $SSH_KEYS
       PrivateTmp = true;
       ProtectSystem = "strict";
       ProtectHome = true;
-      ReadWritePaths = [ "/var/lib/kcode" "/var/run/libvirt" ];
-      ReadOnlyPaths = [ "/etc/kcode" ];
+      ReadWritePaths = [ "/var/lib/kcore" "/var/run/libvirt" ];
+      ReadOnlyPaths = [ "/etc/kcore" ];
       
       # Capabilities for libvirt/KVM and networking
       CapabilityBoundingSet = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
@@ -484,11 +489,11 @@ $SSH_KEYS
   
   # Create required directories
   systemd.tmpfiles.rules = [
-    "d /var/lib/kcode 0755 root root -"
-    "d /var/lib/kcode/disks 0755 root root -"
-    "d /opt/kcode 0755 root root -"
-    "d /opt/kcode/bin 0755 root root -"
-    "d /etc/kcode 0755 root root -"
+    "d /var/lib/kcore 0755 root root -"
+    "d /var/lib/kcore/disks 0755 root root -"
+    "d /opt/kcore 0755 root root -"
+    "d /opt/kcore/bin 0755 root root -"
+    "d /etc/kcore 0755 root root -"
   ];
   
   environment.systemPackages = with pkgs; [
@@ -516,27 +521,27 @@ EOF
                   echo ""
                 '')
               ];
-              environment.etc."kcode/node-agent.yaml.example" = {
+              environment.etc."kcore/node-agent.yaml.example" = {
                 text = ''
                   # Node agent configuration
-                  # Copy this to /etc/kcode/node-agent.yaml and update with your values
+                  # Copy this to /etc/kcore/node-agent.yaml and update with your values
                   nodeId: kvm-node-01
                   controllerAddr: "CHANGE_ME:9090"
 
                   tls:
-                    caFile: /etc/kcode/ca.crt
-                    certFile: /etc/kcode/node.crt
-                    keyFile: /etc/kcode/node.key
+                    caFile: /etc/kcore/ca.crt
+                    certFile: /etc/kcore/node.crt
+                    keyFile: /etc/kcore/node.key
 
                   networks:
-                    default: br0
+                    default: default  # libvirt default network (NAT + DHCP)
 
                   storage:
                     drivers:
                       local-dir:
                         type: local-dir
                         parameters:
-                          path: /var/lib/kcode/disks
+                          path: /var/lib/kcore/disks
                 '';
                 mode = "0644";
               };

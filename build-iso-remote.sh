@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build kcode ISO on remote Ubuntu server via SSH
+# Build kcore ISO on remote Ubuntu server via SSH
 
 set -euo pipefail
 
@@ -18,7 +18,7 @@ NIX_STORE="/mnt/md126/nix"
 LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Building kcode ISO on remote Ubuntu server            ║${NC}"
+echo -e "${BLUE}║  Building kcore ISO on remote Ubuntu server            ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -193,12 +193,12 @@ if [ $BUILD_EXIT -eq 0 ]; then
         
         echo ""
         echo -e "${YELLOW}📥 Downloading hybrid ISO from remote server...${NC}"
-        scp -i "$SSH_KEY" "$SSH_HOST:$ISO_PATH" "$LOCAL_DIR/kcode.iso"
-        echo -e "${GREEN}✅ Hybrid ISO downloaded to: $LOCAL_DIR/kcode.iso${NC}"
+        scp -i "$SSH_KEY" "$SSH_HOST:$ISO_PATH" "$LOCAL_DIR/kcore.iso"
+        echo -e "${GREEN}✅ Hybrid ISO downloaded to: $LOCAL_DIR/kcore.iso${NC}"
         echo ""
         echo "Next step: Write ISO to USB stick with:"
-        echo "  ./write-usb.sh kcode.iso /dev/diskN    (macOS)"
-        echo "  ./write-usb.sh kcode.iso /dev/sdX      (Linux)"
+        echo "  ./write-usb.sh kcore.iso /dev/diskN    (macOS)"
+        echo "  ./write-usb.sh kcore.iso /dev/sdX      (Linux)"
     fi
 else
     echo ""

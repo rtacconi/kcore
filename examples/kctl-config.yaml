@@ -2,34 +2,39 @@
 # Place this at: ~/.kcore/config
 
 # Current active context
-current-context: dev-node
+current-context: my-node
 
 # Contexts define connections to kcore nodes/controllers
 contexts:
-  # Development node (direct connection)
-  dev-node:
-    controller: "192.168.40.146:9091"  # Node address (default port 9091)
-    insecure: true                      # Skip TLS verification for testing
-    
-  # Production controller (with mTLS)
-  prod-controller:
-    controller: "controller.example.com:9091"
+  # Direct connection to a specific node
+  my-node:
+    controller: "node1.example.com:9091"  # Node address (default port 9091)
     insecure: false
-    cert: "certs/controller.crt"       # Client certificate
-    key: "certs/controller.key"        # Client key
-    ca: "certs/ca.crt"                 # CA certificate
+    cert: "certs/controller.crt"          # Client certificate
+    key: "certs/controller.key"           # Client key
+    ca: "certs/ca.crt"                    # CA certificate
     
-  # Localhost for testing
+  # Connection via central controller (multi-node clusters)
+  prod-controller:
+    controller: "controller.example.com:9090"  # Controller listens on 9090
+    insecure: false
+    cert: "certs/controller.crt"
+    key: "certs/controller.key"
+    ca: "certs/ca.crt"
+    
+  # Localhost for testing (insecure)
   localhost:
-    controller: "localhost"            # Port will default to 9091
+    controller: "localhost:9091"          # Explicit port recommended
     insecure: true
 
 # Usage:
-#   kctl get vms                              # Uses current-context (dev-node)
+#   kctl get vms                              # Uses current-context (my-node)
 #   kctl create vm test --cpu 2 --memory 4G  # Uses current-context
 #   kctl delete vm test --force               # Uses current-context
 #
 # Override with flags:
-#   kctl get vms --controller 10.0.0.5:9091  # Temporarily use different node
-#   kctl create vm test --insecure            # Force insecure even if config says otherwise
-
+#   kctl get vms --controller node2.example.com:9091  # Temporarily use different node
+#   kctl create vm test --insecure                     # Force insecure even if config says otherwise
+#
+# Environment variables:
+#   KCORE_CONFIG=/path/to/config  # Override config file location

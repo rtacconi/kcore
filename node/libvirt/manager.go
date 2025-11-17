@@ -117,14 +117,28 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 	domain.Devices.Interfaces = make([]libvirtxml.DomainInterface, 0, len(spec.NICs))
 	for _, nic := range spec.NICs {
 		iface := libvirtxml.DomainInterface{
-			Source: &libvirtxml.DomainInterfaceSource{
-				Bridge: &libvirtxml.DomainInterfaceSourceBridge{
-					Bridge: nic.Network, // Network name maps to bridge name
-				},
-			},
 			Model: &libvirtxml.DomainInterfaceModel{
 				Type: nic.Model,
 			},
+		}
+
+		// Use libvirt Network mode (supports both libvirt networks and bridges)
+		// If network name starts with "br" or contains "/", assume it's a bridge
+		// Otherwise, treat it as a libvirt network name
+		if strings.HasPrefix(nic.Network, "br") || strings.Contains(nic.Network, "/") {
+			// Bridge mode (for custom bridges like br0, br1, etc.)
+			iface.Source = &libvirtxml.DomainInterfaceSource{
+				Bridge: &libvirtxml.DomainInterfaceSourceBridge{
+					Bridge: nic.Network,
+				},
+			}
+		} else {
+			// Network mode (for libvirt networks like "default", "private", etc.)
+			iface.Source = &libvirtxml.DomainInterfaceSource{
+				Network: &libvirtxml.DomainInterfaceSourceNetwork{
+					Network: nic.Network,
+				},
+			}
 		}
 
 		if nic.MACAddress != "" {
@@ -199,14 +213,14 @@ func (m *Manager) CreateDomain(xml string) (*libvirt.Domain, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to define domain: %w", err)
 	}
-	
+
 	// Optionally start the domain
 	if err := domain.Create(); err != nil {
 		// If start fails, clean up the definition
 		domain.Undefine()
 		return nil, fmt.Errorf("failed to start domain: %w", err)
 	}
-	
+
 	return domain, nil
 }
 

@@ -16,7 +16,7 @@ import (
 
 // NodeClient wraps gRPC client for node operations
 type NodeClient struct {
-	conn   *grpc.ClientConn
+	conn    *grpc.ClientConn
 	compute pb.NodeComputeClient
 	storage pb.NodeStorageClient
 	info    pb.NodeInfoClient
@@ -89,9 +89,11 @@ func (c *NodeClient) Close() error {
 }
 
 // CreateVM creates a new VM on the node
-func (c *NodeClient) CreateVM(ctx context.Context, spec *pb.VmSpec) (*pb.VmStatus, error) {
+func (c *NodeClient) CreateVM(ctx context.Context, spec *pb.VmSpec, imageURI, imagePath string) (*pb.VmStatus, error) {
 	resp, err := c.compute.CreateVm(ctx, &pb.CreateVmRequest{
-		Spec: spec,
+		Spec:      spec,
+		ImageUri:  imageURI,
+		ImagePath: imagePath,
 	})
 	if err != nil {
 		return nil, err
@@ -177,4 +179,3 @@ func formatBytes(bytes int64) string {
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
-

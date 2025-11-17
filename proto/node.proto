@@ -16,6 +16,9 @@ service NodeCompute {
   rpc RebootVm(RebootVmRequest) returns (RebootVmResponse);
   rpc GetVm(GetVmRequest) returns (GetVmResponse);
   rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+  rpc PullImage(PullImageRequest) returns (PullImageResponse);
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  rpc DeleteImage(DeleteImageRequest) returns (DeleteImageResponse);
 }
 
 // NodeStorage service handles volume operations
@@ -73,6 +76,11 @@ message VmStatus {
 // CreateVm
 message CreateVmRequest {
   VmSpec spec = 1;
+  
+  // Optional: Boot image (cloud-init images, ISOs, etc.)
+  string image_uri = 2;    // HTTP/HTTPS URI to download image (e.g., "https://cloud.debian.org/images/...")
+  string image_path = 3;   // Path to local image file (e.g., "/var/lib/images/debian-12.qcow2")
+  string image_format = 4; // Image format: qcow2, raw, iso (auto-detected if empty)
 }
 
 message CreateVmResponse {
@@ -213,5 +221,41 @@ message StorageBackend {
   int64 total_bytes = 2;
   int64 free_bytes = 3;
   bool shared = 4; // Whether volumes are visible from other nodes
+}
+
+// Image management
+
+message PullImageRequest {
+  string uri = 1;           // HTTP/HTTPS URI to download image
+  string name = 2;          // Optional: custom name for the image (defaults to filename from URI)
+}
+
+message PullImageResponse {
+  string path = 1;          // Local path where image was saved
+  int64 size_bytes = 2;     // Size of the downloaded image
+  bool cached = 3;          // True if image was already cached (not downloaded)
+}
+
+message ListImagesRequest {}
+
+message ListImagesResponse {
+  repeated ImageInfo images = 1;
+}
+
+message ImageInfo {
+  string name = 1;          // Filename
+  string path = 2;          // Full path
+  int64 size_bytes = 3;     // File size
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message DeleteImageRequest {
+  string name = 1;          // Image name (filename) or full path
+  bool force = 2;           // Force deletion even if in use
+}
+
+message DeleteImageResponse {
+  bool success = 1;
+  string message = 2;       // Optional message (e.g., "Image deleted" or "Image in use")
 }
 

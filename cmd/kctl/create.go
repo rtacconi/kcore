@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
-	pb "github.com/kcore/kcore/api/node"
 	"github.com/google/uuid"
+	pb "github.com/kcore/kcore/api/node"
 	"github.com/spf13/cobra"
 )
 
@@ -31,13 +32,14 @@ Available resource types:
 
 func newCreateVMCmd() *cobra.Command {
 	var (
-		cpu        int
-		memory     string
-		disk       string
-		image      string
-		node       string
-		network    string
-		autostart  bool
+		cpu       int
+		memory    string
+		disk      string
+		image     string
+		node      string
+		network   string
+		bridge    string
+		autostart bool
 	)
 
 	cmd := &cobra.Command{
@@ -48,17 +50,17 @@ func newCreateVMCmd() *cobra.Command {
 The VM will be scheduled on an available node unless --node is specified.
 
 Examples:
-  # Create a VM with 4 CPUs and 8GB RAM
+  # Create a VM with 4 CPUs and 8GB RAM (uses default libvirt network with NAT)
   kctl create vm web-server --cpu 4 --memory 8G
 
-  # Create a VM with specific disk size
-  kctl create vm db-server --cpu 8 --memory 16G --disk 500G
+  # Create a VM on host subnet using bridge (gets IP from real subnet)
+  kctl create vm db-server --cpu 8 --memory 16G --bridge br0
 
-  # Create a VM on a specific node
-  kctl create vm cache-server --cpu 2 --memory 4G --node kvm-node-02
+  # Create a VM with specific libvirt network
+  kctl create vm cache-server --cpu 2 --memory 4G --network default
 
   # Create a VM with an image
-  kctl create vm ubuntu-vm --cpu 2 --memory 2G --image ubuntu-22.04
+  kctl create vm ubuntu-vm --cpu 2 --memory 2G --image /path/to/image.qcow2
 
   # Create a VM that starts automatically
   kctl create vm web-01 --cpu 4 --memory 8G --autostart`,
@@ -99,22 +101,62 @@ Examples:
 			defer client.Close()
 
 			// Create VM spec with proper UUID
-			// Note: disks and nics are empty for now - they should be added via separate API calls
 			vmID := uuid.New().String()
+
+			// Determine network configuration
+			// Bridge takes precedence over network flag
+			var nics []*pb.Nic
+			if bridge != "" {
+				nics = []*pb.Nic{
+					{
+						Network:    bridge, // Bridge name (e.g., "br0")
+						Model:      "virtio",
+						MacAddress: "", // Let libvirt generate MAC
+					},
+				}
+			} else if network != "" && network != "default" {
+				// Explicit network specified (libvirt network name or bridge)
+				nics = []*pb.Nic{
+					{
+						Network:    network,
+						Model:      "virtio",
+						MacAddress: "",
+					},
+				}
+			}
+			// If network is "default" or empty, server will add default NIC automatically
+
 			spec := &pb.VmSpec{
 				Id:          vmID,
 				Name:        name,
 				Cpu:         int32(cpu),
 				MemoryBytes: memoryBytes,
-				Disks:       []*pb.Disk{},  // Empty - add disks separately
-				Nics:        []*pb.Nic{},   // Empty - add NICs separately
+				Disks:       []*pb.Disk{}, // Empty - will be added if image is provided
+				Nics:        nics,
 			}
 
 			// Create VM
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			// Longer timeout for image downloads
+			timeout := 30 * time.Second
+			if image != "" {
+				timeout = 10 * time.Minute // Allow time for image download
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			defer cancel()
 
-			status, err := client.CreateVM(ctx, spec)
+			// Determine if image is URI or local path
+			var imageURI, imagePath string
+			if image != "" {
+				if strings.HasPrefix(image, "http://") || strings.HasPrefix(image, "https://") {
+					imageURI = image
+					fmt.Printf("  Downloading image from %s...\n", image)
+				} else {
+					imagePath = image
+					fmt.Printf("  Using image: %s\n", image)
+				}
+			}
+
+			status, err := client.CreateVM(ctx, spec, imageURI, imagePath)
 			if err != nil {
 				return fmt.Errorf("failed to create VM: %w", err)
 			}
@@ -125,7 +167,13 @@ Examples:
 			fmt.Printf("  CPU: %d cores\n", cpu)
 			fmt.Printf("  Memory: %s (%s)\n", memory, formatBytes(memoryBytes))
 			fmt.Printf("  Disk: %s\n", disk)
-			fmt.Printf("  Network: %s\n", network)
+			if bridge != "" {
+				fmt.Printf("  Network: bridge %s (host subnet)\n", bridge)
+			} else if network != "" {
+				fmt.Printf("  Network: %s\n", network)
+			} else {
+				fmt.Printf("  Network: default (NAT with DHCP)\n")
+			}
 
 			return nil
 		},
@@ -134,9 +182,10 @@ Examples:
 	cmd.Flags().IntVar(&cpu, "cpu", 2, "Number of CPU cores")
 	cmd.Flags().StringVar(&memory, "memory", "2G", "Memory size (e.g., 2G, 4096M)")
 	cmd.Flags().StringVar(&disk, "disk", "20G", "Disk size (e.g., 100G, 50000M)")
-	cmd.Flags().StringVar(&image, "image", "", "OS image to use (optional)")
+	cmd.Flags().StringVar(&image, "image", "", "OS image to use (optional, URI or local path)")
 	cmd.Flags().StringVar(&node, "node", "", "Specific node to run on (optional)")
-	cmd.Flags().StringVar(&network, "network", "default", "Network to connect to")
+	cmd.Flags().StringVar(&network, "network", "default", "Libvirt network name (e.g., 'default' for NAT, 'private' for isolated)")
+	cmd.Flags().StringVar(&bridge, "bridge", "", "Bridge interface for host subnet (e.g., 'br0'). VM gets IP from real subnet. Overrides --network")
 	cmd.Flags().BoolVar(&autostart, "autostart", false, "Start VM automatically after creation")
 
 	return cmd
@@ -144,7 +193,7 @@ Examples:
 
 func newCreateVolumeCmd() *cobra.Command {
 	var (
-		size        string
+		size         string
 		storageClass string
 		node         string
 	)
@@ -219,4 +268,3 @@ Examples:
 
 	return cmd
 }
-

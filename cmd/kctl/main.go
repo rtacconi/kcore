@@ -48,6 +48,7 @@ Examples:
 	rootCmd.AddCommand(newGetCmd())
 	rootCmd.AddCommand(newDeleteCmd())
 	rootCmd.AddCommand(newDescribeCmd())
+	rootCmd.AddCommand(newPullCmd())
 	rootCmd.AddCommand(newApplyCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
@@ -66,4 +67,3 @@ func newVersionCmd() *cobra.Command {
 		},
 	}
 }
-

@@ -4,8 +4,8 @@ set -euo pipefail
 if [ $# -lt 2 ]; then
   echo "Usage: $0 <path/to.iso> </dev/device>"
   echo "Examples:"
-  echo "  macOS: $0 kcode.iso /dev/disk3   (will use /dev/rdisk3)"
-  echo "  Linux: $0 kcode.iso /dev/sdX"
+  echo "  macOS: $0 kcore.iso /dev/disk3   (will use /dev/rdisk3)"
+  echo "  Linux: $0 kcore.iso /dev/sdX"
   exit 1
 fi
 

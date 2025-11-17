@@ -1,6 +1,6 @@
 # Building ISO on Remote Ubuntu Server
 
-This document explains how to build the kcode ISO image on a remote Ubuntu server instead of locally on macOS.
+This document explains how to build the kcore ISO image on a remote Ubuntu server instead of locally on macOS.
 
 ## Why Build Remotely?
 
@@ -64,7 +64,7 @@ The script will:
    # On local machine
    scp -i ~/.ssh/id_ed25519_gmail \
        rtacconi@192.168.40.10:~/kcore-build/result-iso/*.iso \
-       ./kcode.iso
+       ./kcore.iso
    ```
 
 ## Configuration

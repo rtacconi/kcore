@@ -104,7 +104,7 @@ deploy:
 	@USER=$${USER:-root}; \
 	echo "Deploying to $$NODE as $$USER..."; \
 	scp bin/kcore-node-agent-linux-amd64 $$USER@$$NODE:/tmp/kcore-node-agent; \
-	ssh $$USER@$$NODE 'sudo mv /tmp/kcore-node-agent /opt/kcode/kcore-node-agent && sudo chmod +x /opt/kcode/kcore-node-agent && sudo systemctl restart kcode-node-agent'
+	ssh $$USER@$$NODE 'sudo mv /tmp/kcore-node-agent /opt/kcore/kcore-node-agent && sudo chmod +x /opt/kcore/kcore-node-agent && sudo systemctl restart kcore-node-agent'
 
 #
 # ISO and Node Management

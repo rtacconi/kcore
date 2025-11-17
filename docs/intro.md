@@ -6,10 +6,10 @@ A modern, minimal virtualization platform focused on **datacenters and home labs
 
 kcore is a clustered virtualization platform built with:
 
-- **Host OS**: NixOS-based "kcode" image (rebranded, minimal)
+- **Host OS**: NixOS-based "kcore" image (rebranded, minimal)
 - **Hypervisor**: KVM via libvirt
 - **Control Plane**: Go-based controller with SQLite state
-- **Node Agents**: Go-based agents running on kcode nodes
+- **Node Agents**: Go-based agents running on kcore nodes
 - **Communication**: gRPC with mTLS
 
 ## Architecture
@@ -24,7 +24,7 @@ kcore is a clustered virtualization platform built with:
     ┌────┴────┐
     │        │
 ┌───▼───┐ ┌──▼───┐
-│ Node  │ │ Node │  (kcode/NixOS, libvirt)
+│ Node  │ │ Node │  (kcore/NixOS, libvirt)
 │ Agent │ │ Agent│
 └───────┘ └──────┘
 ```
@@ -119,10 +119,10 @@ nodeNetworks:
 
 On each ThinkCentre node:
 
-1. Install kcode (NixOS-based) using the flake
-2. Copy node agent binary to `/opt/kcode/kcore-node-agent`
-3. Create `/etc/kcode/node-agent.yaml`
-4. Start the service: `systemctl start kcode-node-agent`
+1. Install kcore (NixOS-based) using the flake
+2. Copy node agent binary to `/opt/kcore/kcore-node-agent`
+3. Create `/etc/kcore/node-agent.yaml`
+4. Start the service: `systemctl start kcore-node-agent`
 
 Or use the deployment script:
 
@@ -142,10 +142,10 @@ Or use the deployment script:
 
 ## NixOS Flake
 
-Build a kcode node image:
+Build a kcore node image:
 
 ```bash
-nix build .#images.kcode-node
+nix build .#images.kcore-node
 ```
 
 This produces a bootable ISO/image that can be written to USB.
@@ -168,10 +168,10 @@ kcore/
 ├── api/                 # Generated protobuf code
 ├── proto/               # Protobuf definitions
 ├── modules/             # NixOS modules
-│   ├── kcode-minimal.nix
-│   ├── kcode-branding.nix
-│   ├── kcode-node-agent.nix
-│   └── kcode-libvirt.nix
+│   ├── kcore-minimal.nix
+│   ├── kcore-branding.nix
+│   ├── kcore-node-agent.nix
+│   └── kcore-libvirt.nix
 ├── examples/            # Example YAML specs
 └── scripts/             # Deployment scripts
 ```

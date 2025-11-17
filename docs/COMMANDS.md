@@ -86,8 +86,8 @@ Script: `scripts/list-services.sh`
 NODE_IP=192.168.40.146 make deploy-node
 ```
 Deploys to an existing kcore node (for updates):
-- Copies node-agent binary to `/opt/kcode/bin/`
-- Copies certificates to `/etc/kcode/`
+- Copies node-agent binary to `/opt/kcore/bin/`
+- Copies certificates to `/etc/kcore/`
 - Copies `node-agent.yaml` config
 
 **Note:** This is for updating nodes. Fresh installs get node-agent automatically from the ISO.  
@@ -230,7 +230,7 @@ make node-agent-nix
 NODE_IP=192.168.40.146 make deploy-node
 
 # Restart service on kcore node
-ssh root@192.168.40.146 systemctl restart kcode-node-agent
+ssh root@192.168.40.146 systemctl restart kcore-node-agent
 
 # Verify
 NODE_IP=192.168.40.146 make test-node
@@ -272,13 +272,13 @@ make node-agent-nix && \
 NODE_IP=192.168.40.146
 
 # node-agent logs
-ssh root@$NODE_IP journalctl -u kcode-node-agent -f
+ssh root@$NODE_IP journalctl -u kcore-node-agent -f
 
 # libvirtd logs
 ssh root@$NODE_IP journalctl -u libvirtd -f
 
 # All kcore services
-ssh root@$NODE_IP systemctl status kcode-node-agent libvirtd virtlogd
+ssh root@$NODE_IP systemctl status kcore-node-agent libvirtd virtlogd
 ```
 
 ### Quick VM Status
@@ -307,7 +307,7 @@ ssh root@$NODE_IP 'echo "SSH works"'
 nc -zv $NODE_IP 9091
 
 # Check services on node
-ssh root@$NODE_IP systemctl status kcode-node-agent
+ssh root@$NODE_IP systemctl status kcore-node-agent
 ```
 
 ### Certificate Issues
@@ -315,10 +315,10 @@ ssh root@$NODE_IP systemctl status kcode-node-agent
 NODE_IP=192.168.40.146
 
 # Check certs exist
-ssh root@$NODE_IP 'ls -l /etc/kcode/'
+ssh root@$NODE_IP 'ls -l /etc/kcore/'
 
 # Verify cert details
-ssh root@$NODE_IP 'openssl x509 -in /etc/kcode/node.crt -text -noout | grep -A2 "Subject:"'
+ssh root@$NODE_IP 'openssl x509 -in /etc/kcore/node.crt -text -noout | grep -A2 "Subject:"'
 
 # Redeploy certs
 devbox run deploy-node

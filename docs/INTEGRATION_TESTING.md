@@ -404,7 +404,7 @@ Error: Node agent not running at 192.168.40.146:9091
 **Solution**:
 ```bash
 # Check node status
-ssh root@192.168.40.146 'systemctl status kcode-node-agent'
+ssh root@192.168.40.146 'systemctl status kcore-node-agent'
 
 # Deploy if needed
 NODE_IP=192.168.40.146 make deploy-node

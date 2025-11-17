@@ -26,7 +26,7 @@ Phase 2 end-to-end testing is **complete and operational** with full TLS encrypt
 
 ### 1. Full TLS Communication
 - ✅ Certificates generated with IP SANs
-- ✅ Certificates deployed to node (`/etc/kcode/certs/`)
+- ✅ Certificates deployed to node (`/etc/kcore/certs/`)
 - ✅ Node-agent configured for mTLS
 - ✅ Test framework updated to support TLS
 - ✅ Controller→Node secure communication validated
@@ -175,15 +175,15 @@ IP.1 = 192.168.40.146
 IP.2 = 127.0.0.1
 ```
 
-**Node-Agent Config** (`/etc/kcode/node-agent.yaml`):
+**Node-Agent Config** (`/etc/kcore/node-agent.yaml`):
 ```yaml
 nodeId: kvm-node-01
 controllerAddr: "192.168.40.146:9090"
 
 tls:
-  caFile: "/etc/kcode/certs/ca.crt"
-  certFile: "/etc/kcode/certs/node.crt"
-  keyFile: "/etc/kcode/certs/node.key"
+  caFile: "/etc/kcore/certs/ca.crt"
+  certFile: "/etc/kcore/certs/node.crt"
+  keyFile: "/etc/kcore/certs/node.key"
 
 networks:
   default: br0
@@ -193,7 +193,7 @@ storage:
     local-dir:
       type: local-dir
       parameters:
-        path: /var/lib/kcode/disks
+        path: /var/lib/kcore/disks
 ```
 
 ### Test Helper TLS Support

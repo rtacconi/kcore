@@ -264,7 +264,7 @@ without manual intervention.
 - Set virtualisation.libvirtd.enable = true
 - Add virtlogd systemd service configuration
 - Include in embedded configuration.nix
-- Copy node-agent binary to /opt/kcode/bin
+- Copy node-agent binary to /opt/kcore/bin
 
 BREAKING CHANGE: Previous installations require manual
 libvirtd configuration. Fresh installs are fully automated.

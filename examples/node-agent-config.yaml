@@ -2,9 +2,9 @@ nodeId: kvm-node-01
 controllerAddr: "192.168.40.146:9090"
 
 tls:
-  caFile: "/etc/kcode/certs/ca.crt"
-  certFile: "/etc/kcode/certs/node.crt"
-  keyFile: "/etc/kcode/certs/node.key"
+  caFile: "/etc/kcore/certs/ca.crt"
+  certFile: "/etc/kcore/certs/node.crt"
+  keyFile: "/etc/kcore/certs/node.key"
 
 networks:
   default: br0
@@ -15,5 +15,5 @@ storage:
     local-dir:
       type: local-dir
       parameters:
-        path: /var/lib/kcode/disks
+        path: /var/lib/kcore/disks
 

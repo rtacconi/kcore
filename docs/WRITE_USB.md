@@ -33,7 +33,7 @@ The script will:
 
 3. **Write the ISO:**
    ```bash
-   sudo dd if=result-iso/iso/kcode-*.iso of=/dev/rdiskX bs=1m
+   sudo dd if=result-iso/iso/kcore-*.iso of=/dev/rdiskX bs=1m
    ```
    (Use `rdiskX` instead of `diskX` for faster writes)
 
@@ -57,7 +57,7 @@ The script will:
 
 3. **Write the ISO:**
    ```bash
-   sudo dd if=result-iso/iso/kcode-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
+   sudo dd if=result-iso/iso/kcore-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
    ```
    (Replace `sdX` with your device)
 

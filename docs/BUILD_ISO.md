@@ -1,4 +1,4 @@
-# Building and Installing kcode NixOS Image
+# Building and Installing kcore NixOS Image
 
 ## Prerequisites
 
@@ -45,7 +45,7 @@ nix build '.#nixosConfigurations.kvm-node-iso.config.system.build.isoImage' -o r
 
 ## Step 1: Build the ISO Image
 
-Choose one of the options above. The ISO will be in `result-iso/iso/kcode-*.iso`
+Choose one of the options above. The ISO will be in `result-iso/iso/kcore-*.iso`
 
 ## Step 2: Write ISO to USB Stick
 
@@ -59,7 +59,7 @@ diskutil list
 diskutil unmountDisk /dev/diskX
 
 # Write the ISO (replace /dev/diskX with your USB device, use rdiskX for faster writes)
-sudo dd if=result-iso/iso/kcode-*.iso of=/dev/rdiskX bs=1m
+sudo dd if=result-iso/iso/kcore-*.iso of=/dev/rdiskX bs=1m
 
 # Eject when done
 diskutil eject /dev/diskX
@@ -72,7 +72,7 @@ diskutil eject /dev/diskX
 lsblk
 
 # Write the ISO (replace /dev/sdX with your USB device)
-sudo dd if=result-iso/iso/kcode-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
+sudo dd if=result-iso/iso/kcore-*.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
 
 ## Step 3: Boot and Install
@@ -87,15 +87,15 @@ sudo dd if=result-iso/iso/kcode-*.iso of=/dev/sdX bs=4M status=progress oflag=sy
 
 After installation, you need to:
 
-1. **Copy TLS certificates** to `/etc/kcode/`:
+1. **Copy TLS certificates** to `/etc/kcore/`:
    ```bash
    # On your macOS machine, copy certificates:
-   scp certs/ca.crt certs/node.crt certs/node.key root@<thinkcentre-ip>:/etc/kcode/
+   scp certs/ca.crt certs/node.crt certs/node.key root@<thinkcentre-ip>:/etc/kcore/
    
    # Set correct permissions
    ssh root@<thinkcentre-ip>
-   chmod 644 /etc/kcode/*.crt
-   chmod 600 /etc/kcode/*.key
+   chmod 644 /etc/kcore/*.crt
+   chmod 600 /etc/kcore/*.key
    ```
 
 2. **Create node agent config**:
@@ -104,10 +104,10 @@ After installation, you need to:
    ssh root@<thinkcentre-ip>
    
    # Copy example config
-   cp /etc/kcode/node-agent.yaml.example /etc/kcode/node-agent.yaml
+   cp /etc/kcore/node-agent.yaml.example /etc/kcore/node-agent.yaml
    
    # Edit config with your controller IP
-   nano /etc/kcode/node-agent.yaml
+   nano /etc/kcore/node-agent.yaml
    # Update:
    # - nodeId: unique identifier for this node (e.g., "thinkcentre-01")
    # - controllerAddr: your macOS machine's IP:9090 (e.g., "192.168.1.100:9090")
@@ -115,9 +115,9 @@ After installation, you need to:
 
 3. **Start the node agent service**:
    ```bash
-   systemctl enable kcode-node-agent
-   systemctl start kcode-node-agent
-   systemctl status kcode-node-agent
+   systemctl enable kcore-node-agent
+   systemctl start kcore-node-agent
+   systemctl status kcore-node-agent
    ```
 
 ## Step 5: Verify Node Registration
@@ -131,13 +131,13 @@ On your controller (macOS), you should see logs like:
 
 ## Troubleshooting
 
-- **Node agent won't start**: Check `journalctl -u kcode-node-agent -n 50`
+- **Node agent won't start**: Check `journalctl -u kcore-node-agent -n 50`
 - **Can't connect to controller**: 
   - Verify firewall allows port 9090 on macOS
   - Check controller is running: `./bin/kcore-controller`
   - Verify network connectivity: `ping <controller-ip>`
 - **TLS errors**: 
-  - Ensure certificates are in `/etc/kcode/` with correct permissions (600 for keys, 644 for certs)
+  - Ensure certificates are in `/etc/kcore/` with correct permissions (600 for keys, 644 for certs)
   - Verify certificate CN matches (node cert should have CN=kcore-node-01 or similar)
 - **Network interface name**: The config assumes `enp1s0`. If your ThinkCentre uses a different interface name (check with `ip addr`), you'll need to update the flake before building:
   ```nix
@@ -151,6 +151,6 @@ On your controller (macOS), you should see logs like:
 - **KVM/QEMU**: Virtualization stack
 - **libvirt**: VM management library
 - **Network bridge**: Configured for br0
-- **Example config**: `/etc/kcode/node-agent.yaml.example`
+- **Example config**: `/etc/kcore/node-agent.yaml.example`
 - **Systemd service**: Auto-starts node agent on boot (after config is set up)
 

@@ -11,7 +11,7 @@ This document provides an overview of the kcore project structure.
 
 ### Node Agent (`cmd/node-agent/`)
 - Main entry point for node agents
-- Runs on kcode (NixOS) nodes
+- Runs on kcore (NixOS) nodes
 - Communicates with control plane via gRPC
 
 ## Packages
@@ -58,10 +58,10 @@ This document provides an overview of the kcore project structure.
 - `controller.proto`: Controller gRPC services (for future use)
 
 ## NixOS Modules (`modules/`)
-- `kcode-minimal.nix`: Minimal base system
-- `kcode-branding.nix`: kcode branding (GRUB, MOTD, etc.)
-- `kcode-node-agent.nix`: Node agent systemd service
-- `kcode-libvirt.nix`: Libvirt/KVM configuration
+- `kcore-minimal.nix`: Minimal base system
+- `kcore-branding.nix`: kcore branding (GRUB, MOTD, etc.)
+- `kcore-node-agent.nix`: Node agent systemd service
+- `kcore-libvirt.nix`: Libvirt/KVM configuration
 
 ## Examples (`examples/`)
 - `vm.yaml`: Example VM specification
@@ -76,7 +76,7 @@ This document provides an overview of the kcore project structure.
 ## Build System
 
 - `Makefile`: Build targets for controller, node-agent, proto generation
-- `flake.nix`: NixOS flake for building kcode node images
+- `flake.nix`: NixOS flake for building kcore node images
 - `go.mod`: Go module dependencies
 
 ## Next Steps

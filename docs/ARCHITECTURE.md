@@ -72,22 +72,22 @@ nix build '.#nixosConfigurations.kvm-node-iso.config.system.build.isoImage' \
 **Option A: Use existing certs**
 ```bash
 # Mount the ISO (or modify it before building)
-mkdir -p /mnt/iso/etc/kcode
-cp certs/*.{crt,key} /mnt/iso/etc/kcode/
-cp examples/node-agent.yaml /mnt/iso/etc/kcode/
+mkdir -p /mnt/iso/etc/kcore
+cp certs/*.{crt,key} /mnt/iso/etc/kcore/
+cp examples/node-agent.yaml /mnt/iso/etc/kcore/
 ```
 
 **Option B: Add certs to live USB after boot**
 ```bash
 # Boot USB, login as root
-mkdir -p /etc/kcode
+mkdir -p /etc/kcore
 
 # From your workstation:
-scp certs/*.{crt,key} root@<node-ip>:/etc/kcode/
-scp examples/node-agent.yaml root@<node-ip>:/etc/kcode/
+scp certs/*.{crt,key} root@<node-ip>:/etc/kcore/
+scp examples/node-agent.yaml root@<node-ip>:/etc/kcore/
 
 # Edit config with correct controller IP
-vi /etc/kcode/node-agent.yaml
+vi /etc/kcore/node-agent.yaml
 # Change controllerAddr to your controller's IP:port
 ```
 
@@ -107,20 +107,20 @@ The installer will:
 2. ✅ Unmount partitions
 3. ✅ Partition and format disk
 4. ✅ Install NixOS
-5. ✅ Copy node-agent binary to `/opt/kcode/bin/`
-6. ✅ Copy `/etc/kcode/*` (certs + config) if present
+5. ✅ Copy node-agent binary to `/opt/kcore/bin/`
+6. ✅ Copy `/etc/kcore/*` (certs + config) if present
 7. ✅ Copy SSH authorized keys if present
 8. ✅ Configure systemd services:
    - `libvirtd.service` (enabled)
    - `virtlogd.service` (enabled)
-   - `kcode-node-agent.service` (enabled)
+   - `kcore-node-agent.service` (enabled)
 
 ### 5. Reboot into Installed System
 
 System boots with:
 - ✅ libvirtd running
 - ✅ virtlogd running
-- ✅ node-agent running (if `/etc/kcode/node-agent.yaml` exists)
+- ✅ node-agent running (if `/etc/kcore/node-agent.yaml` exists)
 - ✅ node-agent automatically registers with controller
 - ✅ SSH enabled with your keys
 
@@ -135,7 +135,7 @@ KVM Node                          Controller
    │                                  │
    │  1. node-agent starts            │
    │                                  │
-   │  2. Reads /etc/kcode/node-agent.yaml
+   │  2. Reads /etc/kcore/node-agent.yaml
    │     Gets controller address      │
    │                                  │
    │  3. gRPC: RegisterNode() ───────>│
@@ -190,16 +190,16 @@ database:
   path: /path/to/kcore.db
 ```
 
-### Node Agent Config (`/etc/kcode/node-agent.yaml`)
+### Node Agent Config (`/etc/kcore/node-agent.yaml`)
 
 ```yaml
 nodeId: kvm-node-01
 controllerAddr: "192.168.1.100:9090"  # Your controller's IP
 
 tls:
-  caFile: /etc/kcode/ca.crt
-  certFile: /etc/kcode/node.crt
-  keyFile: /etc/kcode/node.key
+  caFile: /etc/kcore/ca.crt
+  certFile: /etc/kcore/node.crt
+  keyFile: /etc/kcore/node.key
 
 networks:
   default: br0
@@ -209,7 +209,7 @@ storage:
     local-dir:
       type: local-dir
       parameters:
-        path: /var/lib/kcode/disks
+        path: /var/lib/kcore/disks
 ```
 
 ---
@@ -225,7 +225,7 @@ multi-user.target
     │       │
     ├── libvirtd.service ←── virtlogd.service
     │       │
-    └── kcode-node-agent.service
+    └── kcore-node-agent.service
             │
             └── (requires: libvirtd.service)
 ```
@@ -236,10 +236,10 @@ multi-user.target
 # Check all kcore services
 systemctl status libvirtd
 systemctl status virtlogd
-systemctl status kcode-node-agent
+systemctl status kcore-node-agent
 
 # View logs
-journalctl -u kcode-node-agent -f
+journalctl -u kcore-node-agent -f
 journalctl -u libvirtd -f
 ```
 
@@ -267,7 +267,7 @@ You cannot "start" a node from the controller. The node must be running and will
 
 ### Q3: Is node-agent code in flake.nix?
 **YES!** (After this fix):
-- `install-to-disk` copies node-agent binary to `/opt/kcode/bin/`
+- `install-to-disk` copies node-agent binary to `/opt/kcore/bin/`
 - `install-to-disk` generates systemd service in `configuration.nix`
 - Node-agent auto-starts on boot via systemd
 
@@ -294,7 +294,7 @@ Follow QUICKSTART.md - after reboot, node-agent auto-starts.
 
 Check logs on node:
 ```bash
-journalctl -u kcode-node-agent -f
+journalctl -u kcore-node-agent -f
 ```
 
 Output:

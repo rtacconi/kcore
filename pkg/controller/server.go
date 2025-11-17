@@ -133,6 +133,47 @@ func (s *Server) Heartbeat(ctx context.Context, req *ctrlpb.HeartbeatRequest) (*
 	}, nil
 }
 
+func (s *Server) SyncVmState(ctx context.Context, req *ctrlpb.SyncVmStateRequest) (*ctrlpb.SyncVmStateResponse, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, exists := s.nodes[req.NodeId]
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "node not found: %s", req.NodeId)
+	}
+
+	// Get current VMs for this node
+	currentVMIDs := make(map[string]bool)
+	for _, vm := range req.Vms {
+		currentVMIDs[vm.Id] = true
+	}
+
+	// Remove VMs that no longer exist on the node
+	for vmID, nodeID := range s.vmToNode {
+		if nodeID == req.NodeId && !currentVMIDs[vmID] {
+			log.Printf("VM %s removed from node %s (no longer exists in libvirt)", vmID, req.NodeId)
+			delete(s.vmToNode, vmID)
+		}
+	}
+
+	// Add/update VMs that exist on the node
+	for _, vm := range req.Vms {
+		existingNode, exists := s.vmToNode[vm.Id]
+		if !exists {
+			log.Printf("VM %s discovered on node %s", vm.Id, req.NodeId)
+			s.vmToNode[vm.Id] = req.NodeId
+		} else if existingNode != req.NodeId {
+			log.Printf("VM %s moved from node %s to %s", vm.Id, existingNode, req.NodeId)
+			s.vmToNode[vm.Id] = req.NodeId
+		}
+	}
+
+	log.Printf("State sync from node %s: %d VMs", req.NodeId, len(req.Vms))
+	return &ctrlpb.SyncVmStateResponse{
+		Success: true,
+	}, nil
+}
+
 // VM Operations
 
 func (s *Server) CreateVm(ctx context.Context, req *ctrlpb.CreateVmRequest) (*ctrlpb.CreateVmResponse, error) {

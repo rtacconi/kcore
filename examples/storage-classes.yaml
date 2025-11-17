@@ -6,7 +6,7 @@ spec:
   driver: local-dir
   shared: false
   parameters:
-    path: /var/lib/kcode/disks
+    path: /var/lib/kcore/disks
 
 ---
 apiVersion: kcore.io/v1

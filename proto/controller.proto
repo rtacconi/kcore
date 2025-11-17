@@ -11,6 +11,7 @@ service Controller {
   // Node registration and heartbeat
   rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc SyncVmState(SyncVmStateRequest) returns (SyncVmStateResponse);
   
   // VM operations (forwarded to nodes)
   rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
@@ -44,6 +45,15 @@ message HeartbeatRequest {
 }
 
 message HeartbeatResponse {
+  bool success = 1;
+}
+
+message SyncVmStateRequest {
+  string node_id = 1;
+  repeated VmInfo vms = 2;  // Complete list of VMs currently on this node
+}
+
+message SyncVmStateResponse {
   bool success = 1;
 }
 

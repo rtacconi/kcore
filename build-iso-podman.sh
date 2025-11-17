@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build kcode ISO inside a Podman Linux container
+# Build kcore ISO inside a Podman Linux container
 
 set -euo pipefail
 
@@ -14,7 +14,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Building kcode ISO inside Podman Linux container      ║${NC}"
+echo -e "${BLUE}║  Building kcore ISO inside Podman Linux container      ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

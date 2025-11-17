@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build kcode ISO inside a Podman Linux container - NO SECCOMP VERSION
+# Build kcore ISO inside a Podman Linux container - NO SECCOMP VERSION
 # This version tries to work around macOS Podman seccomp issues
 
 set -euo pipefail
@@ -15,7 +15,7 @@ BLUE='\033[0;34m'
 NC='\033[0m'
 
 echo -e "${BLUE}╔══════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║  Building kcode ISO (no-seccomp workaround)             ║${NC}"
+echo -e "${BLUE}║  Building kcore ISO (no-seccomp workaround)             ║${NC}"
 echo -e "${BLUE}╚══════════════════════════════════════════════════════════╝${NC}"
 echo ""
 

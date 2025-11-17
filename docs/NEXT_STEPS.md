@@ -9,7 +9,7 @@
 5. **Node Agent** - Libvirt integration and gRPC server
 6. **Storage Drivers** - Local-dir and local-lvm implementations
 7. **YAML Specs** - Parsing for VM, Volume, StorageClass
-8. **NixOS Flake** - kcode branding and node configuration
+8. **NixOS Flake** - kcore branding and node configuration
 9. **Protobuf Code** - Generated Go code from .proto files
 10. **Controller Binary** - Built successfully (`bin/kcore-controller`)
 
@@ -85,16 +85,16 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=1 go build -o bin/kcore-node-agent-linux-amd
 
 ### Step 5: Configure Node Agent
 
-On each ThinkCentre node, create `/etc/kcode/node-agent.yaml`:
+On each ThinkCentre node, create `/etc/kcore/node-agent.yaml`:
 
 ```yaml
 nodeId: thinkcentre-01
 controllerAddr: "192.168.1.100:9090"  # Your Mac's IP
 
 tls:
-  caFile: /etc/kcode/ca.crt
-  certFile: /etc/kcode/node.crt
-  keyFile: /etc/kcode/node.key
+  caFile: /etc/kcore/ca.crt
+  certFile: /etc/kcore/node.crt
+  keyFile: /etc/kcore/node.key
 
 networks:
   default: br0
@@ -104,7 +104,7 @@ storage:
     local-dir:
       type: local-dir
       parameters:
-        path: /var/lib/kcode/disks
+        path: /var/lib/kcore/disks
     local-lvm:
       type: local-lvm
       parameters:
@@ -114,7 +114,7 @@ storage:
 Copy certificates to node:
 ```bash
 scp certs/ca.crt certs/node.crt certs/node.key user@thinkcentre:/tmp/
-ssh user@thinkcentre 'sudo mkdir -p /etc/kcode && sudo mv /tmp/{ca,node}.{crt,key} /etc/kcode/'
+ssh user@thinkcentre 'sudo mkdir -p /etc/kcore && sudo mv /tmp/{ca,node}.{crt,key} /etc/kcore/'
 ```
 
 ### Step 6: Deploy Node Agent
@@ -124,7 +124,7 @@ ssh user@thinkcentre 'sudo mkdir -p /etc/kcode && sudo mv /tmp/{ca,node}.{crt,ke
 scp bin/kcore-node-agent-linux-amd64 user@thinkcentre:/tmp/
 
 # Install and start service
-ssh user@thinkcentre 'sudo mkdir -p /opt/kcode && sudo mv /tmp/kcore-node-agent-linux-amd64 /opt/kcode/kcore-node-agent && sudo chmod +x /opt/kcode/kcore-node-agent && sudo systemctl restart kcode-node-agent'
+ssh user@thinkcentre 'sudo mkdir -p /opt/kcore && sudo mv /tmp/kcore-node-agent-linux-amd64 /opt/kcore/kcore-node-agent && sudo chmod +x /opt/kcore/kcore-node-agent && sudo systemctl restart kcore-node-agent'
 ```
 
 Or use the deployment script:
@@ -145,7 +145,7 @@ spec:
   driver: local-dir
   shared: false
   parameters:
-    path: /var/lib/kcode/disks
+    path: /var/lib/kcore/disks
 
 ---
 apiVersion: kcore.io/v1

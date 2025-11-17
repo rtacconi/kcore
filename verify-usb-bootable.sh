@@ -106,7 +106,7 @@ if [ "$MBR_SIG" = "55aa" ] || [ "$GPT_SIG" = "4546492050415254" ] || [ -n "$ISO9
     echo "  • Try USB 2.0 ports"
 else
     echo -e "${RED}✗ USB may not be bootable - boot signatures not found${NC}"
-    echo "  Consider rewriting with: sudo dd if=kcode.iso of=/dev/rdisk4 bs=4m conv=sync"
+    echo "  Consider rewriting with: sudo dd if=kcore.iso of=/dev/rdisk4 bs=4m conv=sync"
 fi
 
 

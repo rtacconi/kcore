@@ -214,7 +214,7 @@ make node-agent-nix
 NODE_IP=192.168.40.146 make deploy-node
 
 # Restart service
-ssh root@192.168.40.146 systemctl restart kcode-node-agent
+ssh root@192.168.40.146 systemctl restart kcore-node-agent
 ```
 
 ---

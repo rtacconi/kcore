@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	pb "github.com/kcore/kcore/api/node"
 	"github.com/spf13/cobra"
 )
 
@@ -22,7 +23,8 @@ func newDeleteCmd() *cobra.Command {
 Available resource types:
   vm       Delete a virtual machine
   volume   Delete a storage volume
-  network  Delete a virtual network`,
+  network  Delete a virtual network
+  image    Delete a cached VM image`,
 	}
 
 	cmd.PersistentFlags().BoolVar(&force, "force", false, "Force deletion without confirmation")
@@ -31,6 +33,7 @@ Available resource types:
 	cmd.AddCommand(newDeleteVMCmd(&force))
 	cmd.AddCommand(newDeleteVolumeCmd(&force))
 	cmd.AddCommand(newDeleteNetworkCmd(&force))
+	cmd.AddCommand(newDeleteImageCmd(&force))
 
 	return cmd
 }
@@ -98,7 +101,7 @@ Examples:
 	}
 }
 
-func newDeleteVolumeCmd(force *bool) *cobra.Command{
+func newDeleteVolumeCmd(force *bool) *cobra.Command {
 	return &cobra.Command{
 		Use:     "volume NAME",
 		Aliases: []string{"volumes", "vol"},
@@ -169,3 +172,71 @@ Examples:
 	}
 }
 
+func newDeleteImageCmd(force *bool) *cobra.Command {
+	return &cobra.Command{
+		Use:     "image NAME",
+		Aliases: []string{"images"},
+		Short:   "Delete a cached VM image",
+		Long: `Delete a cached VM image from the node.
+
+The image name can be either:
+  - Just the filename (e.g., "ubuntu-24.04-server-cloudimg-amd64.img")
+  - Full path (e.g., "/var/lib/kcore/images/ubuntu-24.04-server-cloudimg-amd64.img")
+
+By default, images that are in use by VMs cannot be deleted unless --force is used.
+
+Examples:
+  # Delete an image by filename
+  kctl delete image ubuntu-24.04-server-cloudimg-amd64.img
+
+  # Delete an image by full path
+  kctl delete image /var/lib/kcore/images/debian-12-nocloud-amd64.qcow2
+
+  # Force delete even if in use
+  kctl delete image ubuntu-24.04-server-cloudimg-amd64.img --force`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			imageName := args[0]
+
+			// Get connection info from flags or config
+			configPath, _ := cmd.Flags().GetString("config")
+			controllerFlag, _ := cmd.Flags().GetString("controller")
+			insecureFlag, _ := cmd.Flags().GetBool("insecure")
+
+			nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+			if err != nil {
+				return err
+			}
+
+			fmt.Printf("Deleting image '%s'...\n", imageName)
+
+			// Create client
+			client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+			if err != nil {
+				return fmt.Errorf("failed to connect to node: %w", err)
+			}
+			defer client.Close()
+
+			// Delete image
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+
+			resp, err := client.compute.DeleteImage(ctx, &pb.DeleteImageRequest{
+				Name:  imageName,
+				Force: *force,
+			})
+			if err != nil {
+				return fmt.Errorf("failed to delete image: %w", err)
+			}
+
+			if resp.Success {
+				fmt.Printf("✅ %s\n", resp.Message)
+			} else {
+				fmt.Printf("❌ %s\n", resp.Message)
+				return fmt.Errorf("failed to delete image")
+			}
+
+			return nil
+		},
+	}
+}

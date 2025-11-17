@@ -3,9 +3,12 @@ package node
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/kcore/kcore/api/node"
@@ -43,12 +46,124 @@ func NewServer(nodeID string, libvirtMgr *libvirtmgr.Manager, storageReg *storag
 	}, nil
 }
 
+// Image handling helpers
+
+const (
+	imagesCacheDir = "/var/lib/kcore/images"
+	disksDir       = "/var/lib/kcore/disks"
+)
+
+// downloadImage downloads an image from a URI to the cache directory
+func (s *Server) downloadImage(ctx context.Context, uri string) (string, error) {
+	// Ensure cache directory exists
+	if err := os.MkdirAll(imagesCacheDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create images cache directory: %w", err)
+	}
+
+	// Generate filename from URI
+	filename := filepath.Base(uri)
+	cachePath := filepath.Join(imagesCacheDir, filename)
+
+	// Check if already downloaded
+	if _, err := os.Stat(cachePath); err == nil {
+		log.Printf("Using cached image: %s", cachePath)
+		return cachePath, nil
+	}
+
+	log.Printf("Downloading image from %s...", uri)
+
+	// Download the image
+	resp, err := http.Get(uri)
+	if err != nil {
+		return "", fmt.Errorf("failed to download image: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to download image: HTTP %d", resp.StatusCode)
+	}
+
+	// Create temporary file
+	tmpPath := cachePath + ".tmp"
+	out, err := os.Create(tmpPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to create file: %w", err)
+	}
+	defer out.Close()
+
+	// Copy data
+	_, err = io.Copy(out, resp.Body)
+	if err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to write image: %w", err)
+	}
+
+	// Rename to final name
+	if err := os.Rename(tmpPath, cachePath); err != nil {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("failed to rename image: %w", err)
+	}
+
+	log.Printf("Image downloaded successfully: %s", cachePath)
+	return cachePath, nil
+}
+
+// prepareVMImage creates a COW (copy-on-write) disk from a base image for a VM
+func (s *Server) prepareVMImage(vmID, baseImagePath string) (string, error) {
+	// Ensure disks directory exists
+	if err := os.MkdirAll(disksDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create disks directory: %w", err)
+	}
+
+	// Create COW disk path
+	vmDiskPath := filepath.Join(disksDir, fmt.Sprintf("%s-disk.qcow2", vmID))
+
+	// Create COW disk using qemu-img
+	// This creates a thin-provisioned disk backed by the base image
+	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", baseImagePath, vmDiskPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to create COW disk: %w (output: %s)", err, string(output))
+	}
+
+	log.Printf("Created VM disk: %s (backed by %s)", vmDiskPath, baseImagePath)
+	return vmDiskPath, nil
+}
+
 // NodeCompute implementation
 
 func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node.CreateVmResponse, error) {
 	spec := req.Spec
 	if spec == nil {
 		return nil, status.Error(codes.InvalidArgument, "vm spec is required")
+	}
+
+	// Handle boot image if provided
+	var bootDiskPath string
+	if req.ImageUri != "" || req.ImagePath != "" {
+		var baseImagePath string
+		var err error
+
+		if req.ImageUri != "" {
+			// Download image from URI
+			baseImagePath, err = s.downloadImage(ctx, req.ImageUri)
+			if err != nil {
+				return nil, status.Errorf(codes.Internal, "failed to download image: %v", err)
+			}
+		} else {
+			// Use local image path
+			baseImagePath = req.ImagePath
+			if _, err := os.Stat(baseImagePath); err != nil {
+				return nil, status.Errorf(codes.InvalidArgument, "image file not found: %s", baseImagePath)
+			}
+		}
+
+		// Create COW disk for this VM
+		bootDiskPath, err = s.prepareVMImage(spec.Id, baseImagePath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to prepare VM image: %v", err)
+		}
+		log.Printf("VM %s will boot from %s", spec.Name, bootDiskPath)
 	}
 
 	// Convert protobuf spec to libvirt spec
@@ -61,6 +176,16 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 
 	// Convert disks
 	libvirtSpec.Disks = make([]libvirtmgr.DiskSpec, 0, len(spec.Disks))
+	
+	// Add boot disk first if we have an image
+	if bootDiskPath != "" {
+		libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
+			Name:          "vda",
+			BackendHandle: bootDiskPath,
+			Bus:           "virtio",
+			Device:        "vda",
+		})
+	}
 	for _, disk := range spec.Disks {
 		libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
 			Name:          disk.Name,
@@ -78,11 +203,32 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 			bridgeName = nic.Network // Fallback to network name
 		}
 
+		model := nic.Model
+		if model == "" {
+			model = "virtio" // Default to virtio
+		}
+
 		libvirtSpec.NICs = append(libvirtSpec.NICs, libvirtmgr.NICSpec{
 			Network:    bridgeName,
-			Model:      nic.Model,
+			Model:      model,
 			MACAddress: nic.MacAddress,
 		})
+	}
+
+	// If no NICs specified, add default NIC on libvirt "default" network with DHCP
+	if len(libvirtSpec.NICs) == 0 {
+		// Use network mapping if configured, otherwise use libvirt's "default" network
+		defaultNetwork := s.networks["default"]
+		if defaultNetwork == "" {
+			defaultNetwork = "default" // Use libvirt's default network (NAT with DHCP)
+		}
+
+		libvirtSpec.NICs = append(libvirtSpec.NICs, libvirtmgr.NICSpec{
+			Network:    defaultNetwork,
+			Model:      "virtio",
+			MACAddress: "", // Let libvirt generate MAC
+		})
+		log.Printf("Added default NIC on network '%s' (DHCP provided by libvirt)", defaultNetwork)
 	}
 
 	// Build domain XML
@@ -510,6 +656,163 @@ func (s *Server) GetNodeInfo(ctx context.Context, req *node.GetNodeInfoRequest) 
 		Usage:           usage,
 		StorageBackends: storageBackends,
 	}, nil
+}
+
+// Image management
+
+func (s *Server) PullImage(ctx context.Context, req *node.PullImageRequest) (*node.PullImageResponse, error) {
+	if req.Uri == "" {
+		return nil, status.Error(codes.InvalidArgument, "uri is required")
+	}
+
+	// Download the image (uses cache if already exists)
+	imagePath, err := s.downloadImage(ctx, req.Uri)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to download image: %v", err)
+	}
+
+	// Get file info
+	fileInfo, err := os.Stat(imagePath)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to stat image: %v", err)
+	}
+
+	// Check if it was cached (by seeing if it existed before we called downloadImage)
+	// For simplicity, we'll return false here since downloadImage logs when it uses cache
+	cached := false
+
+	log.Printf("Image pulled: %s (%d bytes)", imagePath, fileInfo.Size())
+
+	return &node.PullImageResponse{
+		Path:      imagePath,
+		SizeBytes: fileInfo.Size(),
+		Cached:    cached,
+	}, nil
+}
+
+func (s *Server) ListImages(ctx context.Context, req *node.ListImagesRequest) (*node.ListImagesResponse, error) {
+	// Ensure images directory exists
+	if err := os.MkdirAll(imagesCacheDir, 0755); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to access images directory: %v", err)
+	}
+
+	// Read directory
+	entries, err := os.ReadDir(imagesCacheDir)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to read images directory: %v", err)
+	}
+
+	// Build image list
+	var images []*node.ImageInfo
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		fullPath := filepath.Join(imagesCacheDir, entry.Name())
+		fileInfo, err := os.Stat(fullPath)
+		if err != nil {
+			log.Printf("Warning: failed to stat %s: %v", fullPath, err)
+			continue
+		}
+
+		images = append(images, &node.ImageInfo{
+			Name:      entry.Name(),
+			Path:      fullPath,
+			SizeBytes: fileInfo.Size(),
+			// CreatedAt can be added if needed
+		})
+	}
+
+	return &node.ListImagesResponse{
+		Images: images,
+	}, nil
+}
+
+func (s *Server) DeleteImage(ctx context.Context, req *node.DeleteImageRequest) (*node.DeleteImageResponse, error) {
+	if req.Name == "" {
+		return nil, status.Error(codes.InvalidArgument, "image name is required")
+	}
+
+	// Determine full path
+	var imagePath string
+	if filepath.IsAbs(req.Name) {
+		// Full path provided
+		imagePath = req.Name
+	} else {
+		// Just filename, assume it's in images cache directory
+		imagePath = filepath.Join(imagesCacheDir, req.Name)
+	}
+
+	// Check if image exists
+	if _, err := os.Stat(imagePath); os.IsNotExist(err) {
+		return &node.DeleteImageResponse{
+			Success: false,
+			Message: fmt.Sprintf("image not found: %s", req.Name),
+		}, nil
+	}
+
+	// Check if image is in use (check if any VM disk uses it as backing file)
+	if !req.Force {
+		inUse, err := s.isImageInUse(imagePath)
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "failed to check if image is in use: %v", err)
+		}
+		if inUse {
+			return &node.DeleteImageResponse{
+				Success: false,
+				Message: fmt.Sprintf("image '%s' is in use by one or more VMs. Use --force to delete anyway", req.Name),
+			}, nil
+		}
+	}
+
+	// Delete the image
+	if err := os.Remove(imagePath); err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to delete image: %v", err)
+	}
+
+	log.Printf("Image deleted: %s", imagePath)
+
+	return &node.DeleteImageResponse{
+		Success: true,
+		Message: fmt.Sprintf("Image deleted: %s", req.Name),
+	}, nil
+}
+
+// isImageInUse checks if an image is being used as a backing file by any VM disk
+func (s *Server) isImageInUse(imagePath string) (bool, error) {
+	// Read all VM disks
+	entries, err := os.ReadDir(disksDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil // No disks directory means no VMs using images
+		}
+		return false, err
+	}
+
+	// Check each disk to see if it uses this image as backing file
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+
+		diskPath := filepath.Join(disksDir, entry.Name())
+		
+		// Use qemu-img to check backing file
+		cmd := exec.Command("qemu-img", "info", diskPath)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			// Skip if we can't read this disk
+			continue
+		}
+
+		// Check if output contains the image path as backing file
+		if strings.Contains(string(output), imagePath) {
+			return true, nil
+		}
+	}
+
+	return false, nil
 }
 
 // Helper functions
