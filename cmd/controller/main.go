@@ -53,6 +53,7 @@ func main() {
 	// Create gRPC server with TLS
 	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
 	ctrlpb.RegisterControllerServer(grpcServer, server)
+	ctrlpb.RegisterControllerAdminServer(grpcServer, server)
 
 	// Start listening
 	listener, err := net.Listen("tcp", *listenAddr)

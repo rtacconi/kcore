@@ -202,3 +202,27 @@ message VmStatus {
   google.protobuf.Timestamp updated_at = 4;
 }
 
+// Management API messages (controller-side)
+
+message ApplyNixConfigRequest {
+  // Full contents to write to /etc/nixos/configuration.nix
+  string configuration_nix = 1;
+
+  // When true, run `nixos-rebuild switch` after writing the file.
+  // When false, only write the file.
+  bool rebuild = 2;
+}
+
+message ApplyNixConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ControllerAdmin service provides controller-level management operations.
+// For now this is intentionally unauthenticated and simple, for development use.
+service ControllerAdmin {
+  // ApplyNixConfig replaces the controller's /etc/nixos/configuration.nix with
+  // the provided content and (optionally) triggers a nixos-rebuild.
+  rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+}
+

@@ -1861,6 +1861,113 @@ func (x *StorageBackend) GetShared() bool {
 	return false
 }
 
+type ApplyNixConfigRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Full contents to write to /etc/nixos/configuration.nix
+	ConfigurationNix string `protobuf:"bytes,1,opt,name=configuration_nix,json=configurationNix,proto3" json:"configuration_nix,omitempty"`
+	// When true, run `nixos-rebuild switch` after writing the file.
+	// When false, only write the file.
+	Rebuild       bool `protobuf:"varint,2,opt,name=rebuild,proto3" json:"rebuild,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyNixConfigRequest) Reset() {
+	*x = ApplyNixConfigRequest{}
+	mi := &file_proto_node_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyNixConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyNixConfigRequest) ProtoMessage() {}
+
+func (x *ApplyNixConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_node_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyNixConfigRequest.ProtoReflect.Descriptor instead.
+func (*ApplyNixConfigRequest) Descriptor() ([]byte, []int) {
+	return file_proto_node_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *ApplyNixConfigRequest) GetConfigurationNix() string {
+	if x != nil {
+		return x.ConfigurationNix
+	}
+	return ""
+}
+
+func (x *ApplyNixConfigRequest) GetRebuild() bool {
+	if x != nil {
+		return x.Rebuild
+	}
+	return false
+}
+
+type ApplyNixConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyNixConfigResponse) Reset() {
+	*x = ApplyNixConfigResponse{}
+	mi := &file_proto_node_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyNixConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyNixConfigResponse) ProtoMessage() {}
+
+func (x *ApplyNixConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_node_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyNixConfigResponse.ProtoReflect.Descriptor instead.
+func (*ApplyNixConfigResponse) Descriptor() ([]byte, []int) {
+	return file_proto_node_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *ApplyNixConfigResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ApplyNixConfigResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 type PullImageRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Uri           string                 `protobuf:"bytes,1,opt,name=uri,proto3" json:"uri,omitempty"`   // HTTP/HTTPS URI to download image
@@ -1871,7 +1978,7 @@ type PullImageRequest struct {
 
 func (x *PullImageRequest) Reset() {
 	*x = PullImageRequest{}
-	mi := &file_proto_node_proto_msgTypes[34]
+	mi := &file_proto_node_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1883,7 +1990,7 @@ func (x *PullImageRequest) String() string {
 func (*PullImageRequest) ProtoMessage() {}
 
 func (x *PullImageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[34]
+	mi := &file_proto_node_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1896,7 +2003,7 @@ func (x *PullImageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullImageRequest.ProtoReflect.Descriptor instead.
 func (*PullImageRequest) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{34}
+	return file_proto_node_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *PullImageRequest) GetUri() string {
@@ -1924,7 +2031,7 @@ type PullImageResponse struct {
 
 func (x *PullImageResponse) Reset() {
 	*x = PullImageResponse{}
-	mi := &file_proto_node_proto_msgTypes[35]
+	mi := &file_proto_node_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1936,7 +2043,7 @@ func (x *PullImageResponse) String() string {
 func (*PullImageResponse) ProtoMessage() {}
 
 func (x *PullImageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[35]
+	mi := &file_proto_node_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1949,7 +2056,7 @@ func (x *PullImageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PullImageResponse.ProtoReflect.Descriptor instead.
 func (*PullImageResponse) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{35}
+	return file_proto_node_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PullImageResponse) GetPath() string {
@@ -1981,7 +2088,7 @@ type ListImagesRequest struct {
 
 func (x *ListImagesRequest) Reset() {
 	*x = ListImagesRequest{}
-	mi := &file_proto_node_proto_msgTypes[36]
+	mi := &file_proto_node_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1993,7 +2100,7 @@ func (x *ListImagesRequest) String() string {
 func (*ListImagesRequest) ProtoMessage() {}
 
 func (x *ListImagesRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[36]
+	mi := &file_proto_node_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2006,7 +2113,7 @@ func (x *ListImagesRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListImagesRequest.ProtoReflect.Descriptor instead.
 func (*ListImagesRequest) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{36}
+	return file_proto_node_proto_rawDescGZIP(), []int{38}
 }
 
 type ListImagesResponse struct {
@@ -2018,7 +2125,7 @@ type ListImagesResponse struct {
 
 func (x *ListImagesResponse) Reset() {
 	*x = ListImagesResponse{}
-	mi := &file_proto_node_proto_msgTypes[37]
+	mi := &file_proto_node_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2030,7 +2137,7 @@ func (x *ListImagesResponse) String() string {
 func (*ListImagesResponse) ProtoMessage() {}
 
 func (x *ListImagesResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[37]
+	mi := &file_proto_node_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2043,7 +2150,7 @@ func (x *ListImagesResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListImagesResponse.ProtoReflect.Descriptor instead.
 func (*ListImagesResponse) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{37}
+	return file_proto_node_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ListImagesResponse) GetImages() []*ImageInfo {
@@ -2065,7 +2172,7 @@ type ImageInfo struct {
 
 func (x *ImageInfo) Reset() {
 	*x = ImageInfo{}
-	mi := &file_proto_node_proto_msgTypes[38]
+	mi := &file_proto_node_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2077,7 +2184,7 @@ func (x *ImageInfo) String() string {
 func (*ImageInfo) ProtoMessage() {}
 
 func (x *ImageInfo) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[38]
+	mi := &file_proto_node_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2090,7 +2197,7 @@ func (x *ImageInfo) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ImageInfo.ProtoReflect.Descriptor instead.
 func (*ImageInfo) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{38}
+	return file_proto_node_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ImageInfo) GetName() string {
@@ -2131,7 +2238,7 @@ type DeleteImageRequest struct {
 
 func (x *DeleteImageRequest) Reset() {
 	*x = DeleteImageRequest{}
-	mi := &file_proto_node_proto_msgTypes[39]
+	mi := &file_proto_node_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2143,7 +2250,7 @@ func (x *DeleteImageRequest) String() string {
 func (*DeleteImageRequest) ProtoMessage() {}
 
 func (x *DeleteImageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[39]
+	mi := &file_proto_node_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2156,7 +2263,7 @@ func (x *DeleteImageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteImageRequest.ProtoReflect.Descriptor instead.
 func (*DeleteImageRequest) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{39}
+	return file_proto_node_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *DeleteImageRequest) GetName() string {
@@ -2183,7 +2290,7 @@ type DeleteImageResponse struct {
 
 func (x *DeleteImageResponse) Reset() {
 	*x = DeleteImageResponse{}
-	mi := &file_proto_node_proto_msgTypes[40]
+	mi := &file_proto_node_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2195,7 +2302,7 @@ func (x *DeleteImageResponse) String() string {
 func (*DeleteImageResponse) ProtoMessage() {}
 
 func (x *DeleteImageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_node_proto_msgTypes[40]
+	mi := &file_proto_node_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2208,7 +2315,7 @@ func (x *DeleteImageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteImageResponse.ProtoReflect.Descriptor instead.
 func (*DeleteImageResponse) Descriptor() ([]byte, []int) {
-	return file_proto_node_proto_rawDescGZIP(), []int{40}
+	return file_proto_node_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *DeleteImageResponse) GetSuccess() bool {
@@ -2345,7 +2452,13 @@ const file_proto_node_proto_rawDesc = "" +
 	"totalBytes\x12\x1d\n" +
 	"\n" +
 	"free_bytes\x18\x03 \x01(\x03R\tfreeBytes\x12\x16\n" +
-	"\x06shared\x18\x04 \x01(\bR\x06shared\"8\n" +
+	"\x06shared\x18\x04 \x01(\bR\x06shared\"^\n" +
+	"\x15ApplyNixConfigRequest\x12+\n" +
+	"\x11configuration_nix\x18\x01 \x01(\tR\x10configurationNix\x12\x18\n" +
+	"\arebuild\x18\x02 \x01(\bR\arebuild\"L\n" +
+	"\x16ApplyNixConfigResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage\"8\n" +
 	"\x10PullImageRequest\x12\x10\n" +
 	"\x03uri\x18\x01 \x01(\tR\x03uri\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\"^\n" +
@@ -2395,7 +2508,9 @@ const file_proto_node_proto_rawDesc = "" +
 	"\fAttachVolume\x12\x1f.kcore.node.AttachVolumeRequest\x1a .kcore.node.AttachVolumeResponse\x12Q\n" +
 	"\fDetachVolume\x12\x1f.kcore.node.DetachVolumeRequest\x1a .kcore.node.DetachVolumeResponse2Z\n" +
 	"\bNodeInfo\x12N\n" +
-	"\vGetNodeInfo\x12\x1e.kcore.node.GetNodeInfoRequest\x1a\x1f.kcore.node.GetNodeInfoResponseB!Z\x1fgithub.com/kcore/kcore/api/nodeb\x06proto3"
+	"\vGetNodeInfo\x12\x1e.kcore.node.GetNodeInfoRequest\x1a\x1f.kcore.node.GetNodeInfoResponse2d\n" +
+	"\tNodeAdmin\x12W\n" +
+	"\x0eApplyNixConfig\x12!.kcore.node.ApplyNixConfigRequest\x1a\".kcore.node.ApplyNixConfigResponseB!Z\x1fgithub.com/kcore/kcore/api/nodeb\x06proto3"
 
 var (
 	file_proto_node_proto_rawDescOnce sync.Once
@@ -2410,59 +2525,61 @@ func file_proto_node_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_node_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_node_proto_msgTypes = make([]protoimpl.MessageInfo, 42)
+var file_proto_node_proto_msgTypes = make([]protoimpl.MessageInfo, 44)
 var file_proto_node_proto_goTypes = []any{
-	(VmState)(0),                  // 0: kcore.node.VmState
-	(*VmSpec)(nil),                // 1: kcore.node.VmSpec
-	(*Disk)(nil),                  // 2: kcore.node.Disk
-	(*Nic)(nil),                   // 3: kcore.node.Nic
-	(*VmStatus)(nil),              // 4: kcore.node.VmStatus
-	(*CreateVmRequest)(nil),       // 5: kcore.node.CreateVmRequest
-	(*CreateVmResponse)(nil),      // 6: kcore.node.CreateVmResponse
-	(*UpdateVmRequest)(nil),       // 7: kcore.node.UpdateVmRequest
-	(*UpdateVmResponse)(nil),      // 8: kcore.node.UpdateVmResponse
-	(*DeleteVmRequest)(nil),       // 9: kcore.node.DeleteVmRequest
-	(*DeleteVmResponse)(nil),      // 10: kcore.node.DeleteVmResponse
-	(*StartVmRequest)(nil),        // 11: kcore.node.StartVmRequest
-	(*StartVmResponse)(nil),       // 12: kcore.node.StartVmResponse
-	(*StopVmRequest)(nil),         // 13: kcore.node.StopVmRequest
-	(*StopVmResponse)(nil),        // 14: kcore.node.StopVmResponse
-	(*RebootVmRequest)(nil),       // 15: kcore.node.RebootVmRequest
-	(*RebootVmResponse)(nil),      // 16: kcore.node.RebootVmResponse
-	(*GetVmRequest)(nil),          // 17: kcore.node.GetVmRequest
-	(*GetVmResponse)(nil),         // 18: kcore.node.GetVmResponse
-	(*ListVmsRequest)(nil),        // 19: kcore.node.ListVmsRequest
-	(*ListVmsResponse)(nil),       // 20: kcore.node.ListVmsResponse
-	(*VmInfo)(nil),                // 21: kcore.node.VmInfo
-	(*CreateVolumeRequest)(nil),   // 22: kcore.node.CreateVolumeRequest
-	(*CreateVolumeResponse)(nil),  // 23: kcore.node.CreateVolumeResponse
-	(*DeleteVolumeRequest)(nil),   // 24: kcore.node.DeleteVolumeRequest
-	(*DeleteVolumeResponse)(nil),  // 25: kcore.node.DeleteVolumeResponse
-	(*AttachVolumeRequest)(nil),   // 26: kcore.node.AttachVolumeRequest
-	(*AttachVolumeResponse)(nil),  // 27: kcore.node.AttachVolumeResponse
-	(*DetachVolumeRequest)(nil),   // 28: kcore.node.DetachVolumeRequest
-	(*DetachVolumeResponse)(nil),  // 29: kcore.node.DetachVolumeResponse
-	(*GetNodeInfoRequest)(nil),    // 30: kcore.node.GetNodeInfoRequest
-	(*GetNodeInfoResponse)(nil),   // 31: kcore.node.GetNodeInfoResponse
-	(*NodeCapacity)(nil),          // 32: kcore.node.NodeCapacity
-	(*NodeUsage)(nil),             // 33: kcore.node.NodeUsage
-	(*StorageBackend)(nil),        // 34: kcore.node.StorageBackend
-	(*PullImageRequest)(nil),      // 35: kcore.node.PullImageRequest
-	(*PullImageResponse)(nil),     // 36: kcore.node.PullImageResponse
-	(*ListImagesRequest)(nil),     // 37: kcore.node.ListImagesRequest
-	(*ListImagesResponse)(nil),    // 38: kcore.node.ListImagesResponse
-	(*ImageInfo)(nil),             // 39: kcore.node.ImageInfo
-	(*DeleteImageRequest)(nil),    // 40: kcore.node.DeleteImageRequest
-	(*DeleteImageResponse)(nil),   // 41: kcore.node.DeleteImageResponse
-	nil,                           // 42: kcore.node.CreateVolumeRequest.ParametersEntry
-	(*timestamppb.Timestamp)(nil), // 43: google.protobuf.Timestamp
+	(VmState)(0),                   // 0: kcore.node.VmState
+	(*VmSpec)(nil),                 // 1: kcore.node.VmSpec
+	(*Disk)(nil),                   // 2: kcore.node.Disk
+	(*Nic)(nil),                    // 3: kcore.node.Nic
+	(*VmStatus)(nil),               // 4: kcore.node.VmStatus
+	(*CreateVmRequest)(nil),        // 5: kcore.node.CreateVmRequest
+	(*CreateVmResponse)(nil),       // 6: kcore.node.CreateVmResponse
+	(*UpdateVmRequest)(nil),        // 7: kcore.node.UpdateVmRequest
+	(*UpdateVmResponse)(nil),       // 8: kcore.node.UpdateVmResponse
+	(*DeleteVmRequest)(nil),        // 9: kcore.node.DeleteVmRequest
+	(*DeleteVmResponse)(nil),       // 10: kcore.node.DeleteVmResponse
+	(*StartVmRequest)(nil),         // 11: kcore.node.StartVmRequest
+	(*StartVmResponse)(nil),        // 12: kcore.node.StartVmResponse
+	(*StopVmRequest)(nil),          // 13: kcore.node.StopVmRequest
+	(*StopVmResponse)(nil),         // 14: kcore.node.StopVmResponse
+	(*RebootVmRequest)(nil),        // 15: kcore.node.RebootVmRequest
+	(*RebootVmResponse)(nil),       // 16: kcore.node.RebootVmResponse
+	(*GetVmRequest)(nil),           // 17: kcore.node.GetVmRequest
+	(*GetVmResponse)(nil),          // 18: kcore.node.GetVmResponse
+	(*ListVmsRequest)(nil),         // 19: kcore.node.ListVmsRequest
+	(*ListVmsResponse)(nil),        // 20: kcore.node.ListVmsResponse
+	(*VmInfo)(nil),                 // 21: kcore.node.VmInfo
+	(*CreateVolumeRequest)(nil),    // 22: kcore.node.CreateVolumeRequest
+	(*CreateVolumeResponse)(nil),   // 23: kcore.node.CreateVolumeResponse
+	(*DeleteVolumeRequest)(nil),    // 24: kcore.node.DeleteVolumeRequest
+	(*DeleteVolumeResponse)(nil),   // 25: kcore.node.DeleteVolumeResponse
+	(*AttachVolumeRequest)(nil),    // 26: kcore.node.AttachVolumeRequest
+	(*AttachVolumeResponse)(nil),   // 27: kcore.node.AttachVolumeResponse
+	(*DetachVolumeRequest)(nil),    // 28: kcore.node.DetachVolumeRequest
+	(*DetachVolumeResponse)(nil),   // 29: kcore.node.DetachVolumeResponse
+	(*GetNodeInfoRequest)(nil),     // 30: kcore.node.GetNodeInfoRequest
+	(*GetNodeInfoResponse)(nil),    // 31: kcore.node.GetNodeInfoResponse
+	(*NodeCapacity)(nil),           // 32: kcore.node.NodeCapacity
+	(*NodeUsage)(nil),              // 33: kcore.node.NodeUsage
+	(*StorageBackend)(nil),         // 34: kcore.node.StorageBackend
+	(*ApplyNixConfigRequest)(nil),  // 35: kcore.node.ApplyNixConfigRequest
+	(*ApplyNixConfigResponse)(nil), // 36: kcore.node.ApplyNixConfigResponse
+	(*PullImageRequest)(nil),       // 37: kcore.node.PullImageRequest
+	(*PullImageResponse)(nil),      // 38: kcore.node.PullImageResponse
+	(*ListImagesRequest)(nil),      // 39: kcore.node.ListImagesRequest
+	(*ListImagesResponse)(nil),     // 40: kcore.node.ListImagesResponse
+	(*ImageInfo)(nil),              // 41: kcore.node.ImageInfo
+	(*DeleteImageRequest)(nil),     // 42: kcore.node.DeleteImageRequest
+	(*DeleteImageResponse)(nil),    // 43: kcore.node.DeleteImageResponse
+	nil,                            // 44: kcore.node.CreateVolumeRequest.ParametersEntry
+	(*timestamppb.Timestamp)(nil),  // 45: google.protobuf.Timestamp
 }
 var file_proto_node_proto_depIdxs = []int32{
 	2,  // 0: kcore.node.VmSpec.disks:type_name -> kcore.node.Disk
 	3,  // 1: kcore.node.VmSpec.nics:type_name -> kcore.node.Nic
 	0,  // 2: kcore.node.VmStatus.state:type_name -> kcore.node.VmState
-	43, // 3: kcore.node.VmStatus.created_at:type_name -> google.protobuf.Timestamp
-	43, // 4: kcore.node.VmStatus.updated_at:type_name -> google.protobuf.Timestamp
+	45, // 3: kcore.node.VmStatus.created_at:type_name -> google.protobuf.Timestamp
+	45, // 4: kcore.node.VmStatus.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 5: kcore.node.CreateVmRequest.spec:type_name -> kcore.node.VmSpec
 	4,  // 6: kcore.node.CreateVmResponse.status:type_name -> kcore.node.VmStatus
 	1,  // 7: kcore.node.UpdateVmRequest.spec:type_name -> kcore.node.VmSpec
@@ -2474,13 +2591,13 @@ var file_proto_node_proto_depIdxs = []int32{
 	4,  // 13: kcore.node.GetVmResponse.status:type_name -> kcore.node.VmStatus
 	21, // 14: kcore.node.ListVmsResponse.vms:type_name -> kcore.node.VmInfo
 	0,  // 15: kcore.node.VmInfo.state:type_name -> kcore.node.VmState
-	43, // 16: kcore.node.VmInfo.created_at:type_name -> google.protobuf.Timestamp
-	42, // 17: kcore.node.CreateVolumeRequest.parameters:type_name -> kcore.node.CreateVolumeRequest.ParametersEntry
+	45, // 16: kcore.node.VmInfo.created_at:type_name -> google.protobuf.Timestamp
+	44, // 17: kcore.node.CreateVolumeRequest.parameters:type_name -> kcore.node.CreateVolumeRequest.ParametersEntry
 	32, // 18: kcore.node.GetNodeInfoResponse.capacity:type_name -> kcore.node.NodeCapacity
 	33, // 19: kcore.node.GetNodeInfoResponse.usage:type_name -> kcore.node.NodeUsage
 	34, // 20: kcore.node.GetNodeInfoResponse.storage_backends:type_name -> kcore.node.StorageBackend
-	39, // 21: kcore.node.ListImagesResponse.images:type_name -> kcore.node.ImageInfo
-	43, // 22: kcore.node.ImageInfo.created_at:type_name -> google.protobuf.Timestamp
+	41, // 21: kcore.node.ListImagesResponse.images:type_name -> kcore.node.ImageInfo
+	45, // 22: kcore.node.ImageInfo.created_at:type_name -> google.protobuf.Timestamp
 	5,  // 23: kcore.node.NodeCompute.CreateVm:input_type -> kcore.node.CreateVmRequest
 	7,  // 24: kcore.node.NodeCompute.UpdateVm:input_type -> kcore.node.UpdateVmRequest
 	9,  // 25: kcore.node.NodeCompute.DeleteVm:input_type -> kcore.node.DeleteVmRequest
@@ -2489,32 +2606,34 @@ var file_proto_node_proto_depIdxs = []int32{
 	15, // 28: kcore.node.NodeCompute.RebootVm:input_type -> kcore.node.RebootVmRequest
 	17, // 29: kcore.node.NodeCompute.GetVm:input_type -> kcore.node.GetVmRequest
 	19, // 30: kcore.node.NodeCompute.ListVms:input_type -> kcore.node.ListVmsRequest
-	35, // 31: kcore.node.NodeCompute.PullImage:input_type -> kcore.node.PullImageRequest
-	37, // 32: kcore.node.NodeCompute.ListImages:input_type -> kcore.node.ListImagesRequest
-	40, // 33: kcore.node.NodeCompute.DeleteImage:input_type -> kcore.node.DeleteImageRequest
+	37, // 31: kcore.node.NodeCompute.PullImage:input_type -> kcore.node.PullImageRequest
+	39, // 32: kcore.node.NodeCompute.ListImages:input_type -> kcore.node.ListImagesRequest
+	42, // 33: kcore.node.NodeCompute.DeleteImage:input_type -> kcore.node.DeleteImageRequest
 	22, // 34: kcore.node.NodeStorage.CreateVolume:input_type -> kcore.node.CreateVolumeRequest
 	24, // 35: kcore.node.NodeStorage.DeleteVolume:input_type -> kcore.node.DeleteVolumeRequest
 	26, // 36: kcore.node.NodeStorage.AttachVolume:input_type -> kcore.node.AttachVolumeRequest
 	28, // 37: kcore.node.NodeStorage.DetachVolume:input_type -> kcore.node.DetachVolumeRequest
 	30, // 38: kcore.node.NodeInfo.GetNodeInfo:input_type -> kcore.node.GetNodeInfoRequest
-	6,  // 39: kcore.node.NodeCompute.CreateVm:output_type -> kcore.node.CreateVmResponse
-	8,  // 40: kcore.node.NodeCompute.UpdateVm:output_type -> kcore.node.UpdateVmResponse
-	10, // 41: kcore.node.NodeCompute.DeleteVm:output_type -> kcore.node.DeleteVmResponse
-	12, // 42: kcore.node.NodeCompute.StartVm:output_type -> kcore.node.StartVmResponse
-	14, // 43: kcore.node.NodeCompute.StopVm:output_type -> kcore.node.StopVmResponse
-	16, // 44: kcore.node.NodeCompute.RebootVm:output_type -> kcore.node.RebootVmResponse
-	18, // 45: kcore.node.NodeCompute.GetVm:output_type -> kcore.node.GetVmResponse
-	20, // 46: kcore.node.NodeCompute.ListVms:output_type -> kcore.node.ListVmsResponse
-	36, // 47: kcore.node.NodeCompute.PullImage:output_type -> kcore.node.PullImageResponse
-	38, // 48: kcore.node.NodeCompute.ListImages:output_type -> kcore.node.ListImagesResponse
-	41, // 49: kcore.node.NodeCompute.DeleteImage:output_type -> kcore.node.DeleteImageResponse
-	23, // 50: kcore.node.NodeStorage.CreateVolume:output_type -> kcore.node.CreateVolumeResponse
-	25, // 51: kcore.node.NodeStorage.DeleteVolume:output_type -> kcore.node.DeleteVolumeResponse
-	27, // 52: kcore.node.NodeStorage.AttachVolume:output_type -> kcore.node.AttachVolumeResponse
-	29, // 53: kcore.node.NodeStorage.DetachVolume:output_type -> kcore.node.DetachVolumeResponse
-	31, // 54: kcore.node.NodeInfo.GetNodeInfo:output_type -> kcore.node.GetNodeInfoResponse
-	39, // [39:55] is the sub-list for method output_type
-	23, // [23:39] is the sub-list for method input_type
+	35, // 39: kcore.node.NodeAdmin.ApplyNixConfig:input_type -> kcore.node.ApplyNixConfigRequest
+	6,  // 40: kcore.node.NodeCompute.CreateVm:output_type -> kcore.node.CreateVmResponse
+	8,  // 41: kcore.node.NodeCompute.UpdateVm:output_type -> kcore.node.UpdateVmResponse
+	10, // 42: kcore.node.NodeCompute.DeleteVm:output_type -> kcore.node.DeleteVmResponse
+	12, // 43: kcore.node.NodeCompute.StartVm:output_type -> kcore.node.StartVmResponse
+	14, // 44: kcore.node.NodeCompute.StopVm:output_type -> kcore.node.StopVmResponse
+	16, // 45: kcore.node.NodeCompute.RebootVm:output_type -> kcore.node.RebootVmResponse
+	18, // 46: kcore.node.NodeCompute.GetVm:output_type -> kcore.node.GetVmResponse
+	20, // 47: kcore.node.NodeCompute.ListVms:output_type -> kcore.node.ListVmsResponse
+	38, // 48: kcore.node.NodeCompute.PullImage:output_type -> kcore.node.PullImageResponse
+	40, // 49: kcore.node.NodeCompute.ListImages:output_type -> kcore.node.ListImagesResponse
+	43, // 50: kcore.node.NodeCompute.DeleteImage:output_type -> kcore.node.DeleteImageResponse
+	23, // 51: kcore.node.NodeStorage.CreateVolume:output_type -> kcore.node.CreateVolumeResponse
+	25, // 52: kcore.node.NodeStorage.DeleteVolume:output_type -> kcore.node.DeleteVolumeResponse
+	27, // 53: kcore.node.NodeStorage.AttachVolume:output_type -> kcore.node.AttachVolumeResponse
+	29, // 54: kcore.node.NodeStorage.DetachVolume:output_type -> kcore.node.DetachVolumeResponse
+	31, // 55: kcore.node.NodeInfo.GetNodeInfo:output_type -> kcore.node.GetNodeInfoResponse
+	36, // 56: kcore.node.NodeAdmin.ApplyNixConfig:output_type -> kcore.node.ApplyNixConfigResponse
+	40, // [40:57] is the sub-list for method output_type
+	23, // [23:40] is the sub-list for method input_type
 	23, // [23:23] is the sub-list for extension type_name
 	23, // [23:23] is the sub-list for extension extendee
 	0,  // [0:23] is the sub-list for field type_name
@@ -2531,9 +2650,9 @@ func file_proto_node_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_node_proto_rawDesc), len(file_proto_node_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   42,
+			NumMessages:   44,
 			NumExtensions: 0,
-			NumServices:   3,
+			NumServices:   4,
 		},
 		GoTypes:           file_proto_node_proto_goTypes,
 		DependencyIndexes: file_proto_node_proto_depIdxs,

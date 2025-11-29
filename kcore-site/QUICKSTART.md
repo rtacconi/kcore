@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get the kcore.ai marketing site running locally in 30 seconds.
+Get the kcore.systems marketing site running locally in 30 seconds.
 
 ## Start Local Server
 

@@ -34,6 +34,14 @@ service NodeInfo {
   rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
 }
 
+// NodeAdmin service provides node-level management operations
+// NOTE: For now this is intentionally unauthenticated and very simple, for development use only.
+service NodeAdmin {
+  // ApplyNixConfig replaces the node's /etc/nixos/configuration.nix with the
+  // provided content and (optionally) triggers a nixos-rebuild.
+  rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+}
+
 // VM specification
 message VmSpec {
   string id = 1;
@@ -221,6 +229,22 @@ message StorageBackend {
   int64 total_bytes = 2;
   int64 free_bytes = 3;
   bool shared = 4; // Whether volumes are visible from other nodes
+}
+
+// Management API messages
+
+message ApplyNixConfigRequest {
+  // Full contents to write to /etc/nixos/configuration.nix
+  string configuration_nix = 1;
+
+  // When true, run `nixos-rebuild switch` after writing the file.
+  // When false, only write the file.
+  bool rebuild = 2;
+}
+
+message ApplyNixConfigResponse {
+  bool success = 1;
+  string message = 2;
 }
 
 // Image management

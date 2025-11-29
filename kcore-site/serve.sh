@@ -5,7 +5,7 @@
 
 PORT=8000
 
-echo "🚀 Starting kcore.ai development server on port $PORT..."
+echo "🚀 Starting kcore.systems development server on port $PORT..."
 echo ""
 
 # Check if we're in a devbox shell

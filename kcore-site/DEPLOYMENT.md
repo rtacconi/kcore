@@ -1,6 +1,6 @@
-# kcore.ai Deployment Guide
+# kcore.systems Deployment Guide
 
-This guide covers deploying the kcore.ai marketing website to various hosting platforms.
+This guide covers deploying the kcore.systems marketing website to various hosting platforms.
 
 ## Quick Deploy Options
 
@@ -57,7 +57,7 @@ Or drag-and-drop deployment:
 cd kcore-site
 git init
 git add .
-git commit -m "Initial kcore.ai website"
+git commit -m "Initial kcore.systems website"
 git branch -M gh-pages
 git remote add origin https://github.com/yourusername/kcore-site.git
 git push -u origin gh-pages
@@ -83,7 +83,7 @@ git push -u origin gh-pages
 server {
     listen 80;
     listen [::]:80;
-    server_name kcore.ai www.kcore.ai;
+    server_name kcore.systems www.kcore.systems;
 
     # Redirect to HTTPS
     return 301 https://$server_name$request_uri;
@@ -92,11 +92,11 @@ server {
 server {
     listen 443 ssl http2;
     listen [::]:443 ssl http2;
-    server_name kcore.ai www.kcore.ai;
+    server_name kcore.systems www.kcore.systems;
 
     # SSL Configuration
-    ssl_certificate /etc/letsencrypt/live/kcore.ai/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/kcore.ai/privkey.pem;
+    ssl_certificate /etc/letsencrypt/live/kcore.systems/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/kcore.systems/privkey.pem;
 
     # Security headers
     add_header X-Frame-Options "SAMEORIGIN" always;
@@ -127,8 +127,8 @@ server {
 
 ```apache
 <VirtualHost *:80>
-    ServerName kcore.ai
-    ServerAlias www.kcore.ai
+    ServerName kcore.systems
+    ServerAlias www.kcore.systems
     
     DocumentRoot /var/www/kcore-site
     
@@ -145,14 +145,14 @@ server {
 </VirtualHost>
 
 <VirtualHost *:443>
-    ServerName kcore.ai
-    ServerAlias www.kcore.ai
+    ServerName kcore.systems
+    ServerAlias www.kcore.systems
     
     DocumentRoot /var/www/kcore-site
     
     SSLEngine on
-    SSLCertificateFile /etc/letsencrypt/live/kcore.ai/fullchain.pem
-    SSLCertificateKeyFile /etc/letsencrypt/live/kcore.ai/privkey.pem
+    SSLCertificateFile /etc/letsencrypt/live/kcore.systems/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/kcore.systems/privkey.pem
     
     <Directory /var/www/kcore-site>
         Options -Indexes +FollowSymLinks
@@ -203,22 +203,22 @@ pip install awscli
 aws configure
 
 # Create S3 bucket
-aws s3 mb s3://kcore.ai
+aws s3 mb s3://kcore.systems
 
 # Enable static website hosting
-aws s3 website s3://kcore.ai \
+aws s3 website s3://kcore.systems \
     --index-document index.html \
     --error-document index.html
 
 # Upload files
 cd kcore-site
-aws s3 sync . s3://kcore.ai \
+aws s3 sync . s3://kcore.systems \
     --acl public-read \
     --cache-control max-age=31536000,public
 
 # Create CloudFront distribution (optional, for CDN)
 aws cloudfront create-distribution \
-    --origin-domain-name kcore.ai.s3.amazonaws.com
+    --origin-domain-name kcore.systems.s3.amazonaws.com
 ```
 
 ## Domain Configuration
@@ -246,7 +246,7 @@ Point your domain to the hosting service:
 sudo apt install certbot python3-certbot-nginx
 
 # Get certificate
-sudo certbot --nginx -d kcore.ai -d www.kcore.ai
+sudo certbot --nginx -d kcore.systems -d www.kcore.systems
 
 # Auto-renewal is configured automatically
 ```
@@ -301,7 +301,7 @@ Add analytics by inserting before `</body>` in HTML files:
 
 ### Plausible (Privacy-friendly)
 ```html
-<script defer data-domain="kcore.ai" src="https://plausible.io/js/script.js"></script>
+<script defer data-domain="kcore.systems" src="https://plausible.io/js/script.js"></script>
 ```
 
 ## Monitoring
@@ -333,7 +333,7 @@ tar -czf kcore-site-backup-$(date +%Y%m%d).tar.gz /var/www/kcore-site
 ## Troubleshooting
 
 ### Site not loading
-1. Check DNS propagation: `dig kcore.ai`
+1. Check DNS propagation: `dig kcore.systems`
 2. Verify hosting service status
 3. Check server logs: `tail -f /var/log/nginx/error.log`
 
@@ -343,7 +343,7 @@ tar -czf kcore-site-backup-$(date +%Y%m%d).tar.gz /var/www/kcore-site
 3. Verify CSS file is being served: Check Network tab in DevTools
 
 ### SSL issues
-1. Verify certificate is valid: `openssl s_client -connect kcore.ai:443`
+1. Verify certificate is valid: `openssl s_client -connect kcore.systems:443`
 2. Check certificate expiration
 3. Ensure auto-renewal is working
 

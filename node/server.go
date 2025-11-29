@@ -10,9 +10,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kcore/kcore/api/node"
 	libvirtmgr "github.com/kcore/kcore/node/libvirt"
+	"github.com/kcore/kcore/node/ovn"
 	"github.com/kcore/kcore/node/storage"
 	libvirt "github.com/libvirt/libvirt-go"
 	"google.golang.org/grpc/codes"
@@ -23,12 +25,15 @@ type Server struct {
 	node.UnimplementedNodeComputeServer
 	node.UnimplementedNodeStorageServer
 	node.UnimplementedNodeInfoServer
+	node.UnimplementedNodeAdminServer
 
 	libvirtMgr *libvirtmgr.Manager
 	storageReg *storage.DriverRegistry
 	networks   map[string]string // network name -> bridge name
 	nodeID     string
 	hostname   string
+
+	ovn *ovn.Client
 }
 
 func NewServer(nodeID string, libvirtMgr *libvirtmgr.Manager, storageReg *storage.DriverRegistry, networks map[string]string) (*Server, error) {
@@ -37,12 +42,78 @@ func NewServer(nodeID string, libvirtMgr *libvirtmgr.Manager, storageReg *storag
 		hostname = nodeID
 	}
 
+	// Best-effort OVN integration: if ovn-nbctl is present, configure the
+	// default logical switch and DHCP for 192.168.200.0/24. If anything
+	// fails here we log and continue without OVN (VMs will still attach to
+	// br-int and can use whatever DHCP is configured externally).
+	ovnClient := ovn.NewClient("kcore-net", "192.168.200.0/24", "192.168.200.1")
+	if ovnClient != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := ovnClient.EnsureNetwork(ctx); err != nil {
+			log.Printf("OVN: failed to ensure network: %v", err)
+			ovnClient = nil
+		} else {
+			log.Printf("OVN: using logical switch kcore-net (cidr=192.168.200.0/24, router=192.168.200.1)")
+		}
+	}
+
 	return &Server{
 		libvirtMgr: libvirtMgr,
 		storageReg: storageReg,
 		networks:   networks,
 		nodeID:     nodeID,
 		hostname:   hostname,
+		ovn:        ovnClient,
+	}, nil
+}
+
+// NodeAdmin implementation
+
+// ApplyNixConfig writes the provided configuration.nix to /etc/nixos/configuration.nix
+// and optionally runs `nixos-rebuild switch`. This is intentionally very simple and
+// unauthenticated for now, for development and lab use only.
+func (s *Server) ApplyNixConfig(ctx context.Context, req *node.ApplyNixConfigRequest) (*node.ApplyNixConfigResponse, error) {
+	if req.GetConfigurationNix() == "" {
+		return &node.ApplyNixConfigResponse{
+			Success: false,
+			Message: "configuration_nix is empty",
+		}, nil
+	}
+
+	const cfgPath = "/etc/nixos/configuration.nix"
+
+	// Ensure directory exists
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0755); err != nil {
+		return &node.ApplyNixConfigResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to create /etc/nixos: %v", err),
+		}, nil
+	}
+
+	// Write configuration file
+	if err := os.WriteFile(cfgPath, []byte(req.GetConfigurationNix()), 0644); err != nil {
+		return &node.ApplyNixConfigResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to write %s: %v", cfgPath, err),
+		}, nil
+	}
+
+	// Optionally trigger a rebuild
+	if req.GetRebuild() {
+		cmd := exec.CommandContext(ctx, "nixos-rebuild", "switch")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return &node.ApplyNixConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("nixos-rebuild switch failed: %v (output: %s)", err, strings.TrimSpace(string(output))),
+			}, nil
+		}
+	}
+
+	return &node.ApplyNixConfigResponse{
+		Success: true,
+		Message: "configuration applied",
 	}, nil
 }
 
@@ -119,8 +190,11 @@ func (s *Server) prepareVMImage(vmID, baseImagePath string) (string, error) {
 	vmDiskPath := filepath.Join(disksDir, fmt.Sprintf("%s-disk.qcow2", vmID))
 
 	// Create COW disk using qemu-img
-	// This creates a thin-provisioned disk backed by the base image
-	cmd := exec.Command("qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", baseImagePath, vmDiskPath)
+	// This creates a thin-provisioned disk backed by the base image.
+	// On NixOS, qemu-img lives at /run/current-system/sw/bin/qemu-img, which
+	// may not be on the restricted systemd service PATH, so we call it by
+	// absolute path.
+	cmd := exec.Command("/run/current-system/sw/bin/qemu-img", "create", "-f", "qcow2", "-F", "qcow2", "-b", baseImagePath, vmDiskPath)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to create COW disk: %w (output: %s)", err, string(output))
@@ -128,6 +202,64 @@ func (s *Server) prepareVMImage(vmID, baseImagePath string) (string, error) {
 
 	log.Printf("Created VM disk: %s (backed by %s)", vmDiskPath, baseImagePath)
 	return vmDiskPath, nil
+}
+
+// prepareCloudInitDisk creates a NoCloud seed ISO for cloud-init so that the
+// guest can be configured with a known root password and basic metadata.
+// We keep this intentionally minimal: just root password "kcore" and a
+// stable instance ID / hostname.
+func (s *Server) prepareCloudInitDisk(vmID, vmName string) (string, error) {
+	baseDir := filepath.Join("/var/lib/kcore/cloud-init", vmID)
+	if err := os.MkdirAll(baseDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to create cloud-init dir: %w", err)
+	}
+
+	userDataPath := filepath.Join(baseDir, "user-data")
+	metaDataPath := filepath.Join(baseDir, "meta-data")
+	seedPath := filepath.Join(baseDir, "seed.iso")
+
+	// Cloud-config used for all VMs booting from an image:
+	// - Set root password to "kcore"
+	// - Enable password-based SSH auth
+	// - Configure the primary virtio NIC (ens2) for DHCP using network v2
+	userData := `#cloud-config
+chpasswd:
+  list: |
+    root:kcore
+  expire: False
+ssh_pwauth: True
+disable_root: false
+network:
+  version: 2
+  ethernets:
+    ens2:
+      dhcp4: true
+`
+
+	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmID, vmName)
+
+	if err := os.WriteFile(userDataPath, []byte(userData), 0600); err != nil {
+		return "", fmt.Errorf("failed to write user-data: %w", err)
+	}
+	if err := os.WriteFile(metaDataPath, []byte(metaData), 0600); err != nil {
+		return "", fmt.Errorf("failed to write meta-data: %w", err)
+	}
+
+	// Use cloud-localds from cloud-utils to build the seed ISO.
+	// Prefer the per-user Nix profile location (how we installed it on the node),
+	// and fall back to the system profile if present.
+	cloudLocalDS := "/root/.nix-profile/bin/cloud-localds"
+	if _, err := os.Stat(cloudLocalDS); err != nil {
+		cloudLocalDS = "/run/current-system/sw/bin/cloud-localds"
+	}
+	cmd := exec.Command(cloudLocalDS, "-v", seedPath, userDataPath, metaDataPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("failed to create cloud-init seed ISO: %w (output: %s)", err, strings.TrimSpace(string(output)))
+	}
+
+	log.Printf("Created cloud-init seed ISO for VM %s at %s", vmName, seedPath)
+	return seedPath, nil
 }
 
 // NodeCompute implementation
@@ -176,7 +308,7 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 
 	// Convert disks
 	libvirtSpec.Disks = make([]libvirtmgr.DiskSpec, 0, len(spec.Disks))
-	
+
 	// Add boot disk first if we have an image
 	if bootDiskPath != "" {
 		libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
@@ -185,6 +317,22 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 			Bus:           "virtio",
 			Device:        "vda",
 		})
+
+		// When we boot from an image, also attach a cloud-init NoCloud seed ISO
+		// so we can guarantee a known root password and basic metadata, without
+		// needing external cloud-init infrastructure.
+		if seedPath, err := s.prepareCloudInitDisk(spec.Id, spec.Name); err != nil {
+			log.Printf("Warning: failed to prepare cloud-init disk for VM %s: %v", spec.Name, err)
+		} else {
+			// Attach the seed ISO as a separate disk. We treat it as a regular
+			// virtio disk; cloud-init will discover the filesystem by label.
+			libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
+				Name:          "cloud-init",
+				BackendHandle: seedPath,
+				Bus:           "virtio",
+				Device:        "vdb",
+			})
+		}
 	}
 	for _, disk := range spec.Disks {
 		libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
@@ -208,10 +356,26 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 			model = "virtio" // Default to virtio
 		}
 
+		ovnIfaceID := ""
+		// For advanced mode on br-int, allocate an OVN iface-id that we can
+		// bind to a logical port in OVN. This is optional: if OVN is not
+		// available, we just leave it empty and fallback to current behavior.
+		if bridgeName == "br-int" && s.ovn != nil {
+			ovnIfaceID = ovn.NewIfaceID(spec.Id)
+			go func(id string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				if err := s.ovn.EnsurePortForVM(ctx, id, nic.MacAddress); err != nil {
+					log.Printf("OVN: failed to ensure port for VM %s iface %s: %v", spec.Name, id, err)
+				}
+			}(ovnIfaceID)
+		}
+
 		libvirtSpec.NICs = append(libvirtSpec.NICs, libvirtmgr.NICSpec{
 			Network:    bridgeName,
 			Model:      model,
 			MACAddress: nic.MacAddress,
+			InterfaceID: ovnIfaceID,
 		})
 	}
 
@@ -797,9 +961,9 @@ func (s *Server) isImageInUse(imagePath string) (bool, error) {
 		}
 
 		diskPath := filepath.Join(disksDir, entry.Name())
-		
-		// Use qemu-img to check backing file
-		cmd := exec.Command("qemu-img", "info", diskPath)
+
+		// Use qemu-img to check backing file (see note in prepareVMImage)
+		cmd := exec.Command("/run/current-system/sw/bin/qemu-img", "info", diskPath)
 		output, err := cmd.CombinedOutput()
 		if err != nil {
 			// Skip if we can't read this disk

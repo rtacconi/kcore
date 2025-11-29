@@ -108,7 +108,8 @@ in
     systemd.services.kcore-node-agent = {
       description = "kcore Node Agent";
       wantedBy = [ "multi-user.target" ];
-      after = [ "network.target" "libvirtd.service" ];
+      after = [ "network.target" "libvirtd.service" ] ++ (lib.optional config.services.kcore.ovs.enable "openvswitch.service");
+      wants = (lib.optional config.services.kcore.ovs.enable "openvswitch.service");
 
       serviceConfig = {
         Type = "simple";

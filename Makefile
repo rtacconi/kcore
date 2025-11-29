@@ -1,4 +1,4 @@
-.PHONY: all build controller kctl install-kctl-local install-kctl-system node-agent proto test clean deploy
+.PHONY: all build controller kctl install-kctl-local install-kctl-system node-agent proto test clean deploy deploy-controller
 .PHONY: build-iso create-vm delete-vm test-node list-services deploy-node deploy-node-agent write-usb help
 
 all: proto build
@@ -11,10 +11,10 @@ proto:
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/*.proto
 
-# Build controller (macOS)
+# Build controller (Linux/amd64 binary for deployment)
 controller:
-	@echo "Building controller..."
-	@go build -o bin/kcore-controller ./cmd/controller
+	@echo "Building controller for Linux/amd64..."
+	@CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o bin/kcore-controller ./cmd/controller
 
 # Build kctl CLI (macOS ARM64)
 kctl:
@@ -106,6 +106,18 @@ deploy:
 	scp bin/kcore-node-agent-linux-amd64 $$USER@$$NODE:/tmp/kcore-node-agent; \
 	ssh $$USER@$$NODE 'sudo mv /tmp/kcore-node-agent /opt/kcore/kcore-node-agent && sudo chmod +x /opt/kcore/kcore-node-agent && sudo systemctl restart kcore-node-agent'
 
+# Deploy controller binary to controller host
+# Usage: make deploy-controller CONTROLLER=192.168.40.10 USER=root
+deploy-controller:
+	@if [ -z "$(CONTROLLER)" ]; then \
+		echo "Error: CONTROLLER variable required. Usage: make deploy-controller CONTROLLER=192.168.40.10 USER=root"; \
+		exit 1; \
+	fi
+	@USER=$${USER:-root}; \
+	echo "Deploying controller to $$CONTROLLER as $$USER..."; \
+	scp bin/kcore-controller $$USER@$$CONTROLLER:/tmp/kcore-controller; \
+	ssh $$USER@$$CONTROLLER 'sudo mv /tmp/kcore-controller /usr/local/bin/kcore-controller && sudo chmod +x /usr/local/bin/kcore-controller && sudo systemctl restart kcore-controller'
+
 #
 # ISO and Node Management
 #
@@ -114,6 +126,11 @@ deploy:
 # Usage: make build-iso
 build-iso:
 	@./scripts/build-iso.sh
+
+# Build ISO on remote Ubuntu server (faster, native Linux build)
+# Usage: make build-iso-remote
+build-iso-remote:
+	@./build-iso-remote.sh
 
 # Create a test VM on node
 # Usage: NODE_IP=192.168.40.146 make create-vm

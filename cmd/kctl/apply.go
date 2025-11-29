@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -35,25 +37,51 @@ Examples:
 				return fmt.Errorf("filename required: use -f or --filename")
 			}
 
-			if dryRun {
-				fmt.Printf("🔍 Dry run mode - showing what would be applied:\n\n")
-			}
-
 			// Read file
 			data, err := os.ReadFile(filename)
 			if err != nil {
 				return fmt.Errorf("failed to read file: %w", err)
 			}
 
-			fmt.Printf("Applying configuration from %s...\n", filename)
-			fmt.Printf("\n%s\n\n", string(data))
-
 			if dryRun {
+				fmt.Printf("Applying configuration from %s (dry run):\n\n", filename)
+				fmt.Printf("%s\n\n", string(data))
 				fmt.Printf("✅ Dry run complete - no changes made\n")
-			} else {
-				fmt.Printf("✅ Configuration applied successfully\n")
+				return nil
 			}
 
+			fmt.Printf("Applying configuration from %s to controller...\n", filename)
+
+			// Use global flags provided on root command
+			root := cmd.Root()
+			configPath, _ := root.PersistentFlags().GetString("config")
+			controllerAddr, _ := root.PersistentFlags().GetString("controller")
+			insecureFlag, _ := root.PersistentFlags().GetBool("insecure")
+
+			ctrlAddr, insecureTLS, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerAddr, insecureFlag)
+			if err != nil {
+				return err
+			}
+
+			client, err := NewControllerAdminClient(ctrlAddr, insecureTLS, certFile, keyFile, caFile)
+			if err != nil {
+				return fmt.Errorf("failed to create controller admin client: %w", err)
+			}
+			defer client.Close()
+
+			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+
+			// For now, always rebuild after applying
+			resp, err := client.ApplyNixConfig(ctx, string(data), true)
+			if err != nil {
+				return fmt.Errorf("ApplyNixConfig RPC failed: %w", err)
+			}
+			if !resp.GetSuccess() {
+				return fmt.Errorf("controller reported failure: %s", resp.GetMessage())
+			}
+
+			fmt.Printf("✅ Controller configuration applied: %s\n", resp.GetMessage())
 			return nil
 		},
 	}
@@ -64,4 +92,3 @@ Examples:
 
 	return cmd
 }
-

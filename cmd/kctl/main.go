@@ -5,10 +5,8 @@ import (
 	"os"
 
 	"github.com/spf13/cobra"
-)
 
-var (
-	version = "0.1.0"
+	kversion "github.com/kcore/kcore/pkg/version"
 )
 
 func main() {
@@ -35,7 +33,7 @@ Examples:
 
   # List all nodes
   kctl get nodes`,
-		Version: version,
+		Version: kversion.Version,
 	}
 
 	// Global flags
@@ -46,6 +44,7 @@ Examples:
 	// Add subcommands
 	rootCmd.AddCommand(newCreateCmd())
 	rootCmd.AddCommand(newGetCmd())
+	rootCmd.AddCommand(newNodeCmd())
 	rootCmd.AddCommand(newDeleteCmd())
 	rootCmd.AddCommand(newDescribeCmd())
 	rootCmd.AddCommand(newPullCmd())
@@ -63,7 +62,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print the kctl version",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Printf("kctl version %s\n", version)
+			fmt.Printf("kctl version %s\n", kversion.Version)
 		},
 	}
 }

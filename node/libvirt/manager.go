@@ -83,15 +83,29 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 	// Add disks
 	domain.Devices.Disks = make([]libvirtxml.DomainDisk, 0, len(spec.Disks))
 	for _, disk := range spec.Disks {
+		isCloudInit := disk.Name == "cloud-init" || strings.HasSuffix(strings.ToLower(disk.BackendHandle), ".iso")
+
+		devType := "disk"
+		driverType := "qcow2"
+		bus := disk.Bus
+		if isCloudInit {
+			// Attach cloud-init seed as a CD-ROM so NoCloud sees the cidata label.
+			devType = "cdrom"
+			driverType = "raw"
+			if bus == "" {
+				bus = "sata"
+			}
+		}
+
 		libvirtDisk := libvirtxml.DomainDisk{
-			Device: "disk",
+			Device: devType,
 			Driver: &libvirtxml.DomainDiskDriver{
 				Name: "qemu",
-				Type: "qcow2",
+				Type: driverType,
 			},
 			Target: &libvirtxml.DomainDiskTarget{
 				Dev: disk.Device,
-				Bus: disk.Bus,
+				Bus: bus,
 			},
 		}
 
@@ -110,6 +124,10 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 			}
 		}
 
+		if isCloudInit {
+			libvirtDisk.ReadOnly = &libvirtxml.DomainDiskReadOnly{}
+		}
+
 		domain.Devices.Disks = append(domain.Devices.Disks, libvirtDisk)
 	}
 
@@ -122,15 +140,35 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 			},
 		}
 
-		// Use libvirt Network mode (supports both libvirt networks and bridges)
+		// Use libvirt Network mode (supports both libvirt networks and bridges).
 		// If network name starts with "br" or contains "/", assume it's a bridge
-		// Otherwise, treat it as a libvirt network name
+		// (e.g. br0, br1, br-int). Otherwise, treat it as a libvirt network name.
 		if strings.HasPrefix(nic.Network, "br") || strings.Contains(nic.Network, "/") {
-			// Bridge mode (for custom bridges like br0, br1, etc.)
+			// Bridge mode – this covers both Linux bridges (br0, br1, etc.) and
+			// Open vSwitch bridges like br-int.
 			iface.Source = &libvirtxml.DomainInterfaceSource{
 				Bridge: &libvirtxml.DomainInterfaceSourceBridge{
 					Bridge: nic.Network,
 				},
+			}
+
+			// If this is the Open vSwitch integration bridge (br-int), attach a
+			// libvirt <virtualport type='openvswitch'> so the tap device is
+			// managed by OVS instead of the kernel bridge code. We use the
+			// InterfaceID provided in the NICSpec (populated by node/server),
+			// falling back to a random UUID if not set.
+			if nic.Network == "br-int" {
+				ifaceID := nic.InterfaceID
+				if ifaceID == "" {
+					ifaceID = spec.ID
+				}
+				iface.VirtualPort = &libvirtxml.DomainInterfaceVirtualPort{
+					Params: &libvirtxml.DomainInterfaceVirtualPortParams{
+						OpenVSwitch: &libvirtxml.DomainInterfaceVirtualPortParamsOpenVSwitch{
+							InterfaceID: ifaceID,
+						},
+					},
+				}
 			}
 		} else {
 			// Network mode (for libvirt networks like "default", "private", etc.)
@@ -154,6 +192,10 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 	portZero := uint(0)
 	domain.Devices.Consoles = []libvirtxml.DomainConsole{
 		{
+			// Use a PTY-backed console so `virsh console` works as expected.
+			Source: &libvirtxml.DomainChardevSource{
+				Pty: &libvirtxml.DomainChardevSourcePty{},
+			},
 			Target: &libvirtxml.DomainConsoleTarget{
 				Type: "serial",
 				Port: &portZero,
@@ -163,6 +205,10 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 
 	domain.Devices.Serials = []libvirtxml.DomainSerial{
 		{
+			// Match the console with a PTY-backed serial device.
+			Source: &libvirtxml.DomainChardevSource{
+				Pty: &libvirtxml.DomainChardevSourcePty{},
+			},
 			Target: &libvirtxml.DomainSerialTarget{
 				Port: &portZero,
 			},
@@ -201,9 +247,10 @@ type DiskSpec struct {
 }
 
 type NICSpec struct {
-	Network    string
-	Model      string
-	MACAddress string
+	Network     string
+	Model       string
+	MACAddress  string
+	InterfaceID string // OVN iface-id for OVS/OVN integration
 }
 
 // CreateDomain creates a libvirt domain from XML

@@ -1,7 +1,7 @@
 {
   "name": "kcore-site",
   "version": "1.0.0",
-  "description": "Marketing website for kcore.ai - AI-powered virtualization platform",
+  "description": "Marketing website for kcore.systems - AI-powered virtualization platform",
   "scripts": {
     "dev": "python3 -m http.server 8000",
     "serve": "python3 -m http.server 8000",
@@ -20,7 +20,7 @@
   "devDependencies": {},
   "repository": {
     "type": "git",
-    "url": "https://github.com/kcore/kcore"
+    "url": "https://github.com/kcore-systems/kcore"
   }
 }
 

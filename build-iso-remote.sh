@@ -103,8 +103,15 @@ echo ""
 
 # Enable Nix flakes and experimental features
 echo -e "${YELLOW}🔧 Configuring Nix...${NC}"
-ssh -i "$SSH_KEY" "$SSH_HOST" "mkdir -p ~/.config/nix && \
-    echo 'experimental-features = nix-command flakes' >> ~/.config/nix/nix.conf 2>/dev/null || true"
+ssh -i "$SSH_KEY" "$SSH_HOST" "bash -c '
+    mkdir -p ~/.config/nix
+    if ! grep -q \"experimental-features\" ~/.config/nix/nix.conf 2>/dev/null; then
+        echo \"experimental-features = nix-command flakes\" >> ~/.config/nix/nix.conf
+    fi
+    # Also set in environment for current session
+    export NIX_CONFIG=\"experimental-features = nix-command flakes\"
+    cat ~/.config/nix/nix.conf
+'"
 echo -e "${GREEN}✅ Nix configured${NC}"
 echo ""
 
@@ -140,17 +147,21 @@ echo -e "${BLUE}Temp directory: /mnt/md126/tmp (root / is 99% full!)${NC}"
 echo -e "${BLUE}This runs natively on AMD64 Linux, so it will be much faster than macOS emulation.${NC}"
 echo ""
 
-ssh -i "$SSH_KEY" "$SSH_HOST" "mkdir -p /mnt/md126/tmp && cd $REMOTE_DIR && \
-    export NIXPKGS_ALLOW_UNFREE=1 && \
-    export TMPDIR=/mnt/md126/tmp && \
-    export TEMP=/mnt/md126/tmp && \
-    export TMP=/mnt/md126/tmp && \
-    source ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || true && \
+ssh -i "$SSH_KEY" "$SSH_HOST" "bash -c '
+    mkdir -p /mnt/md126/tmp
+    cd $REMOTE_DIR
+    export NIXPKGS_ALLOW_UNFREE=1
+    export TMPDIR=/mnt/md126/tmp
+    export TEMP=/mnt/md126/tmp
+    export TMP=/mnt/md126/tmp
+    export NIX_CONFIG=\"experimental-features = nix-command flakes\"
+    source ~/.nix-profile/etc/profile.d/nix.sh 2>/dev/null || true
     nix --extra-experimental-features nix-command \
         --extra-experimental-features flakes \
         --option sandbox false \
-        build '.#nixosConfigurations.kvm-node-iso.config.system.build.isoImage' \
-        -o result-iso 2>&1" | tee /tmp/remote-build.log
+        build .#nixosConfigurations.kvm-node-iso.config.system.build.isoImage \
+        -o result-iso 2>&1
+'" | tee /tmp/remote-build.log
 
 BUILD_EXIT=$?
 

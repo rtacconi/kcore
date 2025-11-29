@@ -36,8 +36,10 @@ func (d *LocalDirDriver) Create(ctx context.Context, spec VolumeSpecOnNode) (str
 	filename := fmt.Sprintf("%s.qcow2", spec.VolumeID)
 	filePath := filepath.Join(d.basePath, filename)
 
-	// Use qemu-img to create the qcow2 file
-	cmd := exec.CommandContext(ctx, "qemu-img", "create", "-f", "qcow2", filePath, fmt.Sprintf("%d", spec.SizeBytes))
+	// Use qemu-img to create the qcow2 file.
+	// On NixOS this binary is at /run/current-system/sw/bin/qemu-img, which
+	// might not be on the systemd service PATH, so we call it by absolute path.
+	cmd := exec.CommandContext(ctx, "/run/current-system/sw/bin/qemu-img", "create", "-f", "qcow2", filePath, fmt.Sprintf("%d", spec.SizeBytes))
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to create qcow2 file: %w", err)
 	}

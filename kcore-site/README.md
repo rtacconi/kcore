@@ -1,4 +1,4 @@
-# kcore.ai - Marketing Website
+# kcore.systems - Marketing Website
 
 A modern, dark-themed marketing website for kcore - the AI-powered virtualization platform.
 
@@ -128,7 +128,7 @@ Deploy to any static hosting service:
 ```nginx
 server {
     listen 80;
-    server_name kcore.ai www.kcore.ai;
+    server_name kcore.systems www.kcore.systems;
     root /var/www/kcore-site;
     index index.html;
 

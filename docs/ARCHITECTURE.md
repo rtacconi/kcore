@@ -57,6 +57,36 @@
 - **Managed by**: systemd (auto-starts on boot)
 - **Used by**: node-agent for VM operations
 
+### Networking (OVS / OVN overview)
+
+At a high level, advanced networking in kcore uses:
+
+- **Open vSwitch (OVS)** on each node:
+  - Provides the integration bridge (e.g. `br-int`) where VM TAP interfaces are attached.
+  - Is programmed by `ovn-controller` to install the actual OpenFlow rules.
+
+- **OVN** as the SDN control plane:
+  - **Northbound (NB) DB – desired logical state**
+    - Written by controllers / orchestration (future kcore network controller).
+    - Stores *what you want the network to look like*:
+      - Logical switches and routers (virtual topology).
+      - Logical switch ports (VM NICs, router interfaces).
+      - DHCP configuration (`DHCP_Options`), ACLs, QoS, etc.
+    - When kcore creates logical switches, DHCP options, and logical ports (via `libovsdb`), it is writing to **NB**.
+  - **Southbound (SB) DB – realized / compiled state**
+    - Mostly written by `ovn-northd` and `ovn-controller`.
+    - Stores *how OVN will actually implement the topology*:
+      - Logical flows that represent packet-processing logic.
+      - Chassis information (nodes) and tunnel information (e.g., Geneve).
+      - Mappings of logical ports to chassis.
+    - Each `ovn-controller` watches **SB** and converts logical flows into concrete OVS rules on the local `br-int`.
+
+In effect:
+
+- **NB** = *intent*: “VM NIC X is on subnet 192.168.200.0/24, with DHCP and router at 192.168.200.1”.
+- **SB** = *implementation*: the logical flows and chassis bindings OVN generates to make that true.
+- **OVS** = *data plane*: enforces those flows on each node’s `br-int`, answering DHCP and forwarding packets as defined by OVN.
+
 ---
 
 ## Installation Workflow

@@ -1741,6 +1741,113 @@ func (x *VmStatus) GetUpdatedAt() *timestamppb.Timestamp {
 	return nil
 }
 
+type ApplyNixConfigRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Full contents to write to /etc/nixos/configuration.nix
+	ConfigurationNix string `protobuf:"bytes,1,opt,name=configuration_nix,json=configurationNix,proto3" json:"configuration_nix,omitempty"`
+	// When true, run `nixos-rebuild switch` after writing the file.
+	// When false, only write the file.
+	Rebuild       bool `protobuf:"varint,2,opt,name=rebuild,proto3" json:"rebuild,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyNixConfigRequest) Reset() {
+	*x = ApplyNixConfigRequest{}
+	mi := &file_proto_controller_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyNixConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyNixConfigRequest) ProtoMessage() {}
+
+func (x *ApplyNixConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_controller_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyNixConfigRequest.ProtoReflect.Descriptor instead.
+func (*ApplyNixConfigRequest) Descriptor() ([]byte, []int) {
+	return file_proto_controller_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *ApplyNixConfigRequest) GetConfigurationNix() string {
+	if x != nil {
+		return x.ConfigurationNix
+	}
+	return ""
+}
+
+func (x *ApplyNixConfigRequest) GetRebuild() bool {
+	if x != nil {
+		return x.Rebuild
+	}
+	return false
+}
+
+type ApplyNixConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
+	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyNixConfigResponse) Reset() {
+	*x = ApplyNixConfigResponse{}
+	mi := &file_proto_controller_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyNixConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyNixConfigResponse) ProtoMessage() {}
+
+func (x *ApplyNixConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_controller_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyNixConfigResponse.ProtoReflect.Descriptor instead.
+func (*ApplyNixConfigResponse) Descriptor() ([]byte, []int) {
+	return file_proto_controller_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ApplyNixConfigResponse) GetSuccess() bool {
+	if x != nil {
+		return x.Success
+	}
+	return false
+}
+
+func (x *ApplyNixConfigResponse) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
 var File_proto_controller_proto protoreflect.FileDescriptor
 
 const file_proto_controller_proto_rawDesc = "" +
@@ -1858,7 +1965,13 @@ const file_proto_controller_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt*t\n" +
+	"updated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"^\n" +
+	"\x15ApplyNixConfigRequest\x12+\n" +
+	"\x11configuration_nix\x18\x01 \x01(\tR\x10configurationNix\x12\x18\n" +
+	"\arebuild\x18\x02 \x01(\bR\arebuild\"L\n" +
+	"\x16ApplyNixConfigResponse\x12\x18\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
+	"\amessage\x18\x02 \x01(\tR\amessage*t\n" +
 	"\aVmState\x12\x14\n" +
 	"\x10VM_STATE_UNKNOWN\x10\x00\x12\x14\n" +
 	"\x10VM_STATE_STOPPED\x10\x01\x12\x14\n" +
@@ -1877,7 +1990,9 @@ const file_proto_controller_proto_rawDesc = "" +
 	"\x05GetVm\x12\x1e.kcore.controller.GetVmRequest\x1a\x1f.kcore.controller.GetVmResponse\x12N\n" +
 	"\aListVms\x12 .kcore.controller.ListVmsRequest\x1a!.kcore.controller.ListVmsResponse\x12T\n" +
 	"\tListNodes\x12\".kcore.controller.ListNodesRequest\x1a#.kcore.controller.ListNodesResponse\x12N\n" +
-	"\aGetNode\x12 .kcore.controller.GetNodeRequest\x1a!.kcore.controller.GetNodeResponseB'Z%github.com/kcore/kcore/api/controllerb\x06proto3"
+	"\aGetNode\x12 .kcore.controller.GetNodeRequest\x1a!.kcore.controller.GetNodeResponse2v\n" +
+	"\x0fControllerAdmin\x12c\n" +
+	"\x0eApplyNixConfig\x12'.kcore.controller.ApplyNixConfigRequest\x1a(.kcore.controller.ApplyNixConfigResponseB'Z%github.com/kcore/kcore/api/controllerb\x06proto3"
 
 var (
 	file_proto_controller_proto_rawDescOnce sync.Once
@@ -1892,40 +2007,42 @@ func file_proto_controller_proto_rawDescGZIP() []byte {
 }
 
 var file_proto_controller_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_proto_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 30)
+var file_proto_controller_proto_msgTypes = make([]protoimpl.MessageInfo, 32)
 var file_proto_controller_proto_goTypes = []any{
-	(VmState)(0),                  // 0: kcore.controller.VmState
-	(*RegisterNodeRequest)(nil),   // 1: kcore.controller.RegisterNodeRequest
-	(*RegisterNodeResponse)(nil),  // 2: kcore.controller.RegisterNodeResponse
-	(*HeartbeatRequest)(nil),      // 3: kcore.controller.HeartbeatRequest
-	(*HeartbeatResponse)(nil),     // 4: kcore.controller.HeartbeatResponse
-	(*SyncVmStateRequest)(nil),    // 5: kcore.controller.SyncVmStateRequest
-	(*SyncVmStateResponse)(nil),   // 6: kcore.controller.SyncVmStateResponse
-	(*NodeCapacity)(nil),          // 7: kcore.controller.NodeCapacity
-	(*NodeUsage)(nil),             // 8: kcore.controller.NodeUsage
-	(*CreateVmRequest)(nil),       // 9: kcore.controller.CreateVmRequest
-	(*CreateVmResponse)(nil),      // 10: kcore.controller.CreateVmResponse
-	(*DeleteVmRequest)(nil),       // 11: kcore.controller.DeleteVmRequest
-	(*DeleteVmResponse)(nil),      // 12: kcore.controller.DeleteVmResponse
-	(*StartVmRequest)(nil),        // 13: kcore.controller.StartVmRequest
-	(*StartVmResponse)(nil),       // 14: kcore.controller.StartVmResponse
-	(*StopVmRequest)(nil),         // 15: kcore.controller.StopVmRequest
-	(*StopVmResponse)(nil),        // 16: kcore.controller.StopVmResponse
-	(*GetVmRequest)(nil),          // 17: kcore.controller.GetVmRequest
-	(*GetVmResponse)(nil),         // 18: kcore.controller.GetVmResponse
-	(*ListVmsRequest)(nil),        // 19: kcore.controller.ListVmsRequest
-	(*ListVmsResponse)(nil),       // 20: kcore.controller.ListVmsResponse
-	(*VmInfo)(nil),                // 21: kcore.controller.VmInfo
-	(*ListNodesRequest)(nil),      // 22: kcore.controller.ListNodesRequest
-	(*ListNodesResponse)(nil),     // 23: kcore.controller.ListNodesResponse
-	(*NodeInfo)(nil),              // 24: kcore.controller.NodeInfo
-	(*GetNodeRequest)(nil),        // 25: kcore.controller.GetNodeRequest
-	(*GetNodeResponse)(nil),       // 26: kcore.controller.GetNodeResponse
-	(*VmSpec)(nil),                // 27: kcore.controller.VmSpec
-	(*Disk)(nil),                  // 28: kcore.controller.Disk
-	(*Nic)(nil),                   // 29: kcore.controller.Nic
-	(*VmStatus)(nil),              // 30: kcore.controller.VmStatus
-	(*timestamppb.Timestamp)(nil), // 31: google.protobuf.Timestamp
+	(VmState)(0),                   // 0: kcore.controller.VmState
+	(*RegisterNodeRequest)(nil),    // 1: kcore.controller.RegisterNodeRequest
+	(*RegisterNodeResponse)(nil),   // 2: kcore.controller.RegisterNodeResponse
+	(*HeartbeatRequest)(nil),       // 3: kcore.controller.HeartbeatRequest
+	(*HeartbeatResponse)(nil),      // 4: kcore.controller.HeartbeatResponse
+	(*SyncVmStateRequest)(nil),     // 5: kcore.controller.SyncVmStateRequest
+	(*SyncVmStateResponse)(nil),    // 6: kcore.controller.SyncVmStateResponse
+	(*NodeCapacity)(nil),           // 7: kcore.controller.NodeCapacity
+	(*NodeUsage)(nil),              // 8: kcore.controller.NodeUsage
+	(*CreateVmRequest)(nil),        // 9: kcore.controller.CreateVmRequest
+	(*CreateVmResponse)(nil),       // 10: kcore.controller.CreateVmResponse
+	(*DeleteVmRequest)(nil),        // 11: kcore.controller.DeleteVmRequest
+	(*DeleteVmResponse)(nil),       // 12: kcore.controller.DeleteVmResponse
+	(*StartVmRequest)(nil),         // 13: kcore.controller.StartVmRequest
+	(*StartVmResponse)(nil),        // 14: kcore.controller.StartVmResponse
+	(*StopVmRequest)(nil),          // 15: kcore.controller.StopVmRequest
+	(*StopVmResponse)(nil),         // 16: kcore.controller.StopVmResponse
+	(*GetVmRequest)(nil),           // 17: kcore.controller.GetVmRequest
+	(*GetVmResponse)(nil),          // 18: kcore.controller.GetVmResponse
+	(*ListVmsRequest)(nil),         // 19: kcore.controller.ListVmsRequest
+	(*ListVmsResponse)(nil),        // 20: kcore.controller.ListVmsResponse
+	(*VmInfo)(nil),                 // 21: kcore.controller.VmInfo
+	(*ListNodesRequest)(nil),       // 22: kcore.controller.ListNodesRequest
+	(*ListNodesResponse)(nil),      // 23: kcore.controller.ListNodesResponse
+	(*NodeInfo)(nil),               // 24: kcore.controller.NodeInfo
+	(*GetNodeRequest)(nil),         // 25: kcore.controller.GetNodeRequest
+	(*GetNodeResponse)(nil),        // 26: kcore.controller.GetNodeResponse
+	(*VmSpec)(nil),                 // 27: kcore.controller.VmSpec
+	(*Disk)(nil),                   // 28: kcore.controller.Disk
+	(*Nic)(nil),                    // 29: kcore.controller.Nic
+	(*VmStatus)(nil),               // 30: kcore.controller.VmStatus
+	(*ApplyNixConfigRequest)(nil),  // 31: kcore.controller.ApplyNixConfigRequest
+	(*ApplyNixConfigResponse)(nil), // 32: kcore.controller.ApplyNixConfigResponse
+	(*timestamppb.Timestamp)(nil),  // 33: google.protobuf.Timestamp
 }
 var file_proto_controller_proto_depIdxs = []int32{
 	7,  // 0: kcore.controller.RegisterNodeRequest.capacity:type_name -> kcore.controller.NodeCapacity
@@ -1939,17 +2056,17 @@ var file_proto_controller_proto_depIdxs = []int32{
 	30, // 8: kcore.controller.GetVmResponse.status:type_name -> kcore.controller.VmStatus
 	21, // 9: kcore.controller.ListVmsResponse.vms:type_name -> kcore.controller.VmInfo
 	0,  // 10: kcore.controller.VmInfo.state:type_name -> kcore.controller.VmState
-	31, // 11: kcore.controller.VmInfo.created_at:type_name -> google.protobuf.Timestamp
+	33, // 11: kcore.controller.VmInfo.created_at:type_name -> google.protobuf.Timestamp
 	24, // 12: kcore.controller.ListNodesResponse.nodes:type_name -> kcore.controller.NodeInfo
 	7,  // 13: kcore.controller.NodeInfo.capacity:type_name -> kcore.controller.NodeCapacity
 	8,  // 14: kcore.controller.NodeInfo.usage:type_name -> kcore.controller.NodeUsage
-	31, // 15: kcore.controller.NodeInfo.last_heartbeat:type_name -> google.protobuf.Timestamp
+	33, // 15: kcore.controller.NodeInfo.last_heartbeat:type_name -> google.protobuf.Timestamp
 	24, // 16: kcore.controller.GetNodeResponse.node:type_name -> kcore.controller.NodeInfo
 	28, // 17: kcore.controller.VmSpec.disks:type_name -> kcore.controller.Disk
 	29, // 18: kcore.controller.VmSpec.nics:type_name -> kcore.controller.Nic
 	0,  // 19: kcore.controller.VmStatus.state:type_name -> kcore.controller.VmState
-	31, // 20: kcore.controller.VmStatus.created_at:type_name -> google.protobuf.Timestamp
-	31, // 21: kcore.controller.VmStatus.updated_at:type_name -> google.protobuf.Timestamp
+	33, // 20: kcore.controller.VmStatus.created_at:type_name -> google.protobuf.Timestamp
+	33, // 21: kcore.controller.VmStatus.updated_at:type_name -> google.protobuf.Timestamp
 	1,  // 22: kcore.controller.Controller.RegisterNode:input_type -> kcore.controller.RegisterNodeRequest
 	3,  // 23: kcore.controller.Controller.Heartbeat:input_type -> kcore.controller.HeartbeatRequest
 	5,  // 24: kcore.controller.Controller.SyncVmState:input_type -> kcore.controller.SyncVmStateRequest
@@ -1961,19 +2078,21 @@ var file_proto_controller_proto_depIdxs = []int32{
 	19, // 30: kcore.controller.Controller.ListVms:input_type -> kcore.controller.ListVmsRequest
 	22, // 31: kcore.controller.Controller.ListNodes:input_type -> kcore.controller.ListNodesRequest
 	25, // 32: kcore.controller.Controller.GetNode:input_type -> kcore.controller.GetNodeRequest
-	2,  // 33: kcore.controller.Controller.RegisterNode:output_type -> kcore.controller.RegisterNodeResponse
-	4,  // 34: kcore.controller.Controller.Heartbeat:output_type -> kcore.controller.HeartbeatResponse
-	6,  // 35: kcore.controller.Controller.SyncVmState:output_type -> kcore.controller.SyncVmStateResponse
-	10, // 36: kcore.controller.Controller.CreateVm:output_type -> kcore.controller.CreateVmResponse
-	12, // 37: kcore.controller.Controller.DeleteVm:output_type -> kcore.controller.DeleteVmResponse
-	14, // 38: kcore.controller.Controller.StartVm:output_type -> kcore.controller.StartVmResponse
-	16, // 39: kcore.controller.Controller.StopVm:output_type -> kcore.controller.StopVmResponse
-	18, // 40: kcore.controller.Controller.GetVm:output_type -> kcore.controller.GetVmResponse
-	20, // 41: kcore.controller.Controller.ListVms:output_type -> kcore.controller.ListVmsResponse
-	23, // 42: kcore.controller.Controller.ListNodes:output_type -> kcore.controller.ListNodesResponse
-	26, // 43: kcore.controller.Controller.GetNode:output_type -> kcore.controller.GetNodeResponse
-	33, // [33:44] is the sub-list for method output_type
-	22, // [22:33] is the sub-list for method input_type
+	31, // 33: kcore.controller.ControllerAdmin.ApplyNixConfig:input_type -> kcore.controller.ApplyNixConfigRequest
+	2,  // 34: kcore.controller.Controller.RegisterNode:output_type -> kcore.controller.RegisterNodeResponse
+	4,  // 35: kcore.controller.Controller.Heartbeat:output_type -> kcore.controller.HeartbeatResponse
+	6,  // 36: kcore.controller.Controller.SyncVmState:output_type -> kcore.controller.SyncVmStateResponse
+	10, // 37: kcore.controller.Controller.CreateVm:output_type -> kcore.controller.CreateVmResponse
+	12, // 38: kcore.controller.Controller.DeleteVm:output_type -> kcore.controller.DeleteVmResponse
+	14, // 39: kcore.controller.Controller.StartVm:output_type -> kcore.controller.StartVmResponse
+	16, // 40: kcore.controller.Controller.StopVm:output_type -> kcore.controller.StopVmResponse
+	18, // 41: kcore.controller.Controller.GetVm:output_type -> kcore.controller.GetVmResponse
+	20, // 42: kcore.controller.Controller.ListVms:output_type -> kcore.controller.ListVmsResponse
+	23, // 43: kcore.controller.Controller.ListNodes:output_type -> kcore.controller.ListNodesResponse
+	26, // 44: kcore.controller.Controller.GetNode:output_type -> kcore.controller.GetNodeResponse
+	32, // 45: kcore.controller.ControllerAdmin.ApplyNixConfig:output_type -> kcore.controller.ApplyNixConfigResponse
+	34, // [34:46] is the sub-list for method output_type
+	22, // [22:34] is the sub-list for method input_type
 	22, // [22:22] is the sub-list for extension type_name
 	22, // [22:22] is the sub-list for extension extendee
 	0,  // [0:22] is the sub-list for field type_name
@@ -1990,9 +2109,9 @@ func file_proto_controller_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_controller_proto_rawDesc), len(file_proto_controller_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   30,
+			NumMessages:   32,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_proto_controller_proto_goTypes,
 		DependencyIndexes: file_proto_controller_proto_depIdxs,

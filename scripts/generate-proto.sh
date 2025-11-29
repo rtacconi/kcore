@@ -22,20 +22,27 @@ if ! go list -m google.golang.org/grpc/cmd/protoc-gen-go-grpc > /dev/null 2>&1; 
     go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
 fi
 
-# Create api directory if it doesn't exist
-mkdir -p api/node api/controller
-
 echo "Generating protobuf code..."
 
-# Generate node.proto
-protoc --go_out=. --go_opt=paths=source_relative \
-    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    proto/node.proto
+# Create api directories if they don't exist
+mkdir -p api/node api/controller
 
-# Generate controller.proto
+# Generate into proto/ using source_relative paths, then move into api/*
+
+# Node protos
 protoc --go_out=. --go_opt=paths=source_relative \
-    --go-grpc_out=. --go-grpc_opt=paths=source_relative \
-    proto/controller.proto
+       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+       proto/node.proto
+
+mv proto/node.pb.go api/node/node.pb.go
+mv proto/node_grpc.pb.go api/node/node_grpc.pb.go
+
+# Controller protos
+protoc --go_out=. --go_opt=paths=source_relative \
+       --go-grpc_out=. --go-grpc_opt=paths=source_relative \
+       proto/controller.proto
+
+mv proto/controller.pb.go api/controller/controller.pb.go
+mv proto/controller_grpc.pb.go api/controller/controller_grpc.pb.go
 
 echo "Protobuf code generated successfully!"
-

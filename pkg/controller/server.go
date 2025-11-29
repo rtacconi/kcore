@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,6 +25,7 @@ import (
 // Server implements the Controller service
 type Server struct {
 	ctrlpb.UnimplementedControllerServer
+	ctrlpb.UnimplementedControllerAdminServer
 	nodes    map[string]*NodeInfo // nodeID -> NodeInfo
 	vmToNode map[string]string    // vmID -> nodeID
 	mu       sync.RWMutex
@@ -45,6 +48,52 @@ func NewServer() *Server {
 		nodes:    make(map[string]*NodeInfo),
 		vmToNode: make(map[string]string),
 	}
+}
+
+// ControllerAdmin implementation
+
+// ApplyNixConfig writes the provided configuration.nix to /etc/nixos/configuration.nix
+// and optionally runs `nixos-rebuild switch`. This mirrors the node-side API and is
+// intended for development / lab usage (no auth, no RBAC yet).
+func (s *Server) ApplyNixConfig(ctx context.Context, req *ctrlpb.ApplyNixConfigRequest) (*ctrlpb.ApplyNixConfigResponse, error) {
+	if req.GetConfigurationNix() == "" {
+		return &ctrlpb.ApplyNixConfigResponse{
+			Success: false,
+			Message: "configuration_nix is empty",
+		}, nil
+	}
+
+	const cfgPath = "/etc/nixos/configuration.nix"
+
+	if err := os.MkdirAll("/etc/nixos", 0755); err != nil {
+		return &ctrlpb.ApplyNixConfigResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to create /etc/nixos: %v", err),
+		}, nil
+	}
+
+	if err := os.WriteFile(cfgPath, []byte(req.GetConfigurationNix()), 0644); err != nil {
+		return &ctrlpb.ApplyNixConfigResponse{
+			Success: false,
+			Message: fmt.Sprintf("failed to write %s: %v", cfgPath, err),
+		}, nil
+	}
+
+	if req.GetRebuild() {
+		cmd := exec.CommandContext(ctx, "nixos-rebuild", "switch")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			return &ctrlpb.ApplyNixConfigResponse{
+				Success: false,
+				Message: fmt.Sprintf("nixos-rebuild switch failed: %v (output: %s)", err, strings.TrimSpace(string(output))),
+			}, nil
+		}
+	}
+
+	return &ctrlpb.ApplyNixConfigResponse{
+		Success: true,
+		Message: "configuration applied",
+	}, nil
 }
 
 // Node Registration

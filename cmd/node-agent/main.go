@@ -99,6 +99,7 @@ func main() {
 	nodepb.RegisterNodeComputeServer(server, nodeServer)
 	nodepb.RegisterNodeStorageServer(server, nodeServer)
 	nodepb.RegisterNodeInfoServer(server, nodeServer)
+	nodepb.RegisterNodeAdminServer(server, nodeServer)
 
 	// Start listening
 	listenAddr := cfg.ListenAddr
