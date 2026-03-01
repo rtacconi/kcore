@@ -986,7 +986,31 @@ body {
     
     .features,
     .architecture,
+    .license,
     .cta {
         padding: 80px 0;
+    }
+    
+    .license-content {
+        grid-template-columns: 1fr;
+        gap: 24px;
+    }
+    
+    .license-card {
+        padding: 32px;
+    }
+    
+    .license-details {
+        padding: 32px 24px;
+    }
+    
+    .license-links {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    
+    .license-links .btn {
+        width: 100%;
+        justify-content: center;
     }
 }
