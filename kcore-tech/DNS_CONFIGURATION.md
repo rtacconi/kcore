@@ -30,13 +30,15 @@ This is the simplest method and automatically updates if GitHub changes their IP
    TTL:     3600 (or Auto/Default)
    ```
 
-4. **For www subdomain (optional):**
+4. **For www subdomain (REQUIRED for GitHub Pages):**
    ```
    Type:    CNAME
    Name:    www
    Value:   rtacconi.github.io
    TTL:     3600
    ```
+   
+   **Important:** GitHub Pages will try to verify www.kcorehypervisor.com. You must add this DNS record, otherwise you'll get an InvalidDNSError.
 
 5. **Save the changes**
 
