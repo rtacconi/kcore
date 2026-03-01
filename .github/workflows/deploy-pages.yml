@@ -5,7 +5,11 @@ on:
     branches:
       - main
     paths:
-      - 'kcore-site/**'
+      - 'index.html'
+      - 'styles.css'
+      - 'script.js'
+      - '.nojekyll'
+      - 'CNAME'
   workflow_dispatch:
 
 permissions:
@@ -33,7 +37,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './kcore-site'
+          path: '.'
 
       - name: Deploy to GitHub Pages
         id: deployment
