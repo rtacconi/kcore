@@ -11,6 +11,8 @@
     --accent-primary: #6366f1;
     --accent-secondary: #8b5cf6;
     --accent-hover: #818cf8;
+    --link-color: #a78bfa;
+    --link-hover: #c4b5fd;
     --border-color: #1f1f1f;
     --border-hover: #2f2f2f;
     --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
