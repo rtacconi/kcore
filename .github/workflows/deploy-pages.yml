@@ -4,12 +4,6 @@ on:
   push:
     branches:
       - main
-    paths:
-      - 'index.html'
-      - 'styles.css'
-      - 'script.js'
-      - '.nojekyll'
-      - 'CNAME'
   workflow_dispatch:
 
 permissions:
