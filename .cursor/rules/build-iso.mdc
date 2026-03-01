@@ -1,0 +1,103 @@
+---
+description: ISO build process and troubleshooting for kcore NixOS ISO
+alwaysApply: false
+---
+
+# ISO Build Process
+
+## Building the ISO
+
+The ISO is built using Docker to ensure a Linux build environment:
+
+```bash
+./scripts/build-iso.sh
+```
+
+This script:
+1. Uses the `nixos/nix:2.18.1` Docker image
+2. Builds the `kvm-node-iso` NixOS configuration
+3. Copies the resulting ISO to `./out/`
+
+## Common Issues and Fixes
+
+### 1. Go Module Dependencies
+
+**Issue**: Build fails with missing libvirt packages
+- Error: `no required module provides package libvirt.org/go/libvirt`
+
+**Fix**: 
+```bash
+go get libvirt.org/go/libvirt libvirt.org/go/libvirtxml
+go mod tidy
+git add go.mod go.sum
+```
+
+### 2. vendorHash Mismatch
+
+**Issue**: Build fails with hash mismatch in fixed-output derivation
+- Error: `hash mismatch in fixed-output derivation`
+
+**Fix**: Update `vendorHash` in [flake.nix](mdc:flake.nix) with the computed hash:
+```nix
+vendorHash = "sha256-...";  # Update with actual hash from error message
+```
+
+Or remove vendor directory and let Nix compute:
+```bash
+rm -rf vendor
+# Then set vendorHash = ""; to let Nix compute it
+```
+
+### 3. Git Tracking Required
+
+**Issue**: Flake files must be tracked by Git
+- Error: `Path 'flake.nix' in the repository is not tracked by Git`
+
+**Fix**:
+```bash
+git add flake.nix flake.lock go.mod go.sum
+```
+
+### 4. Docker Not Running
+
+**Issue**: Docker daemon not available
+- Error: `Cannot connect to the Docker daemon`
+
+**Fix**: Start Docker Desktop and ensure it's running
+
+### 5. Build Evaluation on macOS
+
+**Issue**: Some flake evaluation happens on macOS instead of in Docker
+- Error: `Required system: 'x86_64-linux'` but `Current system: 'x86_64-darwin'`
+
+**Fix**: Ensure all flake evaluation happens in Docker. The build script should handle this, but if issues persist, run directly:
+```bash
+docker run --rm -v "$(pwd)":/workspace -w /workspace \
+  -e NIX_CONFIG="experimental-features = nix-command flakes" \
+  --security-opt seccomp=unconfined --privileged \
+  nixos/nix:2.18.1 \
+  bash -c "nix build .#nixosConfigurations.kvm-node-iso.config.system.build.isoImage"
+```
+
+## Network Configuration
+
+The ISO uses dynamic NIC detection via a systemd service (`setup-br0`) that:
+- Automatically detects the primary physical network interface
+- Creates and configures the `br0` bridge
+- Works with any NIC name (eno1, enp1s0, eth0, etc.)
+
+See [flake.nix](mdc:flake.nix) for the `setup-br0` service configuration.
+
+## ISO Configuration
+
+The ISO configuration is defined in `nixosConfigurations.kvm-node-iso` in [flake.nix](mdc:flake.nix) and includes:
+- Minimal NixOS installer
+- Dynamic network interface detection
+- libvirt and KVM support
+- Node agent service (if Go binary is built)
+
+## Notes
+
+- The build process can take 30+ minutes depending on cache hits
+- Ensure sufficient disk space (several GB for build artifacts)
+- The ISO will be output to `./out/` directory after successful build

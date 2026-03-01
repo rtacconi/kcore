@@ -10,11 +10,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/kcore/kcore/api/node"
 	libvirtmgr "github.com/kcore/kcore/node/libvirt"
-	"github.com/kcore/kcore/node/ovn"
 	"github.com/kcore/kcore/node/storage"
 	libvirt "github.com/libvirt/libvirt-go"
 	"google.golang.org/grpc/codes"
@@ -32,8 +30,6 @@ type Server struct {
 	networks   map[string]string // network name -> bridge name
 	nodeID     string
 	hostname   string
-
-	ovn *ovn.Client
 }
 
 func NewServer(nodeID string, libvirtMgr *libvirtmgr.Manager, storageReg *storage.DriverRegistry, networks map[string]string) (*Server, error) {
@@ -42,29 +38,12 @@ func NewServer(nodeID string, libvirtMgr *libvirtmgr.Manager, storageReg *storag
 		hostname = nodeID
 	}
 
-	// Best-effort OVN integration: if ovn-nbctl is present, configure the
-	// default logical switch and DHCP for 192.168.200.0/24. If anything
-	// fails here we log and continue without OVN (VMs will still attach to
-	// br-int and can use whatever DHCP is configured externally).
-	ovnClient := ovn.NewClient("kcore-net", "192.168.200.0/24", "192.168.200.1")
-	if ovnClient != nil {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if err := ovnClient.EnsureNetwork(ctx); err != nil {
-			log.Printf("OVN: failed to ensure network: %v", err)
-			ovnClient = nil
-		} else {
-			log.Printf("OVN: using logical switch kcore-net (cidr=192.168.200.0/24, router=192.168.200.1)")
-		}
-	}
-
 	return &Server{
 		libvirtMgr: libvirtMgr,
 		storageReg: storageReg,
 		networks:   networks,
 		nodeID:     nodeID,
 		hostname:   hostname,
-		ovn:        ovnClient,
 	}, nil
 }
 
@@ -356,26 +335,10 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 			model = "virtio" // Default to virtio
 		}
 
-		ovnIfaceID := ""
-		// For advanced mode on br-int, allocate an OVN iface-id that we can
-		// bind to a logical port in OVN. This is optional: if OVN is not
-		// available, we just leave it empty and fallback to current behavior.
-		if bridgeName == "br-int" && s.ovn != nil {
-			ovnIfaceID = ovn.NewIfaceID(spec.Id)
-			go func(id string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-				defer cancel()
-				if err := s.ovn.EnsurePortForVM(ctx, id, nic.MacAddress); err != nil {
-					log.Printf("OVN: failed to ensure port for VM %s iface %s: %v", spec.Name, id, err)
-				}
-			}(ovnIfaceID)
-		}
-
 		libvirtSpec.NICs = append(libvirtSpec.NICs, libvirtmgr.NICSpec{
 			Network:    bridgeName,
 			Model:      model,
 			MACAddress: nic.MacAddress,
-			InterfaceID: ovnIfaceID,
 		})
 	}
 
