@@ -1,0 +1,193 @@
+syntax = "proto3";
+
+package kcore.controlplane;
+
+option go_package = "github.com/kcore/kcore/api/controlplane";
+
+import "google/protobuf/timestamp.proto";
+import "proto/controller.proto";
+
+// Unified control-plane API: orchestration, admin operations, and day-0 automation.
+service ControlPlane {
+  // Existing orchestration + node lifecycle
+  rpc RegisterNode(kcore.controller.RegisterNodeRequest) returns (kcore.controller.RegisterNodeResponse);
+  rpc Heartbeat(kcore.controller.HeartbeatRequest) returns (kcore.controller.HeartbeatResponse);
+  rpc SyncVmState(kcore.controller.SyncVmStateRequest) returns (kcore.controller.SyncVmStateResponse);
+
+  rpc CreateVm(kcore.controller.CreateVmRequest) returns (kcore.controller.CreateVmResponse);
+  rpc DeleteVm(kcore.controller.DeleteVmRequest) returns (kcore.controller.DeleteVmResponse);
+  rpc StartVm(kcore.controller.StartVmRequest) returns (kcore.controller.StartVmResponse);
+  rpc StopVm(kcore.controller.StopVmRequest) returns (kcore.controller.StopVmResponse);
+  rpc GetVm(kcore.controller.GetVmRequest) returns (kcore.controller.GetVmResponse);
+  rpc ListVms(kcore.controller.ListVmsRequest) returns (kcore.controller.ListVmsResponse);
+  rpc ListNodes(kcore.controller.ListNodesRequest) returns (kcore.controller.ListNodesResponse);
+  rpc GetNode(kcore.controller.GetNodeRequest) returns (kcore.controller.GetNodeResponse);
+
+  // Existing controller admin operation (kept, but unified under this service)
+  rpc ApplyControllerNixConfig(kcore.controller.ApplyNixConfigRequest) returns (kcore.controller.ApplyNixConfigResponse);
+
+  // Node-targeted admin operation (new)
+  rpc ApplyNodeNixConfig(ApplyNodeNixConfigRequest) returns (kcore.controller.ApplyNixConfigResponse);
+
+  // Enrollment token management
+  rpc CreateEnrollmentToken(CreateEnrollmentTokenRequest) returns (CreateEnrollmentTokenResponse);
+  rpc RevokeEnrollmentToken(RevokeEnrollmentTokenRequest) returns (RevokeEnrollmentTokenResponse);
+  rpc ListEnrollmentTokens(ListEnrollmentTokensRequest) returns (ListEnrollmentTokensResponse);
+
+  // Day-0 bootstrap and enrollment
+  rpc GetBootstrapConfig(GetBootstrapConfigRequest) returns (GetBootstrapConfigResponse);
+  rpc EnrollNode(EnrollNodeRequest) returns (EnrollNodeResponse);
+  rpc RotateNodeCertificate(RotateNodeCertificateRequest) returns (RotateNodeCertificateResponse);
+
+  // Install progress tracking
+  rpc ReportInstallStatus(ReportInstallStatusRequest) returns (ReportInstallStatusResponse);
+  rpc GetInstallStatus(GetInstallStatusRequest) returns (GetInstallStatusResponse);
+  rpc ListInstallStatus(ListInstallStatusRequest) returns (ListInstallStatusResponse);
+}
+
+message ApplyNodeNixConfigRequest {
+  string node_id = 1;
+  kcore.controller.ApplyNixConfigRequest config = 2;
+}
+
+enum EnrollmentTokenScope {
+  ENROLLMENT_TOKEN_SCOPE_UNSPECIFIED = 0;
+  ENROLLMENT_TOKEN_SCOPE_NODE_BOOTSTRAP = 1;
+}
+
+message CreateEnrollmentTokenRequest {
+  EnrollmentTokenScope scope = 1;
+  repeated string allowed_labels = 2;
+  google.protobuf.Timestamp expires_at = 3;
+  string description = 4;
+}
+
+message CreateEnrollmentTokenResponse {
+  string token_id = 1;
+  string token_secret = 2; // Returned only once.
+}
+
+message RevokeEnrollmentTokenRequest {
+  string token_id = 1;
+}
+
+message RevokeEnrollmentTokenResponse {
+  bool success = 1;
+}
+
+message EnrollmentTokenInfo {
+  string token_id = 1;
+  EnrollmentTokenScope scope = 2;
+  repeated string allowed_labels = 3;
+  google.protobuf.Timestamp expires_at = 4;
+  bool revoked = 5;
+  string description = 6;
+}
+
+message ListEnrollmentTokensRequest {}
+
+message ListEnrollmentTokensResponse {
+  repeated EnrollmentTokenInfo tokens = 1;
+}
+
+message BootstrapNetworkDefaults {
+  map<string, string> network_map = 1;
+}
+
+message BootstrapStorageDefaults {
+  string default_driver = 1;
+  map<string, string> driver_parameters = 2;
+}
+
+message GetBootstrapConfigRequest {
+  string enrollment_token = 1;
+  string node_hostname = 2;
+}
+
+message GetBootstrapConfigResponse {
+  string controller_address = 1;
+  bytes ca_bundle_pem = 2;
+  BootstrapNetworkDefaults network = 3;
+  BootstrapStorageDefaults storage = 4;
+  int32 heartbeat_interval_seconds = 5;
+}
+
+message NodeMetadata {
+  string hostname = 1;
+  string reported_address = 2;
+  repeated string labels = 3;
+  string os_version = 4;
+  string kernel = 5;
+  string machine_id = 6;
+}
+
+message EnrollNodeRequest {
+  string enrollment_token = 1;
+  bytes csr_pem = 2;
+  NodeMetadata metadata = 3;
+}
+
+message EnrollNodeResponse {
+  string node_id = 1;
+  bytes signed_cert_pem = 2;
+  bytes ca_bundle_pem = 3;
+  string controller_address = 4;
+  google.protobuf.Timestamp cert_expires_at = 5;
+}
+
+message RotateNodeCertificateRequest {
+  string node_id = 1;
+  bytes csr_pem = 2;
+}
+
+message RotateNodeCertificateResponse {
+  bytes signed_cert_pem = 1;
+  bytes ca_bundle_pem = 2;
+  google.protobuf.Timestamp cert_expires_at = 3;
+}
+
+enum InstallPhase {
+  INSTALL_PHASE_UNSPECIFIED = 0;
+  INSTALL_PHASE_BOOTED_LIVE = 1;
+  INSTALL_PHASE_DISK_PARTITIONED = 2;
+  INSTALL_PHASE_OS_WRITTEN = 3;
+  INSTALL_PHASE_REBOOTED = 4;
+  INSTALL_PHASE_ENROLLED = 5;
+  INSTALL_PHASE_READY = 6;
+  INSTALL_PHASE_FAILED = 7;
+}
+
+message ReportInstallStatusRequest {
+  string node_id = 1;
+  string machine_id = 2;
+  InstallPhase phase = 3;
+  string message = 4;
+  google.protobuf.Timestamp observed_at = 5;
+}
+
+message ReportInstallStatusResponse {
+  bool success = 1;
+}
+
+message GetInstallStatusRequest {
+  string node_id = 1;
+  string machine_id = 2;
+}
+
+message InstallStatus {
+  string node_id = 1;
+  string machine_id = 2;
+  InstallPhase phase = 3;
+  string message = 4;
+  google.protobuf.Timestamp observed_at = 5;
+}
+
+message GetInstallStatusResponse {
+  InstallStatus status = 1;
+}
+
+message ListInstallStatusRequest {}
+
+message ListInstallStatusResponse {
+  repeated InstallStatus statuses = 1;
+}
