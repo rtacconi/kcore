@@ -698,10 +698,135 @@ body {
     justify-content: center;
 }
 
+/* License Section */
+.license {
+    padding: 120px 0;
+    background: var(--bg-secondary);
+    transition: background-color 0.3s ease;
+}
+
+.license-content {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 32px;
+    margin-top: 48px;
+}
+
+.license-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 40px;
+    transition: all 0.3s ease;
+}
+
+.license-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-md);
+}
+
+.license-icon {
+    font-size: 48px;
+    margin-bottom: 20px;
+}
+
+.license-card h3 {
+    font-size: 24px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    letter-spacing: -0.01em;
+}
+
+.license-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.license-card li {
+    padding: 8px 0;
+    color: var(--text-secondary);
+    position: relative;
+    padding-left: 24px;
+}
+
+.license-card li::before {
+    content: "•";
+    position: absolute;
+    left: 0;
+    color: var(--accent-primary);
+    font-weight: bold;
+}
+
+.license-note {
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.license-note a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.license-note a:hover {
+    text-decoration: underline;
+}
+
+.license-details {
+    margin-top: 64px;
+    padding: 40px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    text-align: center;
+}
+
+.license-details p {
+    color: var(--text-secondary);
+    line-height: 1.8;
+    font-size: 16px;
+    margin-bottom: 16px;
+    max-width: 800px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+.license-details strong {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.license-links {
+    display: flex;
+    gap: 16px;
+    justify-content: center;
+    flex-wrap: wrap;
+    margin-top: 32px;
+}
+
+.footer-license {
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--text-tertiary);
+}
+
+.footer-license a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.footer-license a:hover {
+    text-decoration: underline;
+}
+
 /* CTA Section */
 .cta {
     padding: 120px 0;
-    background: var(--bg-secondary);
+    background: var(--bg-primary);
     text-align: center;
     transition: background-color 0.3s ease;
 }

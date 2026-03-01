@@ -1,0 +1,79 @@
+Business Source License 1.1
+
+Copyright (c) 2024 kcore
+All rights reserved.
+
+Terms
+
+The Licensor hereby grants you the right to copy, modify, create derivative works, redistribute, and use the Software (as defined below) subject to the terms and conditions of this Business Source License (the "License"). By exercising any right to the Software provided here, you accept and agree to be bound by the terms of this License. The Licensor reserves all rights not expressly granted to you in this License.
+
+Change Date: 2027-01-01
+
+Change License: Apache License, Version 2.0
+
+On the Change Date specified above (the "Change Date"), the Licensor hereby changes the Licensed Work; and You may treat the Licensed Work as subject to the Apache License, Version 2.0. The Licensor hereby grants you an additional perpetual, worldwide, non-exclusive, no-charge, royalty-free, irrevocable copyright license to reproduce, prepare Derivative Works of, publicly display, publicly perform, sublicense, and distribute the Licensed Work and such Derivative Works in Source or Object form under the Apache License, Version 2.0.
+
+Definitions
+
+"License" means this Business Source License.
+
+"Licensor" means the individual or entity that makes the Software available under this License.
+
+"Licensed Work" means the Software.
+
+"Derivative Works" means any work (whether source or object code) that is based on (or derived from) the Licensed Work and for which the editorial revisions, annotations, elaborations, or other modifications represent, as a whole, an original work of authorship.
+
+"Change Date" means the date specified in the License as the date after which You may use the Licensed Work (or portions thereof) under the conditions of the Change License.
+
+"Change License" means one of the Apache License Version 2.0, or the GPL Version 2.0, or a later version of either of those licenses.
+
+"Source Code Form" means the form of the work preferred for making modifications, including but not limited to software source code, documentation source, and configuration files.
+
+"Object Code Form" means any form resulting from mechanical transformation or translation of a Source Code Form, including but not limited to compiled object code, generated documentation, and conversions to other media types.
+
+"Work" means the work of authorship, whether in Source Code Form or Object Code Form, made available under the License, as indicated by a copyright notice that is included in or attached to the work.
+
+"You" (or "Your") means an individual or a legal entity exercising rights under this License. For legal entities, "You" includes any entity that controls, is controlled by, or is under common control with You. For purposes of this definition, "control" means (a) the power, direct or indirect, to cause the direction or management of such entity, whether by contract or otherwise, or (b) ownership of more than fifty percent (50%) of the outstanding shares or beneficial ownership of such entity.
+
+"Non-Commercial Use" means any use of the Software that is not intended for or directed toward commercial advantage or monetary compensation.
+
+Restrictions
+
+The license granted hereunder will terminate, automatically and without notice, if you (or any of your subsidiaries, corporate affiliates or agents) initiate directly or indirectly, or take a direct financial interest in, any Patent Assertion: (i) against the Licensor or any contributors (or any of their affiliates, agents, suppliers or customers) alleging that the Software infringes such patent, or (ii) against any Software user alleging that any Software Version that the Licensor made available infringes such patent.
+
+The license granted hereunder will terminate, automatically and without notice, if you use the Licensed Work for any Commercial Use (as defined below) except as expressly permitted under the "Free Use" section below.
+
+"Commercial Use" means any use of the Licensed Work, whether directly or indirectly, for commercial advantage or monetary compensation, including but not limited to:
+- Use in production environments for commercial purposes
+- Use by commercial entities or organizations
+- Use to provide services to third parties for compensation
+- Use in any environment where the Software is used to generate revenue
+
+Free Use
+
+Notwithstanding the restrictions above, you may use the Licensed Work free of charge under the following conditions:
+
+1. Single Server, Non-Commercial Use: You may use the Software on a single physical or virtual server for non-commercial purposes without any restrictions. This includes:
+   - Personal use
+   - Educational use
+   - Development and testing
+   - Home lab environments
+   - Non-profit organizations (subject to the single server limitation)
+
+2. Evaluation and Testing: You may use the Software for evaluation, testing, and development purposes on any number of servers, provided such use is not for commercial purposes.
+
+3. Open Source Projects: You may use the Software in open source projects that are licensed under an OSI-approved open source license, provided the Software itself remains subject to this License.
+
+Commercial Licensing
+
+For any use that does not qualify under the "Free Use" section above, including but not limited to:
+- Production use in commercial environments
+- Use on multiple servers
+- Use by commercial entities
+- Use to provide commercial services
+
+You must obtain a separate commercial license from the Licensor. Please contact licensing@kcorehypervisor.com for commercial licensing inquiries.
+
+No Warranty
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
