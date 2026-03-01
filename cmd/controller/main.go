@@ -14,7 +14,9 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	ctrlpb "github.com/kcore/kcore/api/controller"
+	cppb "github.com/kcore/kcore/api/controlplane"
 	"github.com/kcore/kcore/pkg/controller"
+	"github.com/kcore/kcore/pkg/controlplane"
 )
 
 func main() {
@@ -49,6 +51,7 @@ func main() {
 
 	// Create controller server
 	server := controller.NewServer()
+	controlPlaneServer := controlplane.NewService(server)
 	// Reuse runtime TLS materials for controller->node RPCs too.
 	server.SetNodeDialCredentials(credentials.NewTLS(&tls.Config{
 		Certificates:       []tls.Certificate{cert},
@@ -61,6 +64,7 @@ func main() {
 	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))
 	ctrlpb.RegisterControllerServer(grpcServer, server)
 	ctrlpb.RegisterControllerAdminServer(grpcServer, server)
+	cppb.RegisterControlPlaneServer(grpcServer, controlPlaneServer)
 
 	// Start listening
 	listener, err := net.Listen("tcp", *listenAddr)
