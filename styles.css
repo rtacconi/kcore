@@ -34,6 +34,8 @@
     --accent-primary: #6366f1;
     --accent-secondary: #8b5cf6;
     --accent-hover: #818cf8;
+    --link-color: #7c3aed;
+    --link-hover: #6d28d9;
     --border-color: #e5e5e5;
     --border-hover: #d4d4d4;
     --gradient-primary: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
@@ -563,13 +565,18 @@ body {
 }
 
 .docs-link {
-    color: var(--accent-primary);
+    color: var(--link-color);
     font-weight: 500;
     font-size: 14px;
     margin-top: auto;
     display: inline-flex;
     align-items: center;
     gap: 4px;
+    transition: color 0.2s ease;
+}
+
+.docs-card:hover .docs-link {
+    color: var(--link-hover);
 }
 
 .docs-card:hover .docs-link {
@@ -768,11 +775,12 @@ body {
 }
 
 .license-note a {
-    color: var(--accent-primary);
+    color: var(--link-color);
     text-decoration: none;
 }
 
 .license-note a:hover {
+    color: var(--link-hover);
     text-decoration: underline;
 }
 
@@ -815,11 +823,12 @@ body {
 }
 
 .footer-license a {
-    color: var(--accent-primary);
+    color: var(--link-color);
     text-decoration: none;
 }
 
 .footer-license a:hover {
+    color: var(--link-hover);
     text-decoration: underline;
 }
 
@@ -891,7 +900,7 @@ body {
 }
 
 .footer-column a:hover {
-    color: var(--text-primary);
+    color: var(--link-color);
 }
 
 .footer-bottom {
