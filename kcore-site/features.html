@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Explore kcore's powerful features - atomic updates, AI automation, and declarative infrastructure">
+    <title>Features - kcore.systems</title>
+    <link rel="stylesheet" href="css/styles.css">
+    <style>
+        .features-hero {
+            padding: 8rem 0 4rem;
+            margin-top: 60px;
+            text-align: center;
+            background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+        }
+
+        .features-hero h1 {
+            margin-bottom: 1rem;
+        }
+
+        .features-hero p {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin: 0 auto;
+        }
+
+        .feature-section {
+            padding: 4rem 0;
+        }
+
+        .feature-section:nth-child(even) {
+            background: var(--bg-secondary);
+        }
+
+        .feature-detail {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+            margin-bottom: 4rem;
+        }
+
+        .feature-detail:nth-child(even) .feature-detail-text {
+            order: 2;
+        }
+
+        .feature-detail-text h2 {
+            margin-bottom: 1rem;
+        }
+
+        .feature-detail-text p {
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin-bottom: 1.5rem;
+        }
+
+        .feature-list-items {
+            list-style: none;
+            margin: 1.5rem 0;
+        }
+
+        .feature-list-items li {
+            display: flex;
+            align-items: start;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.5rem;
+        }
+
+        .feature-list-items .icon {
+            flex-shrink: 0;
+            width: 2rem;
+            height: 2rem;
+            background: var(--accent-gradient);
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: bold;
+        }
+
+        .feature-visual {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .feature-visual::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 200px;
+            background: radial-gradient(circle at 50% 0%, rgba(99, 102, 241, 0.1), transparent);
+        }
+
+        .feature-diagram {
+            position: relative;
+            z-index: 1;
+        }
+
+        .diagram-box {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-secondary);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin: 0.5rem 0;
+            text-align: center;
+        }
+
+        .diagram-arrow {
+            text-align: center;
+            color: var(--accent-primary);
+            font-size: 1.5rem;
+            margin: 0.5rem 0;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 2rem;
+            margin: 3rem 0;
+        }
+
+        .stat-card {
+            text-align: center;
+            padding: 2rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+        }
+
+        .stat-number {
+            font-size: 3rem;
+            font-weight: 700;
+            background: var(--accent-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 2rem 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+            overflow: hidden;
+        }
+
+        .comparison-table th,
+        .comparison-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-primary);
+        }
+
+        .comparison-table th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+        }
+
+        .comparison-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .check-mark {
+            color: var(--success);
+            font-size: 1.2rem;
+        }
+
+        .cross-mark {
+            color: var(--text-tertiary);
+            font-size: 1.2rem;
+        }
+
+        @media (max-width: 968px) {
+            .feature-detail {
+                grid-template-columns: 1fr;
+            }
+
+            .feature-detail:nth-child(even) .feature-detail-text {
+                order: 1;
+            }
+
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">.systems</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="index.html#platform">Platform</a></li>
+                <li><a href="index.html#ai">AI Integration</a></li>
+                <li><a href="docs.html">Docs</a></li>
+                <li><a href="index.html#get-started" class="btn-primary">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="features-hero">
+        <div class="container">
+            <h1>Powerful Features for Modern Infrastructure</h1>
+            <p>
+                Built from the ground up for reliability, automation, and developer experience. 
+                Everything you need to run production workloads at scale.
+            </p>
+        </div>
+    </section>
+
+    <!-- Stats Section -->
+    <section class="feature-section">
+        <div class="container">
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-number">&lt;5s</div>
+                    <div class="stat-label">VM Provisioning Time</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">100%</div>
+                    <div class="stat-label">Rollback Success Rate</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number">0</div>
+                    <div class="stat-label">Downtime Updates</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Atomic Updates Feature -->
+    <section class="feature-section">
+        <div class="container">
+            <div class="feature-detail">
+                <div class="feature-detail-text">
+                    <h2>Atomic Updates & Instant Rollback</h2>
+                    <p>
+                        Never worry about broken deployments again. kcore's atomic update system ensures 
+                        that every change is either fully applied or completely reverted - no half-broken states.
+                    </p>
+                    <ul class="feature-list-items">
+                        <li>
+                            <span class="icon">✓</span>
+                            <div>
+                                <strong>Immutable Base System</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    The core OS never changes. All updates are versioned and isolated.
+                                </span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="icon">✓</span>
+                            <div>
+                                <strong>One-Click Rollback</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    Instantly revert to any previous state with zero downtime.
+                                </span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="icon">✓</span>
+                            <div>
+                                <strong>State Verification</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    Automatic health checks ensure updates are successful before committing.
+                                </span>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+                <div class="feature-visual">
+                    <div class="feature-diagram">
+                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">
+                            Version 1 (Current)
+                        </div>
+                        <div class="diagram-arrow">↓</div>
+                        <div class="diagram-box" style="background: rgba(139, 92, 246, 0.1);">
+                            Apply Update → Version 2
+                        </div>
+                        <div class="diagram-arrow">↓</div>
+                        <div class="diagram-box" style="background: rgba(16, 185, 129, 0.1);">
+                            ✓ Health Check Passed
+                        </div>
+                        <div style="margin: 2rem 0; text-align: center; color: var(--text-tertiary);">
+                            or
+                        </div>
+                        <div class="diagram-box" style="background: rgba(239, 68, 68, 0.1);">
+                            ✗ Health Check Failed
+                        </div>
+                        <div class="diagram-arrow">↓</div>
+                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">
+                            Auto Rollback → Version 1
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Declarative Infrastructure -->
+    <section class="feature-section">
+        <div class="container">
+            <div class="feature-detail">
+                <div class="feature-detail-text">
+                    <h2>Declarative Infrastructure as Code</h2>
+                    <p>
+                        Define your entire infrastructure in code. Version control everything from VMs to networks 
+                        to storage. No more clicking through UIs or running manual commands.
+                    </p>
+                    <ul class="feature-list-items">
+                        <li>
+                            <span class="icon">📝</span>
+                            <div>
+                                <strong>Native Terraform Provider</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    First-class integration with your existing Terraform workflows.
+                                </span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="icon">🔄</span>
+                            <div>
+                                <strong>GitOps Ready</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    Commit infrastructure changes and watch them automatically deploy.
+                                </span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="icon">📊</span>
+                            <div>
+                                <strong>State Management</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    Automatic drift detection and reconciliation keeps reality in sync.
+                                </span>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+                <div class="feature-visual">
+                    <pre style="margin: 0; font-family: var(--font-mono); font-size: 0.875rem; line-height: 1.6;"><code><span class="code-comment"># Infrastructure as Code</span>
+<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"web"</span> {
+  <span class="code-property">count</span>  = <span class="code-number">3</span>
+  <span class="code-property">name</span>   = <span class="code-string">"web-${count.index}"</span>
+  <span class="code-property">memory</span> = <span class="code-number">4096</span>
+  <span class="code-property">vcpu</span>   = <span class="code-number">2</span>
+  
+  <span class="code-keyword">disk</span> {
+    <span class="code-property">size</span>         = <span class="code-string">"50GB"</span>
+    <span class="code-property">storage_class</span> = <span class="code-string">"ssd"</span>
+  }
+  
+  <span class="code-keyword">network</span> {
+    <span class="code-property">name</span> = <span class="code-string">"production"</span>
+  }
+}
+
+<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"db"</span> {
+  <span class="code-property">name</span>   = <span class="code-string">"postgres"</span>
+  <span class="code-property">memory</span> = <span class="code-number">8192</span>
+  <span class="code-property">vcpu</span>   = <span class="code-number">4</span>
+  
+  <span class="code-keyword">disk</span> {
+    <span class="code-property">size</span>         = <span class="code-string">"200GB"</span>
+    <span class="code-property">storage_class</span> = <span class="code-string">"nvme"</span>
+  }
+}</code></pre>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- AI Integration -->
+    <section class="feature-section">
+        <div class="container">
+            <div class="feature-detail">
+                <div class="feature-detail-text">
+                    <h2>AI-Powered Automation</h2>
+                    <p>
+                        The first virtualization platform with native AI integration. Describe what you want 
+                        in natural language and watch the AI generate, validate, and deploy production-ready infrastructure.
+                    </p>
+                    <ul class="feature-list-items">
+                        <li>
+                            <span class="icon">🤖</span>
+                            <div>
+                                <strong>MCP Server Built-in</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    Model Context Protocol lets any AI agent interact with your infrastructure.
+                                </span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="icon">💡</span>
+                            <div>
+                                <strong>Intelligent Code Generation</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    Converts natural language to optimized Terraform configurations.
+                                </span>
+                            </div>
+                        </li>
+                        <li>
+                            <span class="icon">📈</span>
+                            <div>
+                                <strong>Auto-Optimization</strong><br>
+                                <span style="color: var(--text-tertiary);">
+                                    ML models analyze workloads and suggest resource optimizations.
+                                </span>
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+                <div class="feature-visual">
+                    <div style="background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
+                        <div style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.5rem;">User:</div>
+                        <div>"Create a web cluster with 3 servers, load balanced, with a PostgreSQL database"</div>
+                    </div>
+                    <div style="text-align: center; color: var(--accent-primary); margin: 1rem 0;">
+                        ⚡ AI Processing
+                    </div>
+                    <div style="background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 0.5rem; padding: 1rem;">
+                        <div style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.5rem;">AI Agent:</div>
+                        <div style="margin-bottom: 1rem;">"I'll create that infrastructure for you:"</div>
+                        <pre style="margin: 0; font-size: 0.75rem; line-height: 1.4;"><code>✓ 3x web servers (4GB RAM each)
+✓ 1x PostgreSQL (8GB RAM)
+✓ Load balancer configured
+✓ Network policies applied</code></pre>
+                        <div style="margin-top: 1rem; padding: 0.5rem; background: rgba(16, 185, 129, 0.1); border-radius: 0.25rem; font-size: 0.875rem;">
+                            ✓ All resources deployed successfully
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Comparison Table -->
+    <section class="feature-section">
+        <div class="container">
+            <h2 style="text-align: center; margin-bottom: 3rem;">How kcore Compares</h2>
+            <table class="comparison-table">
+                <thead>
+                    <tr>
+                        <th>Feature</th>
+                        <th>kcore</th>
+                        <th>Traditional VMs</th>
+                        <th>Container Orchestration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Atomic Updates</td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span class="cross-mark">✗</span></td>
+                        <td><span class="check-mark">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>Instant Rollback</td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span class="cross-mark">✗</span></td>
+                        <td><span class="check-mark">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>Infrastructure as Code</td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span style="color: var(--warning);">Partial</span></td>
+                        <td><span class="check-mark">✓</span></td>
+                    </tr>
+                    <tr>
+                        <td>AI Integration</td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span class="cross-mark">✗</span></td>
+                        <td><span class="cross-mark">✗</span></td>
+                    </tr>
+                    <tr>
+                        <td>Full OS Isolation</td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span class="cross-mark">✗</span></td>
+                    </tr>
+                    <tr>
+                        <td>Legacy App Support</td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span class="check-mark">✓</span></td>
+                        <td><span style="color: var(--warning);">Limited</span></td>
+                    </tr>
+                    <tr>
+                        <td>Resource Efficiency</td>
+                        <td><span style="color: var(--success);">High</span></td>
+                        <td><span style="color: var(--warning);">Medium</span></td>
+                        <td><span style="color: var(--success);">Very High</span></td>
+                    </tr>
+                    <tr>
+                        <td>Learning Curve</td>
+                        <td><span style="color: var(--success);">Low</span></td>
+                        <td><span style="color: var(--success);">Low</span></td>
+                        <td><span style="color: var(--warning);">High</span></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta" style="margin-top: 0;">
+        <div class="container">
+            <div class="cta-content">
+                <h2>Experience the Future of Virtualization</h2>
+                <p>Get started with kcore today and transform how you manage infrastructure.</p>
+                <div class="cta-buttons">
+                    <a href="docs.html" class="btn btn-primary btn-large">Read the Docs</a>
+                    <a href="index.html#get-started" class="btn btn-secondary btn-large">Get Started</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>kcore</h4>
+                    <p>Next-generation virtualization platform powered by AI</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Product</h4>
+                    <ul>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="index.html#platform">Platform</a></li>
+                        <li><a href="index.html#ai">AI Integration</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="docs.html">Documentation</a></li>
+                        <li><a href="#">API Reference</a></li>
+                        <li><a href="#">GitHub</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Company</h4>
+                    <ul>
+                        <li><a href="#">About</a></li>
+                        <li><a href="#">Blog</a></li>
+                        <li><a href="#">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
+
+

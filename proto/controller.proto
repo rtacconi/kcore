@@ -1,0 +1,228 @@
+syntax = "proto3";
+
+package kcore.controller;
+
+option go_package = "github.com/kcore/kcore/api/controller";
+
+import "google/protobuf/timestamp.proto";
+
+// Controller service - orchestrates VMs across nodes
+service Controller {
+  // Node registration and heartbeat
+  rpc RegisterNode(RegisterNodeRequest) returns (RegisterNodeResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc SyncVmState(SyncVmStateRequest) returns (SyncVmStateResponse);
+  
+  // VM operations (forwarded to nodes)
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+  rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
+  rpc StartVm(StartVmRequest) returns (StartVmResponse);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
+  rpc GetVm(GetVmRequest) returns (GetVmResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+  
+  // Node operations
+  rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
+  rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+}
+
+message RegisterNodeRequest {
+  string node_id = 1;
+  string hostname = 2;
+  string address = 3; // gRPC endpoint address
+  NodeCapacity capacity = 4;
+  repeated string labels = 5; // e.g., "dc=dc-a", "rack=rack-1"
+}
+
+message RegisterNodeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  NodeUsage usage = 2;
+}
+
+message HeartbeatResponse {
+  bool success = 1;
+}
+
+message SyncVmStateRequest {
+  string node_id = 1;
+  repeated VmInfo vms = 2;  // Complete list of VMs currently on this node
+}
+
+message SyncVmStateResponse {
+  bool success = 1;
+}
+
+message NodeCapacity {
+  int32 cpu_cores = 1;
+  int64 memory_bytes = 2;
+}
+
+message NodeUsage {
+  int32 cpu_cores_used = 1;
+  int64 memory_bytes_used = 2;
+}
+
+// VM Operations - all include target_node for explicit node selection
+
+message CreateVmRequest {
+  string target_node = 1;  // Node address (e.g., "192.168.1.10:9091") - optional, controller picks if empty
+  VmSpec spec = 2;
+}
+
+message CreateVmResponse {
+  string vm_id = 1;
+  string node_id = 2;  // Which node created it
+  VmState state = 3;
+}
+
+message DeleteVmRequest {
+  string vm_id = 1;
+  string target_node = 2;  // Optional - controller finds it if empty
+}
+
+message DeleteVmResponse {
+  bool success = 1;
+}
+
+message StartVmRequest {
+  string vm_id = 1;
+  string target_node = 2;  // Optional
+}
+
+message StartVmResponse {
+  VmState state = 1;
+}
+
+message StopVmRequest {
+  string vm_id = 1;
+  bool force = 2;
+  string target_node = 3;  // Optional
+}
+
+message StopVmResponse {
+  VmState state = 1;
+}
+
+message GetVmRequest {
+  string vm_id = 1;
+  string target_node = 2;  // Optional
+}
+
+message GetVmResponse {
+  VmSpec spec = 1;
+  VmStatus status = 2;
+  string node_id = 3;  // Which node it's on
+}
+
+message ListVmsRequest {
+  string target_node = 1;  // Optional - list from specific node, or all nodes if empty
+}
+
+message ListVmsResponse {
+  repeated VmInfo vms = 1;
+}
+
+message VmInfo {
+  string id = 1;
+  string name = 2;
+  VmState state = 3;
+  int32 cpu = 4;
+  int64 memory_bytes = 5;
+  string node_id = 6;  // Which node it's on
+  google.protobuf.Timestamp created_at = 7;
+}
+
+// Node Operations
+
+message ListNodesRequest {}
+
+message ListNodesResponse {
+  repeated NodeInfo nodes = 1;
+}
+
+message NodeInfo {
+  string node_id = 1;
+  string hostname = 2;
+  string address = 3;
+  NodeCapacity capacity = 4;
+  NodeUsage usage = 5;
+  string status = 6;  // "ready", "not-ready", "unknown"
+  google.protobuf.Timestamp last_heartbeat = 7;
+}
+
+message GetNodeRequest {
+  string node_id = 1;
+}
+
+message GetNodeResponse {
+  NodeInfo node = 1;
+}
+
+// VM Spec (simplified from node.proto)
+
+message VmSpec {
+  string id = 1;
+  string name = 2;
+  int32 cpu = 3;
+  int64 memory_bytes = 4;
+  repeated Disk disks = 5;
+  repeated Nic nics = 6;
+}
+
+message Disk {
+  string name = 1;
+  string backend_handle = 2;
+  string bus = 3;
+  string device = 4;
+}
+
+message Nic {
+  string network = 1;
+  string model = 2;
+  string mac_address = 3;
+}
+
+enum VmState {
+  VM_STATE_UNKNOWN = 0;
+  VM_STATE_STOPPED = 1;
+  VM_STATE_RUNNING = 2;
+  VM_STATE_PAUSED = 3;
+  VM_STATE_ERROR = 4;
+}
+
+message VmStatus {
+  string id = 1;
+  VmState state = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// Management API messages (controller-side)
+
+message ApplyNixConfigRequest {
+  // Full contents to write to /etc/nixos/configuration.nix
+  string configuration_nix = 1;
+
+  // When true, run `nixos-rebuild switch` after writing the file.
+  // When false, only write the file.
+  bool rebuild = 2;
+}
+
+message ApplyNixConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ControllerAdmin service provides controller-level management operations.
+// For now this is intentionally unauthenticated and simple, for development use.
+service ControllerAdmin {
+  // ApplyNixConfig replaces the controller's /etc/nixos/configuration.nix with
+  // the provided content and (optionally) triggers a nixos-rebuild.
+  rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+}
+

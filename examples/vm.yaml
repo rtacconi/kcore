@@ -1,0 +1,23 @@
+apiVersion: kcore.io/v1
+kind: VM
+metadata:
+  name: example-vm
+  namespace: default
+spec:
+  nodeSelector:
+    dc: dc-a
+  cpu: 2
+  memoryBytes: 4GiB
+  disks:
+    - name: root
+      sizeBytes: 40GiB
+      storageClassName: local-lvm
+      bus: virtio
+    - name: data
+      sizeBytes: 100GiB
+      storageClassName: local-dir
+      bus: virtio
+  nics:
+    - network: default
+      model: virtio
+

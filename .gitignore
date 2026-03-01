@@ -1,31 +1,62 @@
-# Go
+# Devbox
+.devbox/
+devbox.lock
+
+# Binaries
 bin/
 *.exe
 *.exe~
 *.dll
 *.so
 *.dylib
-*.test
-*.out
-coverage*
 
-# Go modules
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
 vendor/
 
-# Protobuf generated code
-/gen/
+# Go workspace file
+go.work
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Generated protobuf code (optional - you may want to commit this)
+# api/
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Certificates and keys
+*.key
+*.crt
+*.pem
+!**/testdata/*.key
+!**/testdata/*.crt
+!**/testdata/*.pem
+
+# Logs
+*.log
 
 # Nix
-result
-result*
-.nix-result
-.cache/
-.direnv/
+result/
+result-*
 
-# OS junk
-.DS_Store
-*.swp
-
-# ISO outputs
+# ISO images
 *.iso
-/out/
+kcode.iso
+

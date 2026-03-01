@@ -1,0 +1,13 @@
+# Example terraform.tfvars file
+# Copy this to terraform.tfvars and adjust values as needed
+
+controller_address = "localhost:9090"
+insecure           = true
+
+# For production with TLS:
+# controller_address = "controller.example.com:9090"
+# insecure           = false
+# tls_cert_path      = "/path/to/client.crt"
+# tls_key_path       = "/path/to/client.key"
+# tls_ca_path        = "/path/to/ca.crt"
+

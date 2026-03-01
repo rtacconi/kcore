@@ -1,0 +1,48 @@
+name: Automated Commit
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      message:
+        description: 'Commit message'
+        required: false
+        default: 'chore: automated update'
+
+permissions:
+  contents: write
+
+jobs:
+  auto-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+      - name: Check for changes
+        id: check
+        run: |
+          git diff --quiet && echo "changed=false" >> $GITHUB_OUTPUT || echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Commit changes
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git add -A
+          COMMIT_MSG="${{ github.event.inputs.message || 'chore: automated update' }}"
+          git commit -m "$COMMIT_MSG [skip ci]" || exit 0
+
+      - name: Push changes
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          git push
+

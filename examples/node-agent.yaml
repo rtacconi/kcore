@@ -1,0 +1,39 @@
+# Node agent configuration example
+nodeId: my-node-01
+
+# Address to listen on (optional, defaults to ":9091")
+# - ":9091" listens on all interfaces
+# - "192.168.1.100:9091" binds to specific IP
+listenAddr: ":9091"
+
+# Controller address for registration and state sync (optional)
+# If empty, node runs standalone without controller integration
+# Example: "controller.example.com:9090"
+controllerAddr: ""
+
+tls:
+  caFile: /etc/kcore/certs/ca.crt
+  certFile: /etc/kcore/certs/node.crt
+  keyFile: /etc/kcore/certs/node.key
+
+# Network name to bridge/libvirt network mapping
+# - Use "default" for libvirt's default network (NAT with DHCP) - recommended
+# - Use "br0", "br1", etc. for custom bridge interfaces
+networks:
+  default: default  # libvirt default network (NAT + DHCP)
+
+# Storage driver configuration
+storage:
+  drivers:
+    local-dir:
+      type: local-dir
+      parameters:
+        path: /var/lib/kcore/disks
+    local-lvm:
+      type: local-lvm
+      parameters:
+        volumeGroup: vg0
+
+# Environment variables:
+# - KCORE_NODE_ADDRESS: Override the address sent to controller during registration
+#   Example: KCORE_NODE_ADDRESS=192.168.1.100:9091

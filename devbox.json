@@ -1,0 +1,37 @@
+{
+  "$schema": "https://raw.githubusercontent.com/jetpack-io/devbox/main/.schema/devbox.schema.json",
+  "packages": [
+    "go@1.22",
+    "protobuf@25",
+    "gnumake",
+    "podman",
+    "cdrtools",
+    "grpcurl",
+    "python3"
+  ],
+  "shell": {
+    "init_hook": [
+      "export PATH=\"$HOME/go/bin:$PATH\"",
+      "# Install Go protobuf plugins if not present",
+      "if ! command -v protoc-gen-go &> /dev/null; then go install google.golang.org/protobuf/cmd/protoc-gen-go@latest; fi",
+      "if ! command -v protoc-gen-go-grpc &> /dev/null; then go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; fi"
+    ],
+    "scripts": {
+      "proto": "make proto",
+      "build-controller": "make controller",
+      "build-kctl": "make kctl",
+      "build-node-agent": "make node-agent",
+      "build-iso": "make build-iso",
+      "start-controller": "./controller -config examples/controller.yaml",
+      "create-vm": "make create-vm",
+      "list-services": "make list-services",
+      "delete-vm": "make delete-vm",
+      "test-node": "make test-node",
+      "deploy-node": "make deploy-node",
+      "deploy-node-agent": "make deploy-node-agent NODE_HOST=root@192.168.40.146",
+      "write-usb": "make write-usb",
+      "help": "make help",
+      "serve-site": "cd kcore-site && python3 -m http.server 8000"
+    }
+  }
+}

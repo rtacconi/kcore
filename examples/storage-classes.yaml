@@ -1,0 +1,30 @@
+apiVersion: kcore.io/v1
+kind: StorageClass
+metadata:
+  name: local-dir
+spec:
+  driver: local-dir
+  shared: false
+  parameters:
+    path: /var/lib/kcore/disks
+
+---
+apiVersion: kcore.io/v1
+kind: StorageClass
+metadata:
+  name: local-lvm
+spec:
+  driver: local-lvm
+  shared: false
+  parameters:
+    volumeGroup: vg0
+
+---
+apiVersion: kcore.io/v1
+kind: Network
+metadata:
+  name: default
+spec:
+  bridgeName: br0
+  description: Default network bridge
+
