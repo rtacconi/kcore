@@ -63,6 +63,25 @@ body {
     transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Global link styles - light violet matching logo */
+a {
+    color: var(--link-color);
+    text-decoration: none;
+    transition: color 0.2s ease;
+}
+
+a:hover {
+    color: var(--link-hover);
+}
+
+/* Override for navigation and buttons that should use different colors */
+.nav-links a:not(.btn-primary),
+.btn,
+.btn-primary,
+.btn-secondary {
+    color: inherit;
+}
+
 .container {
     max-width: 1280px;
     margin: 0 auto;
