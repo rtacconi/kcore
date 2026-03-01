@@ -22,7 +22,9 @@ import (
 	"github.com/kcore/kcore/node/storage"
 	"github.com/kcore/kcore/pkg/config"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/status"
 )
 
 func main() {
@@ -185,10 +187,53 @@ func startStateSyncLoop(ctx context.Context, cfg *config.NodeAgentConfig, nodeSe
 	// Prefer explicit env var, otherwise auto-detect a routable address.
 	nodeAddress := resolveNodeAddress(cfg.ListenAddr)
 
-	// Register with controller first
+	registered := registerWithController(ctx, client, cfg.NodeID, nodeAddress)
+	if !registered {
+		// Keep running and retry in loop; this avoids requiring a process restart
+		// when controller is temporarily unavailable.
+		log.Printf("Continuing sync loop; will retry registration on next tick")
+	}
+
+	// Periodic sync loop
+	ticker := time.NewTicker(10 * time.Second)
+	defer ticker.Stop()
+
+	// Do initial sync immediately (after best-effort registration).
+	if registered {
+		if err := syncState(ctx, client, cfg.NodeID, nodeServer); err != nil {
+			if shouldReregister(err) {
+				log.Printf("Controller no longer recognizes this node, re-registering...")
+				registered = registerWithController(ctx, client, cfg.NodeID, nodeAddress)
+			}
+		}
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !registered {
+				registered = registerWithController(ctx, client, cfg.NodeID, nodeAddress)
+				if !registered {
+					continue
+				}
+			}
+
+			if err := syncState(ctx, client, cfg.NodeID, nodeServer); err != nil {
+				if shouldReregister(err) {
+					log.Printf("Sync failed with %v; attempting node re-registration", status.Code(err))
+					registered = registerWithController(ctx, client, cfg.NodeID, nodeAddress)
+				}
+			}
+		}
+	}
+}
+
+func registerWithController(ctx context.Context, client ctrlpb.ControllerClient, nodeID, nodeAddress string) bool {
 	regResp, err := client.RegisterNode(ctx, &ctrlpb.RegisterNodeRequest{
-		NodeId:   cfg.NodeID,
-		Hostname: cfg.NodeID,
+		NodeId:   nodeID,
+		Hostname: nodeID,
 		Address:  nodeAddress,
 		Capacity: &ctrlpb.NodeCapacity{
 			CpuCores:    8,                       // TODO: Get from system info
@@ -197,29 +242,14 @@ func startStateSyncLoop(ctx context.Context, cfg *config.NodeAgentConfig, nodeSe
 	})
 	if err != nil {
 		log.Printf("Failed to register with controller: %v", err)
-		return
+		return false
 	}
 	if regResp != nil && !regResp.Success {
 		log.Printf("Controller rejected node registration: %s", regResp.Message)
-		return
+		return false
 	}
 	log.Printf("✅ Registered with controller")
-
-	// Periodic sync loop
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	// Do initial sync immediately
-	syncState(ctx, client, cfg.NodeID, nodeServer)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			syncState(ctx, client, cfg.NodeID, nodeServer)
-		}
-	}
+	return true
 }
 
 func resolveNodeAddress(listenAddr string) string {
@@ -292,12 +322,12 @@ func detectPrimaryIPv4() string {
 	return ""
 }
 
-func syncState(ctx context.Context, client ctrlpb.ControllerClient, nodeID string, nodeServer *node.Server) {
+func syncState(ctx context.Context, client ctrlpb.ControllerClient, nodeID string, nodeServer *node.Server) error {
 	// List all VMs from local libvirt
 	resp, err := nodeServer.ListVms(ctx, &nodepb.ListVmsRequest{})
 	if err != nil {
 		log.Printf("Failed to list VMs for sync: %v", err)
-		return
+		return err
 	}
 
 	// Convert to controller VmInfo format
@@ -320,10 +350,23 @@ func syncState(ctx context.Context, client ctrlpb.ControllerClient, nodeID strin
 	})
 	if err != nil {
 		log.Printf("Failed to sync state to controller: %v", err)
-		return
+		return err
 	}
 
 	log.Printf("Synced state: %d VMs to controller", len(vms))
+	return nil
+}
+
+func shouldReregister(err error) bool {
+	if err == nil {
+		return false
+	}
+	switch status.Code(err) {
+	case codes.NotFound, codes.Unavailable:
+		return true
+	default:
+		return false
+	}
 }
 
 func loadTLSCredentials(tlsCfg config.TLSConfig) credentials.TransportCredentials {

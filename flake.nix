@@ -342,6 +342,30 @@
               '';
             };
           };
+
+          devShells.default = pkgs.mkShell {
+            packages = with pkgs; [
+              go_1_24
+              gopls
+              protobuf
+              protoc-gen-go
+              protoc-gen-go-grpc
+              opentofu
+              git
+              jq
+              yq-go
+              openssl
+              pkg-config
+            ] ++ lib.optionals pkgs.stdenv.isLinux [
+              libvirt
+              qemu_kvm
+            ];
+
+            shellHook = ''
+              export PATH="$PATH:$(go env GOPATH)/bin"
+              echo "kcore dev shell ready (go/protobuf/opentofu)."
+            '';
+          };
         }
       ) // {
       nixosConfigurations.kvm-node = nixpkgs.lib.nixosSystem {

@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Wrapper for the repo flake dev shell.
+#
+# Examples:
+#   ./nix_shell
+#   ./nix_shell go test ./node
+#   ./nix_shell bash
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+if [ "$#" -eq 0 ]; then
+  exec nix --extra-experimental-features "nix-command flakes" \
+    develop "${REPO_ROOT}" -c bash
+fi
+
+exec nix --extra-experimental-features "nix-command flakes" \
+  develop "${REPO_ROOT}" -c "$@"

@@ -1,0 +1,7 @@
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.*
+.terraformrc.local
+.providers/
+.last_test_id

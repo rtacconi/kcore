@@ -5,11 +5,14 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 
 	pb "github.com/kcore/kcore/api/controller"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func resourceVM() *schema.Resource {
@@ -132,9 +135,11 @@ func resourceVM() *schema.Resource {
 
 func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
 	client := meta.(*apiClient)
+	vmID := uuid.NewString()
 
 	// Build VM spec
 	spec := &pb.VmSpec{
+		Id:          vmID,
 		Name:        d.Get("name").(string),
 		Cpu:         int32(d.Get("cpu").(int)),
 		MemoryBytes: int64(d.Get("memory_bytes").(int)),
@@ -185,11 +190,14 @@ func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interfac
 		return diag.FromErr(fmt.Errorf("failed to create VM: %w", err))
 	}
 
-	// Set the ID
-	d.SetId(resp.VmId)
-
-	// Read back the VM to populate computed fields
-	return resourceVMRead(ctx, d, meta)
+	createdID := resp.VmId
+	if createdID == "" {
+		createdID = vmID
+	}
+	d.SetId(createdID)
+	_ = d.Set("node_id", resp.NodeId)
+	_ = d.Set("state", resp.State.String())
+	return nil
 }
 
 func resourceVMRead(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
@@ -204,9 +212,12 @@ func resourceVMRead(ctx context.Context, d *schema.ResourceData, meta interface{
 
 	resp, err := client.controller.GetVm(ctx, req)
 	if err != nil {
-		// VM not found, remove from state
-		d.SetId("")
-		return diags
+		if status.Code(err) == codes.NotFound {
+			// VM not found, remove from state.
+			d.SetId("")
+			return diags
+		}
+		return diag.FromErr(fmt.Errorf("failed to read VM %s: %w", vmID, err))
 	}
 
 	// Set computed fields

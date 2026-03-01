@@ -8,6 +8,19 @@ All commands are available via Make. Run `make help` for a quick overview.
 
 ## 📦 Build Commands
 
+### Nix Shell Wrapper
+```bash
+./nix_shell
+```
+Opens the repo flake dev shell with standard tooling (`go`, `protobuf`, `opentofu`, etc.).
+
+```bash
+./nix_shell go test ./node
+./nix_shell bash
+```
+This is a convenience wrapper for:
+`nix --extra-experimental-features 'nix-command flakes' develop . -c ...`
+
 ### Generate Protobuf Code
 ```bash
 make proto
@@ -26,7 +39,7 @@ Script: `scripts/` (inline in Makefile)
 
 ### Run Go Tests (without global Go install)
 ```bash
-nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#go -c go test ./node
+./nix_shell go test ./node
 ```
 Use this form instead of plain `go test` on hosts without global Go installed.
 

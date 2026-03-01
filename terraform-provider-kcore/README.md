@@ -55,7 +55,7 @@ provider "kcore" {
   # tls_key_path  = "/path/to/client.key"
   # tls_ca_path   = "/path/to/ca.crt"
   
-  # For insecure (development only):
+  # For insecure verification (development only):
   insecure = true
 }
 ```
@@ -68,7 +68,7 @@ You can also configure the provider using environment variables:
 - `KCORE_TLS_CERT` - Path to TLS certificate
 - `KCORE_TLS_KEY` - Path to TLS key
 - `KCORE_TLS_CA` - Path to CA certificate
-- `KCORE_INSECURE` - Disable TLS verification (true/false)
+- `KCORE_INSECURE` - Skip TLS certificate verification (true/false)
 
 ### Resources
 

@@ -78,21 +78,28 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 
 	var opts []grpc.DialOption
 
-	if insecure {
+	// Backward-compatible plaintext mode only when explicitly insecure and no TLS material is provided.
+	if insecure && tlsCertPath == "" && tlsKeyPath == "" && tlsCAPath == "" {
 		opts = append(opts, grpc.WithInsecure())
-	} else if tlsCertPath != "" && tlsKeyPath != "" {
-		// Load client cert and key
-		cert, err := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
-		if err != nil {
-			return nil, diag.FromErr(fmt.Errorf("failed to load client cert: %w", err))
-		}
-
-		// Create TLS config
+	} else {
 		tlsConfig := &tls.Config{
-			Certificates: []tls.Certificate{cert},
+			InsecureSkipVerify: insecure,
 		}
 
-		// Load CA cert if provided
+		if (tlsCertPath == "") != (tlsKeyPath == "") {
+			return nil, diag.FromErr(fmt.Errorf("both tls_cert_path and tls_key_path must be provided together"))
+		}
+
+		// Load client cert and key when provided (mTLS).
+		if tlsCertPath != "" && tlsKeyPath != "" {
+			cert, err := tls.LoadX509KeyPair(tlsCertPath, tlsKeyPath)
+			if err != nil {
+				return nil, diag.FromErr(fmt.Errorf("failed to load client cert: %w", err))
+			}
+			tlsConfig.Certificates = []tls.Certificate{cert}
+		}
+
+		// Load CA cert if provided.
 		if tlsCAPath != "" {
 			caCert, err := os.ReadFile(tlsCAPath)
 			if err != nil {
@@ -103,14 +110,10 @@ func providerConfigure(ctx context.Context, d *schema.ResourceData) (interface{}
 			if !caCertPool.AppendCertsFromPEM(caCert) {
 				return nil, diag.FromErr(fmt.Errorf("failed to parse CA cert"))
 			}
-
 			tlsConfig.RootCAs = caCertPool
 		}
 
-		creds := credentials.NewTLS(tlsConfig)
-		opts = append(opts, grpc.WithTransportCredentials(creds))
-	} else {
-		opts = append(opts, grpc.WithInsecure())
+		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
 
 	// Connect to the controller
