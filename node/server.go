@@ -183,11 +183,71 @@ func (s *Server) prepareVMImage(vmID, baseImagePath string) (string, error) {
 	return vmDiskPath, nil
 }
 
+// detectImageFlavor returns a lightweight distro hint derived from image path/URI.
+func detectImageFlavor(imageRef string) string {
+	ref := strings.ToLower(imageRef)
+	switch {
+	case strings.Contains(ref, "ubuntu"):
+		return "ubuntu"
+	case strings.Contains(ref, "debian"):
+		return "debian"
+	default:
+		return "generic"
+	}
+}
+
+func buildCloudInitUserData(imageRef string, enableKcoreLogin bool) (string, string) {
+	flavor := detectImageFlavor(imageRef)
+	userData := `#cloud-config
+ssh_pwauth: false
+disable_root: true
+runcmd:
+  - [ systemctl, enable, --now, serial-getty@ttyS0.service ]
+`
+
+	if enableKcoreLogin {
+		loginEntries := []string{
+			"root:kcore",
+			"kcore:kcore",
+		}
+		switch flavor {
+		case "debian":
+			loginEntries = append(loginEntries, "debian:kcore")
+		case "ubuntu":
+			loginEntries = append(loginEntries, "ubuntu:kcore")
+		}
+
+		// Cloud-config for enabled login mode:
+		// - stable admin account (kcore/kcore)
+		// - distro-default user password for convenience
+		// - root password + serial console
+		userData = fmt.Sprintf(`#cloud-config
+users:
+  - default
+  - name: kcore
+    groups: [sudo]
+    shell: /bin/bash
+    lock_passwd: false
+    plain_text_passwd: kcore
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+chpasswd:
+  list: |
+    %s
+  plaintext: true
+  expire: False
+ssh_pwauth: True
+disable_root: false
+runcmd:
+  - [ systemctl, enable, --now, serial-getty@ttyS0.service ]
+`, strings.Join(loginEntries, "\n    "))
+	}
+
+	return userData, flavor
+}
+
 // prepareCloudInitDisk creates a NoCloud seed ISO for cloud-init so that the
-// guest can be configured with a known root password and basic metadata.
-// We keep this intentionally minimal: just root password "kcore" and a
-// stable instance ID / hostname.
-func (s *Server) prepareCloudInitDisk(vmID, vmName string) (string, error) {
+// guest can be configured with known credentials and basic metadata.
+func (s *Server) prepareCloudInitDisk(vmID, vmName, imageRef string, enableKcoreLogin bool) (string, error) {
 	baseDir := filepath.Join("/var/lib/kcore/cloud-init", vmID)
 	if err := os.MkdirAll(baseDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create cloud-init dir: %w", err)
@@ -197,23 +257,7 @@ func (s *Server) prepareCloudInitDisk(vmID, vmName string) (string, error) {
 	metaDataPath := filepath.Join(baseDir, "meta-data")
 	seedPath := filepath.Join(baseDir, "seed.iso")
 
-	// Cloud-config used for all VMs booting from an image:
-	// - Set root password to "kcore"
-	// - Enable password-based SSH auth
-	// - Configure the primary virtio NIC (ens2) for DHCP using network v2
-	userData := `#cloud-config
-chpasswd:
-  list: |
-    root:kcore
-  expire: False
-ssh_pwauth: True
-disable_root: false
-network:
-  version: 2
-  ethernets:
-    ens2:
-      dhcp4: true
-`
+	userData, flavor := buildCloudInitUserData(imageRef, enableKcoreLogin)
 
 	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmID, vmName)
 
@@ -237,7 +281,7 @@ network:
 		return "", fmt.Errorf("failed to create cloud-init seed ISO: %w (output: %s)", err, strings.TrimSpace(string(output)))
 	}
 
-	log.Printf("Created cloud-init seed ISO for VM %s at %s", vmName, seedPath)
+	log.Printf("Created cloud-init seed ISO for VM %s at %s (image flavor: %s, enable-kcore-login=%t)", vmName, seedPath, flavor, enableKcoreLogin)
 	return seedPath, nil
 }
 
@@ -251,6 +295,7 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 
 	// Handle boot image if provided
 	var bootDiskPath string
+	var imageRef string
 	if req.ImageUri != "" || req.ImagePath != "" {
 		var baseImagePath string
 		var err error
@@ -274,6 +319,7 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 		if err != nil {
 			return nil, status.Errorf(codes.Internal, "failed to prepare VM image: %v", err)
 		}
+		imageRef = baseImagePath
 		log.Printf("VM %s will boot from %s", spec.Name, bootDiskPath)
 	}
 
@@ -300,11 +346,11 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 		// When we boot from an image, also attach a cloud-init NoCloud seed ISO
 		// so we can guarantee a known root password and basic metadata, without
 		// needing external cloud-init infrastructure.
-		if seedPath, err := s.prepareCloudInitDisk(spec.Id, spec.Name); err != nil {
+		if seedPath, err := s.prepareCloudInitDisk(spec.Id, spec.Name, imageRef, spec.EnableKcoreLogin); err != nil {
 			log.Printf("Warning: failed to prepare cloud-init disk for VM %s: %v", spec.Name, err)
 		} else {
-			// Attach the seed ISO as a separate disk. We treat it as a regular
-			// virtio disk; cloud-init will discover the filesystem by label.
+			// Attach the seed ISO as a separate raw data disk. Cloud-init NoCloud
+			// detects the `cidata` filesystem label from regular block devices.
 			libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
 				Name:          "cloud-init",
 				BackendHandle: seedPath,
@@ -400,12 +446,32 @@ func (s *Server) UpdateVm(ctx context.Context, req *node.UpdateVmRequest) (*node
 	}
 
 	libvirtSpec.Disks = make([]libvirtmgr.DiskSpec, 0, len(spec.Disks))
+	seedPath := filepath.Join("/var/lib/kcore/cloud-init", spec.Id, "seed.iso")
+	seedExists := false
+	if _, err := os.Stat(seedPath); err == nil {
+		seedExists = true
+		if _, err := s.prepareCloudInitDisk(spec.Id, spec.Name, "", spec.EnableKcoreLogin); err != nil {
+			log.Printf("Warning: failed to refresh cloud-init seed for VM %s: %v", spec.Name, err)
+		}
+	}
+	hasCloudInitDisk := false
 	for _, disk := range spec.Disks {
+		if disk.Name == "cloud-init" {
+			hasCloudInitDisk = true
+		}
 		libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
 			Name:          disk.Name,
 			BackendHandle: disk.BackendHandle,
 			Bus:           disk.Bus,
 			Device:        disk.Device,
+		})
+	}
+	if seedExists && !hasCloudInitDisk {
+		libvirtSpec.Disks = append(libvirtSpec.Disks, libvirtmgr.DiskSpec{
+			Name:          "cloud-init",
+			BackendHandle: seedPath,
+			Bus:           "virtio",
+			Device:        "vdb",
 		})
 	}
 

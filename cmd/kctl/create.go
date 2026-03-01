@@ -32,14 +32,15 @@ Available resource types:
 
 func newCreateVMCmd() *cobra.Command {
 	var (
-		cpu       int
-		memory    string
-		disk      string
-		image     string
-		node      string
-		network   string
-		bridge    string
-		autostart bool
+		cpu              int
+		memory           string
+		disk             string
+		image            string
+		node             string
+		network          string
+		bridge           string
+		autostart        bool
+		enableKcoreLogin bool
 	)
 
 	cmd := &cobra.Command{
@@ -127,12 +128,13 @@ Examples:
 			// If network is "default" or empty, server will add default NIC automatically
 
 			spec := &pb.VmSpec{
-				Id:          vmID,
-				Name:        name,
-				Cpu:         int32(cpu),
-				MemoryBytes: memoryBytes,
-				Disks:       []*pb.Disk{}, // Empty - will be added if image is provided
-				Nics:        nics,
+				Id:               vmID,
+				Name:             name,
+				Cpu:              int32(cpu),
+				MemoryBytes:      memoryBytes,
+				Disks:            []*pb.Disk{}, // Empty - will be added if image is provided
+				Nics:             nics,
+				EnableKcoreLogin: enableKcoreLogin,
 			}
 
 			// Create VM
@@ -187,6 +189,7 @@ Examples:
 	cmd.Flags().StringVar(&network, "network", "default", "Libvirt network name (e.g., 'default' for NAT, 'private' for isolated)")
 	cmd.Flags().StringVar(&bridge, "bridge", "", "Bridge interface for host subnet (e.g., 'br0'). VM gets IP from real subnet. Overrides --network")
 	cmd.Flags().BoolVar(&autostart, "autostart", false, "Start VM automatically after creation")
+	cmd.Flags().BoolVar(&enableKcoreLogin, "enable-kcore-login", false, "Enable known console/SSH credentials (kcore/kcore and distro default user) via cloud-init")
 
 	return cmd
 }

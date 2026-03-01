@@ -24,6 +24,12 @@ Script: `scripts/` (inline in Makefile)
 
 **Note:** The node-agent is automatically included in the kcore ISO. This build is only needed for updates/development.
 
+### Run Go Tests (without global Go install)
+```bash
+nix --extra-experimental-features 'nix-command flakes' shell nixpkgs#go -c go test ./node
+```
+Use this form instead of plain `go test` on hosts without global Go installed.
+
 ### Build Controller
 ```bash
 make controller
@@ -220,6 +226,24 @@ ssh root@$NODE_IP virsh list --all
 # Delete VM
 VM_ID=5fc2b3d5-57e0-4991-bc1e-349ee5ec3784 make delete-vm
 ```
+
+### 3b. Cloud Image Login Policy
+```bash
+# Secure default (no known guest password injected)
+kctl create vm ubuntu-secure \
+  --cpu 2 --memory 4G --disk 20G \
+  --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
+
+# Explicitly enable lab credentials for console/SSH
+kctl create vm ubuntu-lab \
+  --cpu 2 --memory 4G --disk 20G \
+  --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img \
+  --enable-kcore-login
+```
+
+When `--enable-kcore-login` is used, cloud-init adds known credentials:
+- `kcore/kcore`
+- distro default user (`ubuntu` for Ubuntu images, `debian` for Debian images)
 
 ### 4. Update Existing kcore Node
 ```bash

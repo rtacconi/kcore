@@ -16,6 +16,7 @@ install-to-disk
 
 # After reboot, manage VMs with kctl
 kctl create vm web-server --cpu 4 --memory 8G
+kctl create vm ubuntu-lab --cpu 2 --memory 4G --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img --enable-kcore-login
 kctl get vms
 kctl describe vm web-server
 ```
@@ -194,6 +195,13 @@ reboot
 # Create VM
 kctl create vm web-server --cpu 4 --memory 8G --disk 100G
 
+# Create Ubuntu cloud VM with explicit known guest credentials enabled
+# (guest password logins are disabled by default)
+kctl create vm ubuntu-lab \
+  --cpu 2 --memory 4G --disk 20G \
+  --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img \
+  --enable-kcore-login
+
 # List VMs
 kctl get vms
 
@@ -203,6 +211,10 @@ kctl describe vm web-server
 # Delete VM
 kctl delete vm web-server
 ```
+
+Guest login behavior for cloud images:
+- Default is secure: no default `kcore/kcore` guest password login is injected.
+- Use `--enable-kcore-login` only for labs/debugging where convenient console/SSH passwords are needed.
 
 ### Update Node
 

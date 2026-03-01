@@ -49,6 +49,13 @@ func main() {
 
 	// Create controller server
 	server := controller.NewServer()
+	// Reuse runtime TLS materials for controller->node RPCs too.
+	server.SetNodeDialCredentials(credentials.NewTLS(&tls.Config{
+		Certificates:       []tls.Certificate{cert},
+		RootCAs:            certPool,
+		InsecureSkipVerify: true, // Node cert SANs may not include dial target yet.
+		MinVersion:         tls.VersionTLS12,
+	}))
 
 	// Create gRPC server with TLS
 	grpcServer := grpc.NewServer(grpc.Creds(credentials.NewTLS(tlsConfig)))

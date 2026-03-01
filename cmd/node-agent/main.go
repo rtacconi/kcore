@@ -5,10 +5,13 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"flag"
+	"fmt"
 	"log"
 	"net"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -178,19 +181,12 @@ func startStateSyncLoop(ctx context.Context, cfg *config.NodeAgentConfig, nodeSe
 	client := ctrlpb.NewControllerClient(conn)
 	log.Printf("Connected to controller at %s", cfg.ControllerAddr)
 
-	// Get node's own address (required for registration)
-	// Try to get from environment, config, or use hostname
-	nodeAddress := os.Getenv("KCORE_NODE_ADDRESS")
-	if nodeAddress == "" {
-		// Could also try to auto-detect from network interfaces
-		// For now, require explicit configuration
-		hostname, _ := os.Hostname()
-		nodeAddress = hostname + ":9091"
-		log.Printf("Warning: KCORE_NODE_ADDRESS not set, using %s", nodeAddress)
-	}
+	// Get node's own address (required for registration).
+	// Prefer explicit env var, otherwise auto-detect a routable address.
+	nodeAddress := resolveNodeAddress(cfg.ListenAddr)
 
 	// Register with controller first
-	_, err = client.RegisterNode(ctx, &ctrlpb.RegisterNodeRequest{
+	regResp, err := client.RegisterNode(ctx, &ctrlpb.RegisterNodeRequest{
 		NodeId:   cfg.NodeID,
 		Hostname: cfg.NodeID,
 		Address:  nodeAddress,
@@ -201,6 +197,10 @@ func startStateSyncLoop(ctx context.Context, cfg *config.NodeAgentConfig, nodeSe
 	})
 	if err != nil {
 		log.Printf("Failed to register with controller: %v", err)
+		return
+	}
+	if regResp != nil && !regResp.Success {
+		log.Printf("Controller rejected node registration: %s", regResp.Message)
 		return
 	}
 	log.Printf("✅ Registered with controller")
@@ -220,6 +220,76 @@ func startStateSyncLoop(ctx context.Context, cfg *config.NodeAgentConfig, nodeSe
 			syncState(ctx, client, cfg.NodeID, nodeServer)
 		}
 	}
+}
+
+func resolveNodeAddress(listenAddr string) string {
+	if v := strings.TrimSpace(os.Getenv("KCORE_NODE_ADDRESS")); v != "" {
+		return v
+	}
+
+	host, port, err := net.SplitHostPort(listenAddr)
+	if err != nil {
+		// Handle forms like ":9091" or invalid values; fallback to default port.
+		if strings.HasPrefix(listenAddr, ":") {
+			port = strings.TrimPrefix(listenAddr, ":")
+		} else {
+			port = "9091"
+		}
+		host = ""
+	}
+	if _, err := strconv.Atoi(port); err != nil || port == "" {
+		port = "9091"
+	}
+
+	trimmedHost := strings.TrimSpace(host)
+	if trimmedHost != "" && trimmedHost != "0.0.0.0" && trimmedHost != "::" && trimmedHost != ":::" {
+		return net.JoinHostPort(trimmedHost, port)
+	}
+
+	if ip := detectPrimaryIPv4(); ip != "" {
+		addr := net.JoinHostPort(ip, port)
+		log.Printf("KCORE_NODE_ADDRESS not set, auto-detected node address %s", addr)
+		return addr
+	}
+
+	hostname, _ := os.Hostname()
+	fallback := fmt.Sprintf("%s:%s", hostname, port)
+	log.Printf("Warning: could not auto-detect node IP, falling back to %s", fallback)
+	return fallback
+}
+
+func detectPrimaryIPv4() string {
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return ""
+	}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			var ip net.IP
+			switch v := addr.(type) {
+			case *net.IPNet:
+				ip = v.IP
+			case *net.IPAddr:
+				ip = v.IP
+			}
+			if ip == nil {
+				continue
+			}
+			ipv4 := ip.To4()
+			if ipv4 == nil || ipv4.IsLoopback() || ipv4.IsLinkLocalUnicast() {
+				continue
+			}
+			return ipv4.String()
+		}
+	}
+	return ""
 }
 
 func syncState(ctx context.Context, client ctrlpb.ControllerClient, nodeID string, nodeServer *node.Server) {

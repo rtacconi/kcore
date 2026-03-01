@@ -2,8 +2,6 @@ package controller
 
 import (
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"fmt"
 	"log"
 	"os"
@@ -26,9 +24,10 @@ import (
 type Server struct {
 	ctrlpb.UnimplementedControllerServer
 	ctrlpb.UnimplementedControllerAdminServer
-	nodes    map[string]*NodeInfo // nodeID -> NodeInfo
-	vmToNode map[string]string    // vmID -> nodeID
-	mu       sync.RWMutex
+	nodes         map[string]*NodeInfo // nodeID -> NodeInfo
+	vmToNode      map[string]string    // vmID -> nodeID
+	nodeDialCreds credentials.TransportCredentials
+	mu            sync.RWMutex
 }
 
 type NodeInfo struct {
@@ -48,6 +47,12 @@ func NewServer() *Server {
 		nodes:    make(map[string]*NodeInfo),
 		vmToNode: make(map[string]string),
 	}
+}
+
+func (s *Server) SetNodeDialCredentials(creds credentials.TransportCredentials) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.nodeDialCreds = creds
 }
 
 // ControllerAdmin implementation
@@ -102,44 +107,23 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Load TLS credentials for connecting to nodes
-	cert, err := tls.LoadX509KeyPair("certs/controller.crt", "certs/controller.key")
+	var (
+		conn         *grpc.ClientConn
+		client       nodepb.NodeComputeClient
+		status       = "ready"
+		responseMsg  = "Node registered successfully"
+		dialWarnText string
+	)
+	if s.nodeDialCreds != nil && req.Address != "" {
+		dialConn, err := grpc.Dial(req.Address, grpc.WithTransportCredentials(s.nodeDialCreds))
 	if err != nil {
-		return &ctrlpb.RegisterNodeResponse{
-			Success: false,
-			Message: fmt.Sprintf("failed to load client cert: %v", err),
-		}, nil
-	}
-
-	caCert, err := os.ReadFile("certs/ca.crt")
-	if err != nil {
-		return &ctrlpb.RegisterNodeResponse{
-			Success: false,
-			Message: fmt.Sprintf("failed to read CA cert: %v", err),
-		}, nil
-	}
-
-	certPool := x509.NewCertPool()
-	if !certPool.AppendCertsFromPEM(caCert) {
-		return &ctrlpb.RegisterNodeResponse{
-			Success: false,
-			Message: "failed to append CA cert",
-		}, nil
-	}
-
-	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		RootCAs:            certPool,
-		InsecureSkipVerify: true, // Skip verification for now (IPs not in cert SANs)
-	}
-
-	// Connect to node
-	conn, err := grpc.Dial(req.Address, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
-	if err != nil {
-		return &ctrlpb.RegisterNodeResponse{
-			Success: false,
-			Message: fmt.Sprintf("failed to connect to node: %v", err),
-		}, nil
+			status = "degraded"
+			dialWarnText = fmt.Sprintf(" (initial node dial failed: %v)", err)
+			responseMsg = "Node registered, but initial controller-to-node connection failed"
+		} else {
+			conn = dialConn
+			client = nodepb.NewNodeComputeClient(dialConn)
+		}
 	}
 
 	nodeInfo := &NodeInfo{
@@ -149,18 +133,18 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 		Capacity:      req.Capacity,
 		Usage:         &ctrlpb.NodeUsage{},
 		LastHeartbeat: time.Now(),
-		Status:        "ready",
-		Client:        nodepb.NewNodeComputeClient(conn),
+		Status:        status,
+		Client:        client,
 		Conn:          conn,
 	}
 
 	s.nodes[req.NodeId] = nodeInfo
 
-	log.Printf("Node registered: %s (%s) at %s", req.NodeId, req.Hostname, req.Address)
+	log.Printf("Node registered: %s (%s) at %s%s", req.NodeId, req.Hostname, req.Address, dialWarnText)
 
 	return &ctrlpb.RegisterNodeResponse{
 		Success: true,
-		Message: "Node registered successfully",
+		Message: responseMsg,
 	}, nil
 }
 

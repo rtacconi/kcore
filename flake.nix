@@ -448,7 +448,7 @@
                   # Node agent configuration
                   # Copy this to /etc/kcore/node-agent.yaml and update with your values
                   nodeId: kvm-node-01
-                  controllerAddr: "CHANGE_ME:9090"  # Replace with controller IP
+                  controllerAddr: ""  # Set to "<controller-ip>:9090" when controller is ready
 
                   tls:
                     caFile: /etc/kcore/ca.crt
@@ -546,11 +546,76 @@
               virtualisation.kvmgt.enable = false;
               virtualisation.libvirtd.enable = false;
               # QEMU is included in systemPackages below
+              systemd.services.kcore-bootstrap-certs = {
+                description = "Generate bootstrap TLS certificates for kcore node-agent";
+                wantedBy = [ "multi-user.target" ];
+                before = [ "kcore-node-agent.service" ];
+                serviceConfig = {
+                  Type = "oneshot";
+                  RemainAfterExit = true;
+                };
+                script = ''
+                  set -euo pipefail
+                  mkdir -p /etc/kcore
+
+                  if [ -s /etc/kcore/ca.crt ] && [ -s /etc/kcore/node.crt ] && [ -s /etc/kcore/node.key ]; then
+                    exit 0
+                  fi
+
+                  tmp="$(mktemp -d)"
+                  cleanup() {
+                    rm -rf "$tmp"
+                  }
+                  trap cleanup EXIT
+
+                  cat > "$tmp/node.cnf" <<'EOF'
+                  [ req ]
+                  default_bits = 2048
+                  prompt = no
+                  default_md = sha256
+                  distinguished_name = dn
+                  req_extensions = req_ext
+                  [ dn ]
+                  CN = kvm-node
+                  [ req_ext ]
+                  subjectAltName = @alt_names
+                  extendedKeyUsage = serverAuth,clientAuth
+                  [ alt_names ]
+                  DNS.1 = kvm-node
+                  DNS.2 = localhost
+                  IP.1 = 127.0.0.1
+                  EOF
+
+                  ${pkgs.openssl}/bin/openssl req -x509 -newkey rsa:4096 -sha256 -days 3650 -nodes \
+                    -subj "/CN=kcore-local-ca" \
+                    -keyout /etc/kcore/ca.key \
+                    -out /etc/kcore/ca.crt
+
+                  ${pkgs.openssl}/bin/openssl genrsa -out /etc/kcore/node.key 2048
+                  ${pkgs.openssl}/bin/openssl req -new \
+                    -key /etc/kcore/node.key \
+                    -out "$tmp/node.csr" \
+                    -config "$tmp/node.cnf"
+                  ${pkgs.openssl}/bin/openssl x509 -req \
+                    -in "$tmp/node.csr" \
+                    -CA /etc/kcore/ca.crt \
+                    -CAkey /etc/kcore/ca.key \
+                    -CAcreateserial \
+                    -out /etc/kcore/node.crt \
+                    -days 825 \
+                    -sha256 \
+                    -extensions req_ext \
+                    -extfile "$tmp/node.cnf"
+
+                  chmod 0644 /etc/kcore/ca.crt /etc/kcore/node.crt
+                  chmod 0600 /etc/kcore/ca.key /etc/kcore/node.key
+                '';
+              };
               systemd.services.kcore-node-agent = {
                 description = "kcore Node Agent";
                 wantedBy = [ "multi-user.target" ];
-                after = [ "network-online.target" "ovs-vswitchd.service" ];
-                wants = [ "network-online.target" "ovs-vswitchd.service" ];
+                after = [ "network-online.target" "ovs-vswitchd.service" "kcore-bootstrap-certs.service" ];
+                wants = [ "network-online.target" "ovs-vswitchd.service" "kcore-bootstrap-certs.service" ];
                 serviceConfig = {
                   Type = "simple";
                   # Use kcore-node-agent (the symlink created by postInstall)
@@ -583,7 +648,7 @@
                 "d /etc/kcore 0755 root root -"
               ];
               environment.systemPackages = with pkgs; [
-                qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq openvswitch nodeAgent
+                qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq openvswitch nodeAgent openssl
                 # Tools needed for install-to-disk script (parted is main missing one)
                 parted
                 (pkgs.writeScriptBin "install-to-disk" ''
@@ -762,6 +827,7 @@ $SSH_KEYS
     ];
   };
   users.mutableUsers = true;
+  users.groups.libvirt = {};
   
   services.openssh = {
     enable = true;
@@ -799,6 +865,13 @@ $SSH_KEYS
     after = [ "network-online.target" "libvirtd.service" "virtlogd.service" "ovs-vswitchd.service" ];
     wants = [ "network-online.target" "ovs-vswitchd.service" ];
     requires = [ "libvirtd.service" ];
+    unitConfig = {
+      ConditionPathExists = [
+        "/etc/kcore/ca.crt"
+        "/etc/kcore/node.crt"
+        "/etc/kcore/node.key"
+      ];
+    };
     
     serviceConfig = {
       Type = "simple";
@@ -846,6 +919,7 @@ $SSH_KEYS
                     libvirt
                     lvm2
                     parted
+                    openssl
                     openvswitch
                     ovn
                     cloud-utils
@@ -888,7 +962,7 @@ EOF
                   # Node agent configuration
                   # Managed by kcore ISO defaults – adjust values to your environment.
                   nodeId: kvm-node-01
-                  controllerAddr: "CHANGE_ME:9090"
+                  controllerAddr: ""
 
                   tls:
                     caFile: /etc/kcore/ca.crt

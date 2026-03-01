@@ -176,6 +176,17 @@ NODE_IP=192.168.40.146 make create-vm
 # }
 ```
 
+Cloud image login policy:
+- Default VM creation is secure: no default guest password login is injected.
+- For lab/debug use, explicitly enable known guest credentials:
+  ```bash
+  kctl create vm debian-lab \
+    --cpu 2 --memory 4G --disk 20G \
+    --image https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2 \
+    --enable-kcore-login
+  ```
+  This enables `kcore/kcore` and distro-default user password login in the guest.
+
 ---
 
 ## Step 8: Verify VM

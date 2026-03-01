@@ -145,6 +145,22 @@ On your controller (macOS), you should see logs like:
   networking.bridges.br0.interfaces = [ "YOUR_INTERFACE" ];
   ```
 
+## Cloud Image Guest Login Behavior
+
+For VMs created from cloud images:
+- Default: guest password login is **disabled** (secure default).
+- Optional: enable known credentials only when explicitly requested at VM creation time:
+  ```bash
+  kctl create vm ubuntu-lab \
+    --cpu 2 --memory 4G --disk 20G \
+    --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img \
+    --enable-kcore-login
+  ```
+
+When enabled, cloud-init injects:
+- `kcore/kcore`
+- distro default user password (`ubuntu` for Ubuntu images, `debian` for Debian images)
+
 ## What's Included in the Image
 
 - **kcore-node-agent**: Pre-compiled binary with libvirt support

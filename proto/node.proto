@@ -50,6 +50,7 @@ message VmSpec {
   int64 memory_bytes = 4;
   repeated Disk disks = 5;
   repeated Nic nics = 6;
+  bool enable_kcore_login = 7; // Enable known kcore credentials in cloud-init
 }
 
 message Disk {
