@@ -51,12 +51,16 @@ func New() *schema.Provider {
 			},
 		},
 		ResourcesMap: map[string]*schema.Resource{
-			"kcore_vm": resourceVM(),
+			"kcore_vm":               resourceVM(),
+			"kcore_enrollment_token": resourceEnrollmentToken(),
+			"kcore_node_enrollment":  resourceNodeEnrollment(),
+			"kcore_node_wait_ready":  resourceNodeWaitReady(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
-			"kcore_vm":    dataSourceVM(),
-			"kcore_node":  dataSourceNode(),
-			"kcore_nodes": dataSourceNodes(),
+			"kcore_vm":               dataSourceVM(),
+			"kcore_node":             dataSourceNode(),
+			"kcore_nodes":            dataSourceNodes(),
+			"kcore_bootstrap_config": dataSourceBootstrapConfig(),
 		},
 		ConfigureContextFunc: providerConfigure,
 	}
