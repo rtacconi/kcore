@@ -32,6 +32,29 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: '.'
+          exclude-paths: |
+            .git
+            .github
+            api
+            cmd
+            internal
+            node
+            pkg
+            proto
+            scripts
+            kcore-site
+            kcore-tech
+            modules
+            test
+            terraform-provider-kcore
+            examples
+            docs
+            *.nix
+            *.lock
+            go.*
+            Makefile
+            README.md
+            .gitignore
 
       - name: Deploy to GitHub Pages
         id: deployment
