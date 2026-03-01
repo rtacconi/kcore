@@ -6,6 +6,7 @@ Quick guide to set up and deploy the website to GitHub Pages.
 
 1. GitHub Personal Access Token with `repo` and `workflow` scopes
 2. Access to the `kcore-systems` organization
+3. Repository secret `WEBSITE_REPO_TOKEN` set in `kcore-systems/kcore` with access to `kcore-systems/website`
 
 ## Quick Setup
 
