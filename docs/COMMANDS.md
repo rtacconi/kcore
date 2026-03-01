@@ -79,6 +79,24 @@ Starts the kcore controller using `examples/controller.yaml` config.
 
 ---
 
+## 🧭 Unified ControlPlane (Scaffold)
+
+Unified admin + automation + orchestration command family:
+
+```bash
+kctl controlplane --help
+kctl cp config apply-controller --file ./configuration.nix
+kctl cp enroll token create
+kctl cp install status list
+```
+
+Notes:
+- `controlplane` has alias `cp`.
+- Current handlers are scaffolds and intentionally return not implemented.
+- See `docs/CONTROLPLANE_API.md` for rollout and API details.
+
+---
+
 ## ☁️ Node Management
 
 All node management commands require `NODE_IP` environment variable:
