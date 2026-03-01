@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore cli reference">
+    <title>CLI Reference - kcore Docs</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <style>
+        .docs-page {
+            margin-top: 80px;
+            padding: 2.5rem 0 4rem;
+        }
+        .docs-page p {
+            color: var(--text-secondary);
+        }
+        .docs-page h2 {
+            margin-top: 2rem;
+            margin-bottom: 0.75rem;
+        }
+        pre {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin: 0.75rem 0 1.25rem;
+            overflow-x: auto;
+        }
+        code {
+            font-family: var(--font-mono);
+        }
+        .top-links {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">.systems</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="../features.html">Features</a></li>
+                <li><a href="../index.html#platform">Platform</a></li>
+                <li><a href="../index.html#ai">AI Integration</a></li>
+                <li><a href="/docs/">Docs</a></li>
+                <li><a href="../index.html#get-started" class="btn-primary">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="docs-page">
+        <div class="container">
+            <div class="top-links">
+                <a href="/docs/">Docs Home</a>
+                <a href="quickstart.html">Quick Start</a>
+                <a href="architecture.html">Architecture</a>
+            </div>
+            <h1>CLI Reference</h1>
+            <p>Common `kctl` commands for day-to-day cluster and VM management.</p>
+
+            <h2>Inspect</h2>
+            <pre><code>kctl get vms
+kctl describe vm my-vm
+kctl get nodes</code></pre>
+
+            <h2>Lifecycle</h2>
+            <pre><code>kctl start vm my-vm
+kctl stop vm my-vm
+kctl restart vm my-vm
+kctl delete vm my-vm</code></pre>
+
+            <h2>Create and Apply</h2>
+            <pre><code>kctl create vm app --memory 4096 --vcpu 4 --disk size=40GB
+kctl apply -f vm.yaml</code></pre>
+
+            <h2>Configuration</h2>
+            <pre><code>cat ~/.kcore/config.yaml
+kctl version</code></pre>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore architecture documentation">
+    <title>Architecture - kcore Docs</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <style>
+        .docs-page {
+            margin-top: 80px;
+            padding: 2.5rem 0 4rem;
+        }
+        .docs-page p, .docs-page li {
+            color: var(--text-secondary);
+        }
+        .docs-page h2 {
+            margin-top: 2rem;
+            margin-bottom: 0.75rem;
+        }
+        .diagram {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin: 1rem 0;
+            line-height: 1.8;
+            font-family: var(--font-mono);
+            color: var(--text-secondary);
+            white-space: pre-wrap;
+        }
+        .top-links {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">.systems</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="../features.html">Features</a></li>
+                <li><a href="../index.html#platform">Platform</a></li>
+                <li><a href="../index.html#ai">AI Integration</a></li>
+                <li><a href="/docs/">Docs</a></li>
+                <li><a href="../index.html#get-started" class="btn-primary">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="docs-page">
+        <div class="container">
+            <div class="top-links">
+                <a href="/docs/">Docs Home</a>
+                <a href="quickstart.html">Quick Start</a>
+                <a href="cli-reference.html">CLI Reference</a>
+            </div>
+            <h1>Architecture</h1>
+            <p>kcore is composed of a control plane, node agents, and command-line/API clients.</p>
+
+            <h2>Core Components</h2>
+            <ul>
+                <li><strong>Controller:</strong> Stores desired state, schedules work, and serves the API.</li>
+                <li><strong>Node Agent:</strong> Runs on each host, executes workloads through local virtualization APIs.</li>
+                <li><strong>CLI/API Clients:</strong> `kctl`, Terraform, and automation interact with the controller.</li>
+            </ul>
+
+            <h2>High-Level Flow</h2>
+            <div class="diagram">kctl / Terraform / AI Agent
+        |
+        v
+    Controller API + scheduler
+        |
+        v
+   Node Agent (one per node)
+        |
+        v
+ libvirt + storage + network</div>
+
+            <h2>Reliability Model</h2>
+            <ul>
+                <li>Desired state is persisted and reconciled by the controller.</li>
+                <li>Agents report runtime status back to the control plane.</li>
+                <li>Failed operations can be retried without drift from source config.</li>
+            </ul>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>

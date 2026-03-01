@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore quick start documentation">
+    <title>Quick Start - kcore Docs</title>
+    <link rel="stylesheet" href="../css/styles.css">
+    <style>
+        .docs-page {
+            margin-top: 80px;
+            padding: 2.5rem 0 4rem;
+        }
+        .docs-page p, .docs-page li {
+            color: var(--text-secondary);
+        }
+        .docs-page h2 {
+            margin-top: 2rem;
+            margin-bottom: 0.75rem;
+        }
+        pre {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin: 0.75rem 0 1.25rem;
+            overflow-x: auto;
+        }
+        code {
+            font-family: var(--font-mono);
+        }
+        .top-links {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="../index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">.systems</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="../features.html">Features</a></li>
+                <li><a href="../index.html#platform">Platform</a></li>
+                <li><a href="../index.html#ai">AI Integration</a></li>
+                <li><a href="/docs/">Docs</a></li>
+                <li><a href="../index.html#get-started" class="btn-primary">Get Started</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <main class="docs-page">
+        <div class="container">
+            <div class="top-links">
+                <a href="/docs/">Docs Home</a>
+                <a href="architecture.html">Architecture</a>
+                <a href="cli-reference.html">CLI Reference</a>
+            </div>
+            <h1>Quick Start</h1>
+            <p>Follow these steps to bring up a local kcore environment and launch your first virtual machine.</p>
+
+            <h2>1) Install Binaries</h2>
+            <pre><code>curl -sSL https://get.kcore.systems | sh
+kctl version</code></pre>
+
+            <h2>2) Start the Controller</h2>
+            <pre><code>cat <<EOF > controller.yaml
+listen_address: "0.0.0.0:50051"
+database: "./kcore.db"
+EOF
+
+kcore-controller --config controller.yaml</code></pre>
+
+            <h2>3) Configure the CLI</h2>
+            <pre><code>mkdir -p ~/.kcore
+cat <<EOF > ~/.kcore/config.yaml
+controller_address: "localhost:50051"
+insecure: true
+EOF</code></pre>
+
+            <h2>4) Create a VM</h2>
+            <pre><code>kctl create vm web-server \
+  --memory 2048 \
+  --vcpu 2 \
+  --disk size=20GB
+
+kctl get vms</code></pre>
+        </div>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-bottom">
+                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="../js/main.js"></script>
+</body>
+</html>
