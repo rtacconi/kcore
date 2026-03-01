@@ -326,7 +326,7 @@
               pname = "kcore-node-agent";
               version = "0.1.0";
               src = ./.; # Include vendor directory
-              vendorHash = null; # TODO: fill vendorHash after running: nix build .#node-agent
+              vendorHash = "sha256-K14plyEnAIibeETxGZaQhTasSp2Gw0CCm3IvqGizdDo=";
               subPackages = [ "cmd/node-agent" ];
               env.CGO_ENABLED = "1";
               buildFlags = [ "-tags" "libvirt" ];

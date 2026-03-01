@@ -507,6 +507,93 @@ body {
     font-family: 'Monaco', 'Menlo', monospace;
 }
 
+/* Docs Section */
+.docs {
+    padding: 120px 0;
+    background: var(--bg-secondary);
+    transition: background-color 0.3s ease;
+}
+
+.docs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 24px;
+    margin-top: 48px;
+}
+
+.docs-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    padding: 32px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.docs-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-glow);
+    background: var(--bg-card-hover);
+}
+
+.docs-icon {
+    font-size: 40px;
+    margin-bottom: 8px;
+}
+
+.docs-card h3 {
+    font-size: 22px;
+    font-weight: 600;
+    margin: 0;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+}
+
+.docs-card p {
+    color: var(--text-secondary);
+    line-height: 1.6;
+    font-size: 15px;
+    margin: 0;
+    flex-grow: 1;
+}
+
+.docs-link {
+    color: var(--accent-primary);
+    font-weight: 500;
+    font-size: 14px;
+    margin-top: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.docs-card:hover .docs-link {
+    transform: translateX(4px);
+}
+
+.docs-footer {
+    margin-top: 64px;
+    text-align: center;
+    padding-top: 32px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    font-size: 14px;
+}
+
+.docs-footer a {
+    color: var(--accent-primary);
+    text-decoration: none;
+}
+
+.docs-footer a:hover {
+    text-decoration: underline;
+}
+
 /* Architecture Section */
 .architecture {
     padding: 120px 0;
