@@ -1,0 +1,31 @@
+# Go
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+coverage*
+
+# Go modules
+vendor/
+
+# Protobuf generated code
+/gen/
+
+# Nix
+result
+result*
+.nix-result
+.cache/
+.direnv/
+
+# OS junk
+.DS_Store
+*.swp
+
+# ISO outputs
+*.iso
+/out/

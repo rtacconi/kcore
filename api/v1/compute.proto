@@ -1,0 +1,39 @@
+syntax = "proto3";
+package api.v1;
+option go_package = "kcore/gen/api/v1;pb";
+
+message CPU { uint32 cores = 1; }
+message Memory { uint64 bytes = 1; }
+message NIC { string bridge = 1; string mac = 2; }
+message Disk {
+  string id = 1; // path or volume handle
+  uint64 size_bytes = 2;
+  string bus = 3; // virtio, scsi
+}
+message CloudInit { string user_data = 1; string meta_data = 2; }
+
+message VmSpec {
+  string name = 1;
+  CPU cpu = 2;
+  Memory memory = 3;
+  repeated NIC nics = 4;
+  repeated Disk disks = 5;
+  CloudInit cloud_init = 6;
+}
+
+message Vm { string id = 1; string name = 2; string node = 3; string status = 4; }
+
+message CreateVmRequest { VmSpec spec = 1; }
+message CreateVmResponse { Vm vm = 1; }
+
+message VmId { string id = 1; }
+
+message Empty {}
+
+service NodeAgent {
+  rpc CreateVm (CreateVmRequest) returns (CreateVmResponse);
+  rpc StartVm (VmId) returns (Vm);
+  rpc StopVm (VmId) returns (Vm);
+  rpc DeleteVm (VmId) returns (Empty);
+  rpc GetVm    (VmId) returns (Vm);
+}
