@@ -196,7 +196,7 @@ sequenceDiagram
 %%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart LR
     subgraph ListAll["kctl get vms (no --node)"]
-        kctl1["kctl"] -->|ListVms(target_node='')| Ctrl1["Controller"]
+        kctl1["kctl"] -->|ListVms all nodes| Ctrl1["Controller"]
         Ctrl1 -->|query all registered nodes| N1["Node 1"]
         Ctrl1 --> N2["Node 2"]
         Ctrl1 --> N3["Node N"]
@@ -206,9 +206,9 @@ flowchart LR
         Ctrl1 -->|aggregate| kctl1
     end
 
-    subgraph ListOne["kctl get vms --node 192.168.40.146:9091"]
-        kctl2["kctl"] -->|ListVms(target_node=...)| Ctrl2["Controller"]
-        Ctrl2 -->|query that node only| N4["Node 192.168.40.146"]
+    subgraph ListOne["kctl get vms --node ADDR:9091"]
+        kctl2["kctl"] -->|ListVms one node| Ctrl2["Controller"]
+        Ctrl2 -->|query that node only| N4["Node"]
         N4 --> Ctrl2
         Ctrl2 --> kctl2
     end
