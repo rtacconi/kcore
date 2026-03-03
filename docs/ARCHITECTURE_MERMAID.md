@@ -2,11 +2,14 @@
 
 This document provides Mermaid diagrams of the current kcore architecture, based on the project docs and codebase.
 
+**Viewing tip:** If diagrams still look small, open this file in [Mermaid Live Editor](https://mermaid.live), paste one diagram at a time, and use the zoom/export controls for a larger view.
+
 ---
 
 ## 1. High-Level System Architecture
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart TB
     subgraph Workstation["Workstation (Mac/Linux)"]
         kctl["kctl (CLI)"]
@@ -66,6 +69,7 @@ flowchart TB
 The controller binary (`cmd/controller`) exposes three gRPC services on the same port. ControlPlane delegates to the same in-memory Controller implementation.
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart LR
     subgraph ControllerBinary["bin/kcore-controller :8080"]
         direction TB
@@ -98,6 +102,7 @@ flowchart LR
 Each node runs one node-agent process. It implements the node proto services and talks to libvirt and storage drivers.
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart TB
     subgraph NodeAgent["cmd/node-agent (e.g. :9091)"]
         direction TB
@@ -153,6 +158,7 @@ flowchart TB
 ## 4. Node Registration and VM Creation Flow
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 sequenceDiagram
     participant kctl
     participant Controller
@@ -187,6 +193,7 @@ sequenceDiagram
 ## 5. List VMs Flow (Single Node vs All Nodes)
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart LR
     subgraph ListAll["kctl get vms (no --node)"]
         kctl1["kctl"] -->|ListVms(target_node='')| Ctrl1["Controller"]
@@ -212,6 +219,7 @@ flowchart LR
 ## 6. NixOS / ISO Deployment Context
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart TB
     subgraph Build["Build time"]
         Flake["flake.nix"]
@@ -249,6 +257,7 @@ flowchart TB
 ## 7. API Surface Summary
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart LR
     subgraph ControllerAPI["Controller (controller.proto)"]
         C1["RegisterNode / Heartbeat / SyncVmState"]
@@ -284,6 +293,7 @@ flowchart LR
 The codebase also contains a SQLite-based controller implementation that is **not** wired into the main controller binary.
 
 ```mermaid
+%%{init: {'themeVariables': {'fontSize': '20px', 'fontFamily': 'arial'}}}%%
 flowchart LR
     subgraph Current["Current production path"]
         Main["cmd/controller main.go"]
