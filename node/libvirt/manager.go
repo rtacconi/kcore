@@ -142,33 +142,13 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 
 		// Use libvirt Network mode (supports both libvirt networks and bridges).
 		// If network name starts with "br" or contains "/", assume it's a bridge
-		// (e.g. br0, br1, br-int). Otherwise, treat it as a libvirt network name.
+		// (e.g. br0, br1). Otherwise, treat it as a libvirt network name.
 		if strings.HasPrefix(nic.Network, "br") || strings.Contains(nic.Network, "/") {
-			// Bridge mode – this covers both Linux bridges (br0, br1, etc.) and
-			// Open vSwitch bridges like br-int.
+			// Bridge mode – Linux bridges (br0, br1, etc.)
 			iface.Source = &libvirtxml.DomainInterfaceSource{
 				Bridge: &libvirtxml.DomainInterfaceSourceBridge{
 					Bridge: nic.Network,
 				},
-			}
-
-			// If this is the Open vSwitch integration bridge (br-int), attach a
-			// libvirt <virtualport type='openvswitch'> so the tap device is
-			// managed by OVS instead of the kernel bridge code. We use the
-			// InterfaceID provided in the NICSpec (populated by node/server),
-			// falling back to a random UUID if not set.
-			if nic.Network == "br-int" {
-				ifaceID := nic.InterfaceID
-				if ifaceID == "" {
-					ifaceID = spec.ID
-				}
-				iface.VirtualPort = &libvirtxml.DomainInterfaceVirtualPort{
-					Params: &libvirtxml.DomainInterfaceVirtualPortParams{
-						OpenVSwitch: &libvirtxml.DomainInterfaceVirtualPortParamsOpenVSwitch{
-							InterfaceID: ifaceID,
-						},
-					},
-				}
 			}
 		} else {
 			// Network mode (for libvirt networks like "default", "private", etc.)
@@ -250,7 +230,7 @@ type NICSpec struct {
 	Network     string
 	Model       string
 	MACAddress  string
-	InterfaceID string // OVN iface-id for OVS/OVN integration
+	InterfaceID string // Optional iface-id for bridge port identification
 }
 
 // CreateDomain creates a libvirt domain from XML

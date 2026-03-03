@@ -83,236 +83,6 @@
           ];
         };
 
-      # Shared Open vSwitch module used by host and ISO
-      kcoreOvsModule = { config, lib, pkgs, ... }:
-        {
-          options.services.kcore.ovs = {
-            enable = lib.mkEnableOption "Open vSwitch for kcore VM networking";
-            datapathType = lib.mkOption {
-              type = lib.types.str;
-              default = "system";
-              description = "OVS datapath type: 'system' (kernel) or 'netdev' (DPDK)";
-            };
-          };
-
-          config = lib.mkIf config.services.kcore.ovs.enable {
-            boot.kernelModules = [ "openvswitch" ];
-            virtualisation.vswitch = {
-              enable = true;
-              package = pkgs.openvswitch;
-            };
-            environment.systemPackages = with pkgs; [
-              openvswitch
-              dnsmasq
-              iproute2
-              iptables
-            ];
-            systemd.tmpfiles.rules = [
-              "d /var/lib/openvswitch 0755 root root -"
-            ];
-
-            # Provide a Proxmox-like default NAT network on br-int for VMs.
-            # This creates br-int, gives it 192.168.200.1/24, enables IP forwarding,
-            # configures iptables MASQUERADE, and runs dnsmasq to hand out DHCP
-            # leases on 192.168.200.0/24.
-            systemd.services.kcore-ovs-nat-dhcp = {
-              description = "kcore: OVS br-int with NAT + DHCP for VMs";
-              wantedBy = [ "multi-user.target" ];
-              after = [ "network-online.target" "ovs-vswitchd.service" ];
-              wants = [ "network-online.target" "ovs-vswitchd.service" ];
-              serviceConfig = {
-                Type = "simple";
-                ExecStartPre = pkgs.writeShellScript "kcore-ovs-nat-pre" ''
-                  set -e
-
-                  # Determine the external interface from the default IPv4 route.
-                  EXT_IF="$(${pkgs.iproute2}/bin/ip -4 route show default | head -n1 | cut -d' ' -f5 || true)"
-                  if [ -z "$EXT_IF" ]; then
-                    echo "kcore-ovs-nat-pre: could not determine external interface for NAT" >&2
-                    exit 0
-                  fi
-
-                  # Ensure br-int exists.
-                  ${pkgs.openvswitch}/bin/ovs-vsctl --may-exist add-br br-int
-
-                  # Apply datapath type if configured (system or netdev).
-                  ${lib.optionalString (config.services.kcore.ovs.datapathType != "") ''
-                    ${pkgs.openvswitch}/bin/ovs-vsctl set bridge br-int datapath_type=${config.services.kcore.ovs.datapathType}
-                  ''}
-
-                  # Assign IP and bring br-int up.
-                  ${pkgs.iproute2}/bin/ip addr flush dev br-int || true
-                  ${pkgs.iproute2}/bin/ip addr add 192.168.200.1/24 dev br-int
-                  ${pkgs.iproute2}/bin/ip link set br-int up
-
-                  # Enable IPv4 forwarding.
-                  ${pkgs.procps}/bin/sysctl -w net.ipv4.ip_forward=1 >/dev/null
-
-                  # Configure NAT for the VM subnet.
-                  ${pkgs.iptables}/bin/iptables -t nat -C POSTROUTING -s 192.168.200.0/24 -o "$EXT_IF" -j MASQUERADE 2>/dev/null || \
-                    ${pkgs.iptables}/bin/iptables -t nat -A POSTROUTING -s 192.168.200.0/24 -o "$EXT_IF" -j MASQUERADE
-                '';
-
-                ExecStart = "${pkgs.dnsmasq}/bin/dnsmasq "
-                  + "--interface=br-int "
-                  + "--bind-interfaces "
-                  + "--except-interface=lo "
-                  + "--dhcp-range=192.168.200.10,192.168.200.200,12h "
-                  + "--dhcp-option=3,192.168.200.1 "
-                  + "--dhcp-option=6,1.1.1.1 "
-                  + "--pid-file=/run/dnsmasq-br-int.pid "
-                  + "--log-facility=/var/log/dnsmasq-br-int.log";
-              };
-            };
-          };
-        };
-
-      # Shared OVN module used by nodes that participate in advanced networking.
-      # This module does NOT enable OVN by default; nodes opt in via
-      #   services.kcore.ovn.enable = true;
-      # and select a role:
-      #   "central" - runs NB/SB ovsdb-server + ovn-northd + ovn-controller
-      #   "chassis" - runs only ovn-controller and connects to a remote NB/SB
-      kcoreOvnModule = { config, lib, pkgs, ... }:
-        let
-          cfg = config.services.kcore.ovn;
-        in {
-          options.services.kcore.ovn = {
-            enable = lib.mkEnableOption "OVN integration for kcore";
-
-            role = lib.mkOption {
-              type = lib.types.enum [ "central" "chassis" ];
-              default = "central";
-              description = ''
-                OVN role for this node.
-
-                - "central": runs OVN NB/SB ovsdb-server and ovn-northd locally.
-                - "chassis": runs only ovn-controller and connects to remote NB/SB.
-              '';
-            };
-
-            nbConnection = lib.mkOption {
-              type = lib.types.str;
-              default = "unix:/var/run/ovn/ovnnb_db.sock";
-              description = "OVN northbound DB connection string (used by ovn-northd and chassis controllers).";
-            };
-
-            sbConnection = lib.mkOption {
-              type = lib.types.str;
-              default = "unix:/var/run/ovn/ovnsb_db.sock";
-              description = "OVN southbound DB connection string (used by ovn-controller).";
-            };
-          };
-
-          config = lib.mkIf cfg.enable {
-            environment.systemPackages = with pkgs; [
-              ovn
-            ];
-
-            # Ensure OVN runtime and config directories exist.
-            systemd.tmpfiles.rules = [
-              "d /etc/ovn 0755 root root -"
-              "d /var/run/ovn 0755 root root -"
-            ];
-
-            # Central role: own NB/SB DB files and ovsdb-server processes.
-            systemd.services.kcore-ovn-db-setup = lib.mkIf (cfg.role == "central") {
-              description = "kcore: Initialize OVN NB/SB databases";
-              wantedBy = [ "multi-user.target" ];
-              before = [ "ovn-ovsdb-nb.service" "ovn-ovsdb-sb.service" ];
-              serviceConfig = {
-                Type = "oneshot";
-                RemainAfterExit = true;
-                ExecStart = pkgs.writeShellScript "kcore-ovn-db-setup" ''
-                  set -e
-                  OVN_PREFIX="${pkgs.ovn}"
-                  SCHEMA_NB="$OVN_PREFIX/share/ovn/ovn-nb.ovsschema"
-                  SCHEMA_SB="$OVN_PREFIX/share/ovn/ovn-sb.ovsschema"
-
-                  if [ ! -f "$SCHEMA_NB" ] || [ ! -f "$SCHEMA_SB" ]; then
-                    echo "OVN schema files not found at $SCHEMA_NB / $SCHEMA_SB" >&2
-                    exit 1
-                  fi
-
-                  mkdir -p /etc/ovn /var/run/ovn
-
-                  if [ ! -f /etc/ovn/ovnnb_db.db ]; then
-                    echo "Creating /etc/ovn/ovnnb_db.db..."
-                    ${pkgs.ovn}/bin/ovsdb-tool create /etc/ovn/ovnnb_db.db "$SCHEMA_NB"
-                  fi
-
-                  if [ ! -f /etc/ovn/ovnsb_db.db ]; then
-                    echo "Creating /etc/ovn/ovnsb_db.db..."
-                    ${pkgs.ovn}/bin/ovsdb-tool create /etc/ovn/ovnsb_db.db "$SCHEMA_SB"
-                  fi
-                '';
-              };
-            };
-
-            systemd.services."ovn-ovsdb-nb" = lib.mkIf (cfg.role == "central") {
-              description = "OVN Northbound ovsdb-server";
-              wantedBy = [ "multi-user.target" ];
-              after = [ "network-online.target" "kcore-ovn-db-setup.service" ];
-              serviceConfig = {
-                Type = "simple";
-                RuntimeDirectory = "ovn";
-                ExecStart = "${pkgs.ovn}/bin/ovsdb-server "
-                  + "--no-chdir "
-                  + "--log-file=/var/log/ovnnb.log "
-                  + "--remote=punix:/var/run/ovn/ovnnb_db.sock "
-                  + "--pidfile=/run/ovn/ovnnb_db.pid "
-                  + "/etc/ovn/ovnnb_db.db";
-                Restart = "always";
-              };
-            };
-
-            systemd.services."ovn-ovsdb-sb" = lib.mkIf (cfg.role == "central") {
-              description = "OVN Southbound ovsdb-server";
-              wantedBy = [ "multi-user.target" ];
-              after = [ "network-online.target" "kcore-ovn-db-setup.service" ];
-              serviceConfig = {
-                Type = "simple";
-                RuntimeDirectory = "ovn";
-                ExecStart = "${pkgs.ovn}/bin/ovsdb-server "
-                  + "--no-chdir "
-                  + "--log-file=/var/log/ovnsb.log "
-                  + "--remote=punix:/var/run/ovn/ovnsb_db.sock "
-                  + "--pidfile=/run/ovn/ovnsb_db.pid "
-                  + "/etc/ovn/ovnsb_db.db";
-                Restart = "always";
-              };
-            };
-
-            systemd.services."ovn-northd" = lib.mkIf (cfg.role == "central") {
-              description = "OVN Northbound Daemon";
-              wantedBy = [ "multi-user.target" ];
-              after = [ "network-online.target" "ovn-ovsdb-nb.service" "ovn-ovsdb-sb.service" ];
-              serviceConfig = {
-                Type = "simple";
-                RuntimeDirectory = "ovn";
-                ExecStart = "${pkgs.ovn}/bin/ovn-northd "
-                  + "--ovnnb-db=${cfg.nbConnection} "
-                  + "--ovnsb-db=${cfg.sbConnection}";
-                Restart = "always";
-              };
-            };
-
-            # ovn-controller runs on both central and chassis nodes as the local
-            # chassis agent. For now we point it at the local OVS DB and rely on
-            # OVS external_ids for NB/SB connection config.
-            systemd.services."ovn-controller" = {
-              description = "OVN Controller (kcore node)";
-              wantedBy = [ "multi-user.target" ];
-              after = [ "network-online.target" "ovs-vswitchd.service" ];
-              serviceConfig = {
-                Type = "simple";
-                RuntimeDirectory = "ovn";
-                ExecStart = "${pkgs.ovn}/bin/ovn-controller unix:/run/openvswitch/db.sock";
-                Restart = "always";
-              };
-            };
-          };
-        };
     in
       flake-utils.lib.eachDefaultSystem (system:
         let
@@ -374,7 +144,6 @@
           ./modules/kcore-minimal.nix
           ./modules/kcore-branding.nix
           kcoreLibvirtModule
-          kcoreOvsModule
 
           ({ config, pkgs, lib, ... }:
             let
@@ -408,8 +177,8 @@
               systemd.services.kcore-node-agent = {
                 description = "kcore Node Agent";
                 wantedBy = [ "multi-user.target" ];
-                after = [ "network-online.target" "ovs-vswitchd.service" ] ++ (lib.optional config.virtualisation.libvirtd.enable "libvirtd.service");
-                wants = [ "network-online.target" "ovs-vswitchd.service" ];
+                after = [ "network-online.target" ] ++ (lib.optional config.virtualisation.libvirtd.enable "libvirtd.service");
+                wants = [ "network-online.target" ];
 
                 serviceConfig = {
                   Type = "simple";
@@ -453,7 +222,6 @@
                     pkgs.lvm2
                     pkgs.qemu-utils
                     pkgs.coreutils
-                    pkgs.openvswitch  # OVS utilities (ovs-vsctl, ovs-ofctl, etc.)
                   ];
                 };
               };
@@ -479,11 +247,10 @@
                     certFile: /etc/kcore/node.crt
                     keyFile: /etc/kcore/node.key
 
-                  # Network name to bridge/OVS mapping
-                  # Use OVS bridge names (e.g., "br-int", "br-ex")
-                  # OVS will be used instead of libvirt virbr0
+                  # Network name to bridge/libvirt network mapping
+                  # Use "default" for libvirt default network (NAT + DHCP)
                   networks:
-                    default: br-int  # OVS integration bridge
+                    default: default
 
                   # Storage driver configuration
                   storage:
@@ -505,13 +272,9 @@
                 cloud-utils
                 iproute2
                 jq
-                openvswitch  # Open vSwitch for networking
                 nodeAgent # Include the shared binary in system packages (makes it available on PATH)
               ];
               
-              # Enable Open vSwitch
-              services.kcore.ovs.enable = true;
-
               # For cloud-init NoCloud seed creation
               services.cloud-init.enable = false; # guests use it; host doesn't need the daemon
             })
@@ -525,7 +288,6 @@
           "${nixpkgs}/nixos/modules/installer/cd-dvd/iso-image.nix"
           ./modules/kcore-minimal.nix
           ./modules/kcore-branding.nix
-          kcoreOvsModule
           ({ config, pkgs, lib, ... }:
             let
               # Reuse the shared node-agent package from outputs.packages
@@ -638,8 +400,8 @@
               systemd.services.kcore-node-agent = {
                 description = "kcore Node Agent";
                 wantedBy = [ "multi-user.target" ];
-                after = [ "network-online.target" "ovs-vswitchd.service" "kcore-bootstrap-certs.service" ];
-                wants = [ "network-online.target" "ovs-vswitchd.service" "kcore-bootstrap-certs.service" ];
+                after = [ "network-online.target" "kcore-bootstrap-certs.service" ];
+                wants = [ "network-online.target" "kcore-bootstrap-certs.service" ];
                 serviceConfig = {
                   Type = "simple";
                   # Use kcore-node-agent (the symlink created by postInstall)
@@ -661,7 +423,7 @@
                 };
                 environment = lib.mkForce {
                   PATH = pkgs.lib.makeBinPath [
-                    pkgs.qemu_kvm pkgs.libvirt pkgs.lvm2 pkgs.qemu-utils pkgs.coreutils pkgs.openvswitch
+                    pkgs.qemu_kvm pkgs.libvirt pkgs.lvm2 pkgs.qemu-utils pkgs.coreutils
                   ];
                 };
               };
@@ -672,7 +434,7 @@
                 "d /etc/kcore 0755 root root -"
               ];
               environment.systemPackages = with pkgs; [
-                qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq openvswitch nodeAgent openssl
+                qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq nodeAgent openssl
                 # Tools needed for install-to-disk script (parted is main missing one)
                 parted
                 (pkgs.writeScriptBin "install-to-disk" ''
@@ -874,20 +636,14 @@ $SSH_KEYS
     before = [ "libvirtd.service" ];
   };
 
-  # Enable Open vSwitch using standard NixOS options (no custom services.kcore)
-  boot.kernelModules = [ "kvm" "kvm-intel" "kvm-amd" "br_netfilter" "tap" "openvswitch" ];
-  virtualisation.vswitch = {
-    enable = true;
-    package = pkgs.openvswitch;
-  };
-
+  boot.kernelModules = [ "kvm" "kvm-intel" "kvm-amd" "br_netfilter" "tap" ];
   
   # kcore node-agent service
   systemd.services.kcore-node-agent = {
     description = "kcore Node Agent";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" "libvirtd.service" "virtlogd.service" "ovs-vswitchd.service" ];
-    wants = [ "network-online.target" "ovs-vswitchd.service" ];
+    after = [ "network-online.target" "libvirtd.service" "virtlogd.service" ];
+    wants = [ "network-online.target" ];
     requires = [ "libvirtd.service" ];
     unitConfig = {
       ConditionPathExists = [
@@ -944,8 +700,6 @@ $SSH_KEYS
                     lvm2
                     parted
                     openssl
-                    openvswitch
-                    ovn
                     cloud-utils
                   ];
   
@@ -994,7 +748,7 @@ EOF
                     keyFile: /etc/kcore/node.key
 
                   networks:
-                    default: br-int  # OVS integration bridge
+                    default: default  # libvirt default network (NAT + DHCP)
 
                   storage:
                     drivers:
@@ -1006,9 +760,6 @@ EOF
                 mode = "0644";
               };
               services.cloud-init.enable = false;
-              
-              # Enable Open vSwitch
-              services.kcore.ovs.enable = true;
               
               # Ensure libvirt group exists for node agent
               users.groups.libvirt = {};

@@ -1,5 +1,7 @@
 # KCORE Architecture & Workflow
 
+For Mermaid diagrams of the current architecture, see [ARCHITECTURE_MERMAID.md](ARCHITECTURE_MERMAID.md).
+
 ## System Architecture
 
 ```
@@ -7,7 +9,7 @@
 │   Your Mac/Linux    │
 │                     │
 │  kcore-controller   │  ← Manages multiple nodes
-│   (port 9090)       │     Receives node registrations
+│   (port 8080)       │     Receives node registrations
 └──────────┬──────────┘     Sends commands to nodes
            │
            │ gRPC (TLS)
@@ -32,7 +34,7 @@
 
 ### Controller (kcore-controller)
 - **Runs on**: Your Mac/Linux workstation
-- **Port**: 9090 (gRPC with TLS)
+- **Port**: 8080 (gRPC with TLS, default `-listen :8080`)
 - **Role**: 
   - Accepts node registrations
   - Receives heartbeats from nodes
@@ -57,35 +59,19 @@
 - **Managed by**: systemd (auto-starts on boot)
 - **Used by**: node-agent for VM operations
 
-### Networking (OVS / OVN overview)
+### Networking
 
-At a high level, advanced networking in kcore uses:
+kcore uses **libvirt** for VM networking. The default configuration uses libvirt's built-in "default" network:
 
-- **Open vSwitch (OVS)** on each node:
-  - Provides the integration bridge (e.g. `br-int`) where VM TAP interfaces are attached.
-  - Is programmed by `ovn-controller` to install the actual OpenFlow rules.
+- **libvirt default network** (recommended for simple setups):
+  - NAT with DHCP via `virbr0`
+  - VMs get IPs from libvirt's DHCP (typically 192.168.122.0/24)
+  - No additional bridge configuration required
 
-- **OVN** as the SDN control plane:
-  - **Northbound (NB) DB – desired logical state**
-    - Written by controllers / orchestration (future kcore network controller).
-    - Stores *what you want the network to look like*:
-      - Logical switches and routers (virtual topology).
-      - Logical switch ports (VM NICs, router interfaces).
-      - DHCP configuration (`DHCP_Options`), ACLs, QoS, etc.
-    - When kcore creates logical switches, DHCP options, and logical ports (via `libovsdb`), it is writing to **NB**.
-  - **Southbound (SB) DB – realized / compiled state**
-    - Mostly written by `ovn-northd` and `ovn-controller`.
-    - Stores *how OVN will actually implement the topology*:
-      - Logical flows that represent packet-processing logic.
-      - Chassis information (nodes) and tunnel information (e.g., Geneve).
-      - Mappings of logical ports to chassis.
-    - Each `ovn-controller` watches **SB** and converts logical flows into concrete OVS rules on the local `br-int`.
-
-In effect:
-
-- **NB** = *intent*: “VM NIC X is on subnet 192.168.200.0/24, with DHCP and router at 192.168.200.1”.
-- **SB** = *implementation*: the logical flows and chassis bindings OVN generates to make that true.
-- **OVS** = *data plane*: enforces those flows on each node’s `br-int`, answering DHCP and forwarding packets as defined by OVN.
+- **Custom bridges** (optional):
+  - Map network names to Linux bridge interfaces (e.g., `br0`, `br1`)
+  - Use when VMs need direct access to a host subnet
+  - Configure `networks: default: br0` in node-agent config
 
 ---
 
@@ -208,23 +194,21 @@ Your Workstation       Controller              Node Agent        libvirtd
 
 ## Configuration Files
 
-### Controller Config (`controller.yaml`)
+### Controller
 
-```yaml
-listenAddr: ":9090"
-tls:
-  caFile: /path/to/ca.crt
-  certFile: /path/to/controller.crt
-  keyFile: /path/to/controller.key
-database:
-  path: /path/to/kcore.db
+The controller binary uses **flags** (not a YAML file): `-listen :8080`, `-cert`, `-key`, `-ca`. Example:
+
+```bash
+./bin/kcore-controller -listen :8080 -cert certs/controller.crt -key certs/controller.key -ca certs/ca.crt
 ```
+
+It keeps **in-memory** state (node registry, VM-to-node mapping). A separate SQLite-based reconciler exists in the codebase but is not used by the default binary.
 
 ### Node Agent Config (`/etc/kcore/node-agent.yaml`)
 
 ```yaml
 nodeId: kvm-node-01
-controllerAddr: "192.168.1.100:9090"  # Your controller's IP
+controllerAddr: "192.168.1.100:8080"  # Your controller's IP
 
 tls:
   caFile: /etc/kcore/ca.crt
@@ -232,7 +216,7 @@ tls:
   keyFile: /etc/kcore/node.key
 
 networks:
-  default: br0
+  default: default  # libvirt default network (NAT + DHCP)
 
 storage:
   drivers:
@@ -309,12 +293,12 @@ You cannot "start" a node from the controller. The node must be running and will
 
 ```bash
 cd /path/to/kcore
-./controller -config controller.yaml
+./bin/kcore-controller -listen :8080 -cert certs/controller.crt -key certs/controller.key -ca certs/ca.crt
 ```
 
 Output:
 ```
-Starting kcore controller on :9090
+Starting kcore controller on :8080
 Waiting for nodes to register...
 ```
 
@@ -330,7 +314,7 @@ journalctl -u kcore-node-agent -f
 Output:
 ```
 Starting kcore node agent (node ID: kvm-node-01)
-Registering with controller at 192.168.1.100:9090
+Registering with controller at 192.168.1.100:8080
 Successfully registered with controller
 Starting heartbeat loop
 ```
@@ -346,9 +330,10 @@ Heartbeat received from kvm-node-01
 ### 4. Create VM via Controller
 
 ```bash
-# Option A: Via controller's API
-curl -X POST http://localhost:9090/api/v1/vms \
-  -d '{"nodeId": "kvm-node-01", "spec": {...}}'
+# Option A: Use kctl (talks to controller via gRPC)
+kctl create vm my-vm --cpu 2 --memory 4G --node <node-address>:9091
+
+# Or call controller gRPC (e.g. with grpcurl) at localhost:8080
 
 # Option B: Direct to node (for testing)
 nix-shell -p grpcurl --run "grpcurl -insecure \
