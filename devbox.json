@@ -2,6 +2,7 @@
   "$schema": "https://raw.githubusercontent.com/jetpack-io/devbox/main/.schema/devbox.schema.json",
   "packages": [
     "go@1.22",
+    "nodejs@22",
     "protobuf@25",
     "gnumake",
     "podman",
@@ -14,7 +15,11 @@
       "export PATH=\"$HOME/go/bin:$PATH\"",
       "# Install Go protobuf plugins if not present",
       "if ! command -v protoc-gen-go &> /dev/null; then go install google.golang.org/protobuf/cmd/protoc-gen-go@latest; fi",
-      "if ! command -v protoc-gen-go-grpc &> /dev/null; then go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; fi"
+      "if ! command -v protoc-gen-go-grpc &> /dev/null; then go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest; fi",
+      "# Install OpenSpec CLI if not present (use writable prefix; Nix store is read-only)",
+      "export NPM_CONFIG_PREFIX=\"${NPM_CONFIG_PREFIX:-$HOME/.local/share/npm}\"",
+      "export PATH=\"$NPM_CONFIG_PREFIX/bin:$PATH\"",
+      "if ! command -v openspec &> /dev/null; then npm install -g @fission-ai/openspec@latest; fi"
     ],
     "scripts": {
       "proto": "make proto",

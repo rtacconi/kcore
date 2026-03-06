@@ -1,0 +1,6 @@
+# kcoreOS install manifest – target disk for install-to-disk / automator API
+# Use with: kctl install --manifest examples/install-manifest.yaml
+# Or: POST /install with this file path or body { "os_disk": "sda" }
+#
+# os_disk: block device name without /dev/ (e.g. sda, nvme0n1, vda)
+os_disk: sda

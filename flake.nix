@@ -491,9 +491,9 @@
                   
                   echo "🔧 Partitioning disk..."
                   
-                  # Wipe any existing partition table (with retries)
+                  # Wipe any existing partition table (with retries). -f = force, no interactive prompt (for API/manifest-driven install)
                   for i in {1..3}; do
-                    wipefs -a "$DISK_PATH" && break || sleep 2
+                    wipefs -af "$DISK_PATH" && break || sleep 2
                   done
                   
                   # Create GPT partition table with UEFI + root partitions
