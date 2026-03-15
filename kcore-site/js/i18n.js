@@ -1,11 +1,12 @@
 (function () {
-  var SUPPORTED = ['en', 'es', 'fr', 'it', 'de', 'zh', 'ja', 'ko'];
+  var SUPPORTED = ['en', 'es', 'fr', 'it', 'de', 'pl', 'zh', 'ja', 'ko'];
   var LANG_NAMES = {
     en: 'English',
     es: 'Español',
     fr: 'Français',
     it: 'Italiano',
     de: 'Deutsch',
+    pl: 'Polski',
     zh: '中文',
     ja: '日本語',
     ko: '한국어'
@@ -16,6 +17,7 @@
     fr: '🇫🇷',
     it: '🇮🇹',
     de: '🇩🇪',
+    pl: '🇵🇱',
     zh: '🇨🇳',
     ja: '🇯🇵',
     ko: '🇰🇷'
