@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -133,6 +134,12 @@ func resourceVM() *schema.Resource {
 				ForceNew:    true,
 				Description: "Custom cloud-init #cloud-config YAML (overrides default)",
 			},
+			"running": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     true,
+				Description: "Whether the VM should be running (default: true). Set to false to create without starting.",
+			},
 			"state": {
 				Type:        schema.TypeString,
 				Computed:    true,
@@ -220,7 +227,22 @@ func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interfac
 	}
 	d.SetId(createdID)
 	_ = d.Set("node_id", resp.NodeId)
-	_ = d.Set("state", resp.State.String())
+
+	if d.Get("running").(bool) && resp.State != pb.VmState_VM_STATE_RUNNING {
+		startResp, err := client.controller.StartVm(ctx, &pb.StartVmRequest{VmId: createdID})
+		if err != nil {
+			if isAlreadyRunning(err) {
+				_ = d.Set("state", pb.VmState_VM_STATE_RUNNING.String())
+			} else {
+				return diag.FromErr(fmt.Errorf("VM created but failed to start: %w", err))
+			}
+		} else {
+			_ = d.Set("state", startResp.State.String())
+		}
+	} else {
+		_ = d.Set("state", resp.State.String())
+	}
+
 	return nil
 }
 
@@ -244,12 +266,12 @@ func resourceVMRead(ctx context.Context, d *schema.ResourceData, meta interface{
 		return diag.FromErr(fmt.Errorf("failed to read VM %s: %w", vmID, err))
 	}
 
-	// Set computed fields
 	d.Set("name", resp.Spec.Name)
 	d.Set("cpu", resp.Spec.Cpu)
 	d.Set("memory_bytes", resp.Spec.MemoryBytes)
 	d.Set("node_id", resp.NodeId)
 	d.Set("state", resp.Status.State.String())
+	d.Set("running", resp.Status.State == pb.VmState_VM_STATE_RUNNING)
 
 	if resp.Status.CreatedAt != nil {
 		d.Set("created_at", resp.Status.CreatedAt.AsTime().Format(time.RFC3339))
@@ -286,8 +308,21 @@ func resourceVMRead(ctx context.Context, d *schema.ResourceData, meta interface{
 }
 
 func resourceVMUpdate(ctx context.Context, d *schema.ResourceData, meta interface{}) diag.Diagnostics {
-	// For now, most changes require recreation (ForceNew)
-	// In the future, you could implement live updates for certain fields like CPU/memory
+	client := meta.(*apiClient)
+	vmID := d.Id()
+
+	if d.HasChange("running") {
+		if d.Get("running").(bool) {
+			if _, err := client.controller.StartVm(ctx, &pb.StartVmRequest{VmId: vmID}); err != nil {
+				return diag.FromErr(fmt.Errorf("failed to start VM: %w", err))
+			}
+		} else {
+			if _, err := client.controller.StopVm(ctx, &pb.StopVmRequest{VmId: vmID}); err != nil {
+				return diag.FromErr(fmt.Errorf("failed to stop VM: %w", err))
+			}
+		}
+	}
+
 	return resourceVMRead(ctx, d, meta)
 }
 
@@ -308,4 +343,11 @@ func resourceVMDelete(ctx context.Context, d *schema.ResourceData, meta interfac
 
 	d.SetId("")
 	return diags
+}
+
+func isAlreadyRunning(err error) bool {
+	if s, ok := status.FromError(err); ok && s.Code() == codes.Internal {
+		return strings.Contains(s.Message(), "already running")
+	}
+	return false
 }

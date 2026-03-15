@@ -1,18 +1,20 @@
 (function () {
-  var SUPPORTED = ['en', 'es', 'it', 'de', 'zh'];
+  var SUPPORTED = ['en', 'es', 'it', 'de', 'zh', 'ja'];
   var LANG_NAMES = {
     en: 'English',
     es: 'Español',
     it: 'Italiano',
     de: 'Deutsch',
-    zh: '中文'
+    zh: '中文',
+    ja: '日本語'
   };
   var LANG_FLAGS = {
     en: '🇬🇧',
     es: '🇪🇸',
     it: '🇮🇹',
     de: '🇩🇪',
-    zh: '🇨🇳'
+    zh: '🇨🇳',
+    ja: '🇯🇵'
   };
   var DEFAULT = 'en';
   var STORAGE_KEY = 'kcore-lang';

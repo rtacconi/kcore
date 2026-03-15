@@ -134,6 +134,18 @@
             shellHook = ''
               export BASH_COMPLETION_COMPAT_DIR="/dev/null"
               export PATH="$PATH:$(go env GOPATH)/bin"
+
+              # Readline / history for interactive shells
+              set -o emacs 2>/dev/null
+              export HISTFILE="$HOME/.bash_history"
+              export HISTSIZE=10000
+              export HISTFILESIZE=20000
+              export HISTCONTROL="ignoredups:erasedups"
+              shopt -s histappend 2>/dev/null
+              [ -f /etc/inputrc ] && bind -f /etc/inputrc 2>/dev/null
+              [ -f "$HOME/.inputrc" ] && bind -f "$HOME/.inputrc" 2>/dev/null
+              export PS1='\[\e[1;34m\][nix-dev]\[\e[0m\] \w \$ '
+
               echo "kcore dev shell ready (go/protobuf/opentofu)."
             '';
           };

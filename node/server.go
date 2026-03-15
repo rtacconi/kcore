@@ -433,7 +433,7 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 	return &node.CreateVmResponse{
 		Status: &node.VmStatus{
 			Id:    spec.Id,
-			State: node.VmState_VM_STATE_STOPPED,
+			State: node.VmState_VM_STATE_RUNNING,
 		},
 	}, nil
 }

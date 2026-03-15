@@ -8,25 +8,16 @@ terraform {
 
 provider "kcore" {
   controller_address = "localhost:9090"
-  insecure           = true # Set to false and configure TLS in production
-}
 
-# Data source to list all nodes
-data "kcore_nodes" "all" {}
-
-# Output all nodes
-output "nodes" {
-  value = data.kcore_nodes.all.nodes
-}
-
-# Data source to get a specific node
-data "kcore_node" "example" {
-  id = "node-1" # Replace with actual node ID
+  tls_cert_path = "/mnt/md126/kcore/certs-lenovo-node.crt"
+  tls_key_path  = "/mnt/md126/kcore/certs-lenovo-node.key"
+  tls_ca_path   = "/mnt/md126/kcore/certs-lenovo-ca.crt"
+  insecure      = true
 }
 
 # Create a VM from a cloud image
 resource "kcore_vm" "example" {
-  name         = "debian12-test"
+  name         = "debian12-tf-test"
   cpu          = 1
   memory_bytes = 2147483648 # 2GB
 
@@ -37,12 +28,8 @@ resource "kcore_vm" "example" {
     network = "default"
     model   = "virtio"
   }
-
-  # Optional: specify target node
-  # target_node = "node-1"
 }
 
-# Output VM information
 output "vm_id" {
   value = kcore_vm.example.id
 }
@@ -55,7 +42,7 @@ output "vm_node_id" {
   value = kcore_vm.example.node_id
 }
 
-# Data source to read an existing VM
+# Read back the VM we just created
 data "kcore_vm" "existing" {
   id = kcore_vm.example.id
 }
@@ -63,4 +50,3 @@ data "kcore_vm" "existing" {
 output "existing_vm_name" {
   value = data.kcore_vm.existing.name
 }
-
