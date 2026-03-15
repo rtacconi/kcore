@@ -1,34 +1,44 @@
 (function () {
-  const SUPPORTED = ['en', 'it', 'de', 'zh'];
-  const LANG_NAMES = {
+  var SUPPORTED = ['en', 'it', 'de', 'zh'];
+  var LANG_NAMES = {
     en: 'English',
     it: 'Italiano',
     de: 'Deutsch',
     zh: '中文'
   };
-  const LANG_FLAGS = {
+  var LANG_FLAGS = {
     en: '🇬🇧',
     it: '🇮🇹',
     de: '🇩🇪',
     zh: '🇨🇳'
   };
-  const DEFAULT = 'en';
-  const STORAGE_KEY = 'kcore-lang';
+  var DEFAULT = 'en';
+  var STORAGE_KEY = 'kcore-lang';
 
-  let translations = {};
-  let currentLang = DEFAULT;
-  let modal = null;
+  var translations = {};
+  var currentLang = DEFAULT;
+  var modal = null;
+  var loaded = false;
 
   function detectLang() {
-    const stored = localStorage.getItem(STORAGE_KEY);
-    if (stored && SUPPORTED.includes(stored)) return stored;
+    try {
+      var stored = localStorage.getItem(STORAGE_KEY);
+      if (stored && SUPPORTED.indexOf(stored) !== -1) return stored;
+    } catch (e) {}
 
-    const browser = (navigator.language || '').slice(0, 2).toLowerCase();
-    return SUPPORTED.includes(browser) ? browser : DEFAULT;
+    var browser = (navigator.language || '').slice(0, 2).toLowerCase();
+    return SUPPORTED.indexOf(browser) !== -1 ? browser : DEFAULT;
   }
 
   function resolveKey(obj, key) {
-    return key.split('.').reduce((o, k) => (o && o[k] !== undefined ? o[k] : null), obj);
+    if (!obj) return null;
+    var parts = key.split('.');
+    var cur = obj;
+    for (var i = 0; i < parts.length; i++) {
+      if (cur[parts[i]] === undefined) return null;
+      cur = cur[parts[i]];
+    }
+    return cur;
   }
 
   function createModal() {
@@ -36,49 +46,70 @@
     modal.className = 'lang-modal-overlay';
     modal.setAttribute('role', 'dialog');
     modal.setAttribute('aria-label', 'Select language');
+
+    var items = '';
+    for (var i = 0; i < SUPPORTED.length; i++) {
+      var lang = SUPPORTED[i];
+      items += '<li>' +
+        '<button class="lang-modal-item" data-lang="' + lang + '">' +
+          '<span class="lang-flag">' + LANG_FLAGS[lang] + '</span>' +
+          '<span class="lang-name">' + LANG_NAMES[lang] + '</span>' +
+          '<span class="lang-code">' + lang.toUpperCase() + '</span>' +
+        '</button>' +
+      '</li>';
+    }
+
     modal.innerHTML =
       '<div class="lang-modal">' +
         '<div class="lang-modal-header">' +
           '<span class="lang-modal-title">Language</span>' +
           '<button class="lang-modal-close" aria-label="Close">&times;</button>' +
         '</div>' +
-        '<ul class="lang-modal-list">' +
-          SUPPORTED.map(function (lang) {
-            return '<li>' +
-              '<button class="lang-modal-item" data-lang="' + lang + '">' +
-                '<span class="lang-flag">' + LANG_FLAGS[lang] + '</span>' +
-                '<span class="lang-name">' + LANG_NAMES[lang] + '</span>' +
-                '<span class="lang-code">' + lang.toUpperCase() + '</span>' +
-              '</button>' +
-            '</li>';
-          }).join('') +
-        '</ul>' +
+        '<ul class="lang-modal-list">' + items + '</ul>' +
       '</div>';
 
     modal.addEventListener('click', function (e) {
       if (e.target === modal) closeModal();
     });
 
-    modal.querySelector('.lang-modal-close').addEventListener('click', closeModal);
-
-    modal.querySelectorAll('.lang-modal-item').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        switchLang(btn.getAttribute('data-lang'));
-        closeModal();
-      });
+    modal.querySelector('.lang-modal-close').addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      closeModal();
     });
+
+    var langBtns = modal.querySelectorAll('.lang-modal-item');
+    for (var j = 0; j < langBtns.length; j++) {
+      (function (btn) {
+        btn.addEventListener('click', function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          switchLang(btn.getAttribute('data-lang'));
+          closeModal();
+        });
+      })(langBtns[j]);
+    }
 
     document.body.appendChild(modal);
   }
 
   function updateModalActive() {
     if (!modal) return;
-    modal.querySelectorAll('.lang-modal-item').forEach(function (btn) {
-      btn.classList.toggle('active', btn.getAttribute('data-lang') === currentLang);
-    });
+    var btns = modal.querySelectorAll('.lang-modal-item');
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].getAttribute('data-lang') === currentLang) {
+        btns[i].classList.add('active');
+      } else {
+        btns[i].classList.remove('active');
+      }
+    }
   }
 
-  function openModal() {
+  function openModal(e) {
+    if (e) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
     if (!modal) createModal();
     updateModalActive();
     modal.classList.add('visible');
@@ -91,69 +122,106 @@
     document.body.style.overflow = '';
   }
 
+  function updateButton() {
+    var btns = document.querySelectorAll('.lang-toggle-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].innerHTML = '<span class="lang-btn-flag">' + LANG_FLAGS[currentLang] + '</span> ' + currentLang.toUpperCase();
+    }
+  }
+
   function applyTranslations() {
-    document.querySelectorAll('[data-i18n]').forEach(function (el) {
-      var key = el.getAttribute('data-i18n');
-      var val = resolveKey(translations[currentLang], key);
-      if (val !== null) el.textContent = val;
-    });
+    if (!loaded) return;
 
-    document.querySelectorAll('[data-i18n-html]').forEach(function (el) {
-      var key = el.getAttribute('data-i18n-html');
+    var els = document.querySelectorAll('[data-i18n]');
+    for (var i = 0; i < els.length; i++) {
+      var key = els[i].getAttribute('data-i18n');
       var val = resolveKey(translations[currentLang], key);
-      if (val !== null) el.innerHTML = val;
-    });
+      if (val !== null) els[i].textContent = val;
+    }
 
-    document.querySelectorAll('[data-i18n-placeholder]').forEach(function (el) {
-      var key = el.getAttribute('data-i18n-placeholder');
-      var val = resolveKey(translations[currentLang], key);
-      if (val !== null) el.placeholder = val;
-    });
+    var htmlEls = document.querySelectorAll('[data-i18n-html]');
+    for (var j = 0; j < htmlEls.length; j++) {
+      var hkey = htmlEls[j].getAttribute('data-i18n-html');
+      var hval = resolveKey(translations[currentLang], hkey);
+      if (hval !== null) htmlEls[j].innerHTML = hval;
+    }
+
+    var phEls = document.querySelectorAll('[data-i18n-placeholder]');
+    for (var k = 0; k < phEls.length; k++) {
+      var pkey = phEls[k].getAttribute('data-i18n-placeholder');
+      var pval = resolveKey(translations[currentLang], pkey);
+      if (pval !== null) phEls[k].placeholder = pval;
+    }
 
     document.documentElement.lang = currentLang;
-
-    document.querySelectorAll('.lang-toggle-btn').forEach(function (btn) {
-      btn.innerHTML = '<span class="lang-btn-flag">' + LANG_FLAGS[currentLang] + '</span> ' + currentLang.toUpperCase();
-    });
-
+    updateButton();
     updateModalActive();
   }
 
   function switchLang(lang) {
-    if (!SUPPORTED.includes(lang)) return;
+    if (SUPPORTED.indexOf(lang) === -1) return;
     currentLang = lang;
-    localStorage.setItem(STORAGE_KEY, lang);
+    try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) {}
     applyTranslations();
   }
 
-  async function loadTranslations() {
+  function getPrefix() {
     var base = document.querySelector('script[src*="i18n.js"]');
-    var prefix = '';
     if (base) {
       var src = base.getAttribute('src');
-      prefix = src.replace('js/i18n.js', '');
+      var idx = src.indexOf('js/i18n.js');
+      if (idx !== -1) return src.substring(0, idx);
     }
-
-    var results = await Promise.all(
-      SUPPORTED.map(function (lang) {
-        return fetch(prefix + 'locales/' + lang + '.json').then(function (r) { return r.json(); });
-      })
-    );
-    SUPPORTED.forEach(function (lang, i) { translations[lang] = results[i]; });
+    return '';
   }
 
-  async function init() {
-    currentLang = detectLang();
-    await loadTranslations();
-    applyTranslations();
+  function loadTranslations() {
+    var prefix = getPrefix();
+    var pending = SUPPORTED.length;
+    var failed = false;
 
-    document.querySelectorAll('.lang-toggle-btn').forEach(function (btn) {
-      btn.addEventListener('click', openModal);
-    });
+    for (var i = 0; i < SUPPORTED.length; i++) {
+      (function (lang) {
+        var url = prefix + 'locales/' + lang + '.json';
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', url, true);
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState !== 4) return;
+          if (xhr.status === 200) {
+            try {
+              translations[lang] = JSON.parse(xhr.responseText);
+            } catch (e) {
+              console.warn('i18n: failed to parse ' + url);
+            }
+          } else {
+            console.warn('i18n: failed to load ' + url + ' (' + xhr.status + ')');
+          }
+          pending--;
+          if (pending === 0) {
+            loaded = true;
+            applyTranslations();
+          }
+        };
+        xhr.send();
+      })(SUPPORTED[i]);
+    }
+  }
 
+  function bindButtons() {
+    var btns = document.querySelectorAll('.lang-toggle-btn');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', openModal);
+    }
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape') closeModal();
     });
+  }
+
+  function init() {
+    currentLang = detectLang();
+    updateButton();
+    bindButtons();
+    loadTranslations();
   }
 
   if (document.readyState === 'loading') {
