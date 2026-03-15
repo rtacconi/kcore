@@ -1,0 +1,8 @@
+apiVersion: kcore.io/v1
+kind: NodeConfig
+metadata:
+  name: node-02-config
+spec:
+  nodeId: kvm-node-02
+  configFile: ./configuration.nix
+  rebuild: true

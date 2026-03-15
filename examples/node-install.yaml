@@ -1,0 +1,19 @@
+apiVersion: kcore.io/v1
+kind: NodeInstall
+metadata:
+  name: kvm-node-02
+spec:
+  address: "192.168.40.108:9090"
+  disks:
+    - device: sda
+      role: os
+    - device: sdb
+      role: storage
+    - device: sdc
+      role: storage
+  hostname: kvm-node-02
+  rootPassword: kcore
+  sshKeys:
+    - "ssh-ed25519 AAAA... user@host"
+  runController: false
+  controllerAddress: "192.168.40.100:9090"

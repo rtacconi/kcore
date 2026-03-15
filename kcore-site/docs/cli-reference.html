@@ -103,8 +103,9 @@
                 <a href="architecture.html" data-i18n="docs.cli.link_arch">Architecture</a>
             </div>
             <h1 data-i18n="docs.cli.title">CLI Reference</h1>
-            <p data-i18n="docs.cli.intro">kctl is the command-line interface for kcore. VMs are created declaratively via YAML manifests.</p>
+            <p data-i18n="docs.cli.intro">kctl is the command-line interface for managing kcore clusters. kctl communicates with the controller (port 9090), which forwards operations to node-agents.</p>
 
+            <!-- Global Flags -->
             <h2 data-i18n="docs.cli.h2_global_flags">Global Flags</h2>
             <table class="cmd-table">
                 <tr>
@@ -113,24 +114,57 @@
                 </tr>
                 <tr>
                     <td><code>-c, --config</code></td>
-                    <td data-i18n-html="docs.cli.global_desc1">Path to kctl config file (default: <code>~/.kcore/config</code>)</td>
+                    <td data-i18n-html="docs.cli.global_config">Path to kctl config file (default: <code>~/.kcore/config</code>)</td>
                 </tr>
                 <tr>
                     <td><code>-s, --controller</code></td>
-                    <td data-i18n="docs.cli.global_desc2">Controller address (overrides config)</td>
+                    <td data-i18n="docs.cli.global_controller">Controller address (overrides config)</td>
                 </tr>
                 <tr>
                     <td><code>-k, --insecure</code></td>
-                    <td data-i18n="docs.cli.global_desc3">Skip TLS certificate verification</td>
+                    <td data-i18n="docs.cli.global_insecure">Skip TLS certificate verification</td>
                 </tr>
             </table>
 
-            <h2 data-i18n="docs.cli.h2_apply">Apply (Declarative VM Creation)</h2>
-            <p data-i18n="docs.cli.apply_desc">The primary way to create VMs. Apply a YAML manifest to the cluster.</p>
-            <pre><code># Create a VM from a manifest
-kctl apply -f vm.yaml
+            <!-- Cluster Management -->
+            <h2 data-i18n="docs.cli.h2_cluster">Cluster Management</h2>
 
-# Dry run — preview what would be applied
+            <h3 data-i18n="docs.cli.h3_init_cluster">Initialize Cluster</h3>
+            <pre><code>kctl init cluster --name my-cluster
+kctl init cluster --name my-cluster --controller-ip 10.0.0.1 --base-path ~/.kcore</code></pre>
+            <p data-i18n="docs.cli.init_cluster_desc">Generates a cluster CA and identity. The CA key stays on the operator machine.</p>
+
+            <!-- Node Provisioning -->
+            <h2 data-i18n="docs.cli.h2_node_provisioning">Node Provisioning</h2>
+
+            <h3 data-i18n="docs.cli.h3_discover_hw">Discover Hardware</h3>
+            <pre><code>kctl get disks --node &lt;node-id&gt;
+kctl get nics --node &lt;node-id&gt;</code></pre>
+            <p data-i18n="docs.cli.discover_hw_desc">Query the node-agent for block devices and NICs before installation.</p>
+
+            <h3 data-i18n="docs.cli.h3_install_node">Install Node</h3>
+            <pre><code>kctl install node --node &lt;id&gt; --os-disk /dev/sda
+kctl install node --node &lt;id&gt; --os-disk /dev/sda --storage-disk /dev/nvme0n1 \
+  --hostname kcore01 --root-password s3cret --run-controller --controller-address 10.0.0.1:9090</code></pre>
+            <p data-i18n-html="docs.cli.install_node_decl">Or declaratively: <code>kctl apply -f node-install.yaml</code> (kind: NodeInstall)</p>
+
+            <h3 data-i18n="docs.cli.h3_configure_network">Configure Network</h3>
+            <pre><code>kctl configure network --node &lt;id&gt; --bridge br0 --bridge-ports enp1s0 --dns 1.1.1.1,8.8.8.8 --apply</code></pre>
+            <p data-i18n-html="docs.cli.configure_network_decl">Or declaratively: <code>kctl apply -f node-network.yaml</code> (kind: NodeNetwork)</p>
+
+            <h3 data-i18n="docs.cli.h3_push_nixconfig">Push NixOS Configuration</h3>
+            <pre><code>kctl update nixconfig --node &lt;id&gt; --file ./configuration.nix</code></pre>
+            <p data-i18n-html="docs.cli.push_nixconfig_decl">Or declaratively: <code>kctl apply -f node-config.yaml</code> (kind: NodeConfig)</p>
+
+            <h3 data-i18n="docs.cli.h3_update_system">Update System</h3>
+            <pre><code>kctl update system --node &lt;id&gt; --channels --rebuild --agent</code></pre>
+            <p data-i18n-html="docs.cli.update_system_flags">Flags: <code>--channels</code> (update NixOS channels), <code>--rebuild</code> (nixos-rebuild switch), <code>--agent</code> (upgrade node-agent binary).</p>
+
+            <!-- VM Management -->
+            <h2 data-i18n="docs.cli.h2_vm_management">VM Management</h2>
+
+            <h3 data-i18n="docs.cli.h3_apply">Apply</h3>
+            <pre><code>kctl apply -f vm.yaml
 kctl apply -f vm.yaml --dry-run</code></pre>
             <p data-i18n-html="docs.cli.apply_example">Example manifest (<code>vm.yaml</code>):</p>
             <pre><code>apiVersion: kcore.io/v1
@@ -146,92 +180,96 @@ spec:
     - network: default
       model: virtio</code></pre>
 
-            <h2 data-i18n="docs.cli.h2_get">Get (List Resources)</h2>
-            <pre><code># List all VMs
-kctl get vms
-
-# Get a specific VM
+            <h3 data-i18n="docs.cli.h3_get">Get</h3>
+            <pre><code>kctl get vms
 kctl get vm debian12-test
-
-# Wide output
 kctl get vms -o wide
-
-# JSON output
 kctl get vm debian12-test -o json
-
-# List all nodes
 kctl get nodes
-
-# List volumes
 kctl get volumes
-
-# List networks
 kctl get networks</code></pre>
 
-            <h2 data-i18n="docs.cli.h2_describe">Describe</h2>
-            <pre><code># Detailed VM information
-kctl describe vm debian12-test</code></pre>
+            <h3 data-i18n="docs.cli.h3_describe">Describe</h3>
+            <pre><code>kctl describe vm debian12-test</code></pre>
 
-            <h2 data-i18n="docs.cli.h2_delete">Delete</h2>
-            <pre><code># Delete a VM
-kctl delete vm debian12-test
-
-# Force delete
+            <h3 data-i18n="docs.cli.h3_delete">Delete</h3>
+            <pre><code>kctl delete vm debian12-test
 kctl delete vm debian12-test --force</code></pre>
 
+            <!-- Create (Volumes and Networks) -->
             <h2 data-i18n="docs.cli.h2_create">Create (Volumes and Networks)</h2>
             <p data-i18n-html="docs.cli.create_desc">The <code>create</code> command is used for volumes and networks, not VMs. Use <code>kctl apply -f</code> for VMs.</p>
-            <pre><code># Create a storage volume
-kctl create volume my-volume --size 50G --storage-class local
-
-# Create a network
+            <pre><code>kctl create volume my-volume --size 50G --storage-class local
 kctl create network my-net</code></pre>
 
+            <!-- Pull -->
             <h2 data-i18n="docs.cli.h2_pull">Pull</h2>
-            <pre><code># Pull a cloud image
-kctl pull https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2</code></pre>
+            <pre><code>kctl pull https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2</code></pre>
 
+            <!-- Provisioning Manifests -->
+            <h2 data-i18n="docs.cli.h2_provisioning_manifests">Provisioning Manifests</h2>
+            <p data-i18n="docs.cli.provisioning_manifests_intro">In addition to VM manifests, kctl supports three provisioning manifest kinds:</p>
+            <ul>
+                <li data-i18n-html="docs.cli.manifest_nodeinstall"><strong>NodeInstall</strong> — multi-disk OS installation with controller role option</li>
+                <li data-i18n-html="docs.cli.manifest_nodenetwork"><strong>NodeNetwork</strong> — bridge, bond, VLAN, DNS configuration</li>
+                <li data-i18n-html="docs.cli.manifest_nodeconfig"><strong>NodeConfig</strong> — NixOS configuration push with rebuild option</li>
+            </ul>
+            <p data-i18n="docs.cli.provisioning_manifests_example">Example NodeInstall manifest:</p>
+            <pre><code>apiVersion: kcore.io/v1
+kind: NodeInstall
+metadata:
+  name: install-kcore01
+spec:
+  nodeId: "node-abc123"
+  hostname: kcore01
+  rootPassword: s3cret
+  disks:
+    - device: /dev/sda
+      role: os
+    - device: /dev/nvme0n1
+      role: storage
+  runController: true
+  controllerAddress: "10.0.0.1:9090"</code></pre>
+
+            <!-- Other Commands -->
             <h2 data-i18n="docs.cli.h2_other">Other Commands</h2>
             <table class="cmd-table">
                 <tr>
                     <th data-i18n="docs.cli.th_command">Command</th>
-                    <th data-i18n="docs.cli.th_description2">Description</th>
+                    <th data-i18n="docs.cli.th_description">Description</th>
                 </tr>
                 <tr>
                     <td><code>kctl version</code></td>
-                    <td data-i18n="docs.cli.other_desc1">Print the kctl version</td>
+                    <td data-i18n="docs.cli.other_version">Print the kctl version</td>
                 </tr>
                 <tr>
                     <td><code>kctl controlplane status</code></td>
-                    <td data-i18n="docs.cli.other_desc2">Check control plane status</td>
+                    <td data-i18n="docs.cli.other_controlplane">Check control plane status</td>
                 </tr>
             </table>
 
+            <!-- Configuration -->
             <h2 data-i18n="docs.cli.h2_config">Configuration</h2>
             <p data-i18n-html="docs.cli.config_desc">kctl reads its config from <code>~/.kcore/config</code> by default. The config supports multiple contexts:</p>
             <pre><code># ~/.kcore/config
-current-context: local
+current-context: lab
 
 contexts:
-  local:
-    controller: "localhost:9090"
+  lab:
+    controller: "10.0.0.1:9090"
     insecure: true
 
   production:
-    controller: "controller.example.com:9090"
+    controller: "10.50.1.10:9090"
     insecure: false
     cert: "certs/controller.crt"
     key: "certs/controller.key"
     ca: "certs/ca.crt"</code></pre>
             <p data-i18n="docs.cli.config_override">You can override the config with flags:</p>
-            <pre><code># Use a different controller
-kctl get vms --controller node2.example.com:9091
-
-# Force insecure even if config says otherwise
+            <pre><code>kctl get vms --controller 10.0.0.2:9090
 kctl get vms --insecure</code></pre>
             <p data-i18n="docs.cli.config_env">Or with environment variables:</p>
-            <pre><code># Override config file location
-export KCORE_CONFIG=/path/to/config</code></pre>
+            <pre><code>export KCORE_CONFIG=/path/to/config</code></pre>
         </div>
     </main>
 

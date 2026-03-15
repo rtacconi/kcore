@@ -1,0 +1,17 @@
+apiVersion: kcore.io/v1
+kind: NodeNetwork
+metadata:
+  name: node-02-network
+spec:
+  nodeId: kvm-node-02
+  bridges:
+    - name: br0
+      memberPorts: [enp0s31f6]
+      dhcp: true
+  vlans:
+    - parentInterface: enp0s31f6
+      vlanId: 100
+      ipAddress: 10.0.100.10
+      subnetMask: "255.255.255.0"
+  dnsServers: "8.8.8.8,8.8.4.4"
+  applyNow: true

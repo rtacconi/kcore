@@ -34,12 +34,26 @@ service NodeInfo {
   rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
 }
 
-// NodeAdmin service provides node-level management operations
-// NOTE: For now this is intentionally unauthenticated and very simple, for development use only.
+// NodeAdmin service provides node-level management operations (legacy, use NodeAutomator).
 service NodeAdmin {
-  // ApplyNixConfig replaces the node's /etc/nixos/configuration.nix with the
-  // provided content and (optionally) triggers a nixos-rebuild.
   rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+}
+
+// NodeAutomator replaces and extends NodeAdmin with full day-0/day-N capabilities.
+service NodeAutomator {
+  // Day-0: Hardware discovery
+  rpc ListDisks(AutomatorListDisksRequest) returns (AutomatorListDisksResponse);
+  rpc ListNetworkInterfaces(AutomatorListNICsRequest) returns (AutomatorListNICsResponse);
+
+  // Day-0: Provisioning
+  rpc InstallToDisk(InstallToDiskRequest) returns (InstallToDiskResponse);
+  rpc GetInstallStatus(AutomatorGetInstallStatusRequest) returns (AutomatorGetInstallStatusResponse);
+  rpc ConfigureNetwork(AutomatorConfigureNetworkRequest) returns (AutomatorConfigureNetworkResponse);
+
+  // Day-N: System management
+  rpc UpdateNixConfig(AutomatorUpdateNixConfigRequest) returns (AutomatorUpdateNixConfigResponse);
+  rpc RebuildNix(AutomatorRebuildNixRequest) returns (AutomatorRebuildNixResponse);
+  rpc UpdateSystem(AutomatorUpdateSystemRequest) returns (AutomatorUpdateSystemResponse);
 }
 
 // VM specification
@@ -244,6 +258,140 @@ message ApplyNixConfigRequest {
 }
 
 message ApplyNixConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// --- NodeAutomator messages ---
+
+message AutomatorDisk {
+  string name = 1;
+  uint64 size_bytes = 2;
+  string model = 3;
+  string serial = 4;
+  bool removable = 5;
+  bool has_partitions = 6;
+}
+
+message AutomatorListDisksRequest {}
+message AutomatorListDisksResponse {
+  repeated AutomatorDisk disks = 1;
+  bool bootstrap_mode = 2;
+}
+
+message AutomatorNIC {
+  string name = 1;
+  string mac_address = 2;
+  string ip_address = 3;
+  string subnet_mask = 4;
+  bool is_up = 5;
+  int64 speed_mbps = 6;
+  string driver = 7;
+  bool is_virtual = 8;
+}
+
+message AutomatorListNICsRequest {}
+message AutomatorListNICsResponse {
+  repeated AutomatorNIC interfaces = 1;
+}
+
+message AutomatorDiskConfig {
+  string device = 1;
+  string role = 2;
+}
+
+message InstallToDiskRequest {
+  repeated AutomatorDiskConfig disks = 1;
+  string hostname = 2;
+  string root_password = 3;
+  repeated string ssh_keys = 4;
+  bool run_controller = 5;
+  string controller_address = 6;
+}
+
+message InstallToDiskResponse {
+  string install_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message AutomatorGetInstallStatusRequest {
+  string install_id = 1;
+}
+
+message AutomatorGetInstallStatusResponse {
+  string install_id = 1;
+  string phase = 2;
+  string message = 3;
+  int32 progress_pct = 4;
+}
+
+message AutomatorBridgeConfig {
+  string name = 1;
+  repeated string member_ports = 2;
+  string ip_address = 3;
+  string subnet_mask = 4;
+  string gateway = 5;
+  bool dhcp = 6;
+}
+
+message AutomatorBondConfig {
+  string name = 1;
+  repeated string member_ports = 2;
+  string mode = 3;
+  string ip_address = 4;
+  string subnet_mask = 5;
+  bool dhcp = 6;
+}
+
+message AutomatorVlanConfig {
+  string parent_interface = 1;
+  int32 vlan_id = 2;
+  string ip_address = 3;
+  string subnet_mask = 4;
+  bool dhcp = 5;
+}
+
+message AutomatorConfigureNetworkRequest {
+  repeated AutomatorBridgeConfig bridges = 1;
+  repeated AutomatorBondConfig bonds = 2;
+  repeated AutomatorVlanConfig vlans = 3;
+  string dns_servers = 4;
+  bool apply_now = 5;
+}
+
+message AutomatorConfigureNetworkResponse {
+  bool success = 1;
+  string message = 2;
+  string generated_nix_snippet = 3;
+}
+
+message AutomatorUpdateNixConfigRequest {
+  string configuration_nix = 1;
+}
+
+message AutomatorUpdateNixConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AutomatorRebuildNixRequest {
+  string strategy = 1;
+}
+
+message AutomatorRebuildNixResponse {
+  bool success = 1;
+  string message = 2;
+  string build_output = 3;
+}
+
+message AutomatorUpdateSystemRequest {
+  bool update_channels = 1;
+  bool rebuild = 2;
+  bool update_agent = 3;
+}
+
+message AutomatorUpdateSystemResponse {
   bool success = 1;
   string message = 2;
 }

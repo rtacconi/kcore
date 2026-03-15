@@ -99,12 +99,18 @@ terraform apply
   - Create, update, and destroy VMs
   - Configure CPU, memory, disks, and network interfaces
   - Optional node targeting for placement
+- **kcore_cluster_ca**: Manage cluster CA (generates CA cert/key pair)
+- **kcore_node_install**: Install NixOS on a bare-metal node (multi-disk, controller role)
+- **kcore_node_network**: Configure node networking (bridges, bonds, VLANs)
+- **kcore_node_nixconfig**: Push NixOS configuration to a node
 
 ### Data Sources
 
 - **kcore_vm**: Read information about an existing VM
 - **kcore_node**: Get details about a specific node
 - **kcore_nodes**: List all nodes in the cluster
+- **kcore_node_disks**: List block devices on a node
+- **kcore_node_nics**: List network interfaces on a node
 
 ### Provider Configuration
 
@@ -302,6 +308,194 @@ resource "kcore_vm" "my_vm" {
     bus            = "virtio"
     device         = "disk"
   }
+}
+```
+
+## Cluster & Node Provisioning Resources
+
+### kcore_cluster_ca
+
+Generates and manages the cluster CA. The CA key is stored in Terraform state -- use a secure backend.
+
+```hcl
+resource "kcore_cluster_ca" "main" {
+  cluster_name = "prod"
+  base_path    = "~/.kcore"
+}
+
+output "ca_cert" {
+  value = kcore_cluster_ca.main.ca_cert
+}
+```
+
+| Attribute | Type | Description |
+|---|---|---|
+| `cluster_name` | string | Cluster identifier |
+| `base_path` | string | Local directory for CA files (default: `~/.kcore`) |
+| `ca_cert` | string (read) | PEM-encoded CA certificate |
+
+### kcore_node_install
+
+Installs NixOS on a node with multi-disk and optional controller role.
+
+```hcl
+data "kcore_node_disks" "n1" {
+  node_id = "node-abc123"
+}
+
+resource "kcore_node_install" "n1" {
+  node_id       = "node-abc123"
+  hostname      = "kcore01"
+  root_password = "s3cret"
+
+  disk {
+    device = "/dev/sda"
+    role   = "os"
+  }
+
+  disk {
+    device = "/dev/nvme0n1"
+    role   = "storage"
+  }
+
+  run_controller     = true
+  controller_address = "10.0.0.1:9090"
+}
+```
+
+| Attribute | Type | Description |
+|---|---|---|
+| `node_id` | string | Target node identifier |
+| `hostname` | string | Hostname for installed system |
+| `root_password` | string | Root password (sensitive) |
+| `disk` | block list | Disks to use (`device`, `role`: `os` or `storage`) |
+| `run_controller` | bool | Deploy controller on this node (default: false) |
+| `controller_address` | string | Advertised controller address |
+
+### kcore_node_network
+
+Configures networking on an installed node.
+
+```hcl
+resource "kcore_node_network" "n1" {
+  node_id = "node-abc123"
+
+  bridge {
+    name  = "br0"
+    ports = ["enp1s0"]
+  }
+
+  bond {
+    name       = "bond0"
+    mode       = "802.3ad"
+    interfaces = ["enp2s0", "enp3s0"]
+  }
+
+  vlan {
+    name   = "vlan100"
+    id     = 100
+    parent = "bond0"
+  }
+
+  dns_servers = ["1.1.1.1", "8.8.8.8"]
+  apply_now   = true
+}
+```
+
+| Attribute | Type | Description |
+|---|---|---|
+| `node_id` | string | Target node identifier |
+| `bridge` | block list | Bridge definitions (`name`, `ports[]`) |
+| `bond` | block list | Bond definitions (`name`, `mode`, `interfaces[]`) |
+| `vlan` | block list | VLAN definitions (`name`, `id`, `parent`) |
+| `dns_servers` | list(string) | DNS server addresses |
+| `apply_now` | bool | Apply immediately (default: false) |
+
+### kcore_node_nixconfig
+
+Pushes a NixOS configuration file to a node.
+
+```hcl
+resource "kcore_node_nixconfig" "n1" {
+  node_id   = "node-abc123"
+  nix_config = file("${path.module}/configuration.nix")
+  rebuild    = true
+}
+```
+
+| Attribute | Type | Description |
+|---|---|---|
+| `node_id` | string | Target node identifier |
+| `nix_config` | string | NixOS configuration content |
+| `rebuild` | bool | Run `nixos-rebuild switch` after push (default: false) |
+
+### Data Sources: Node Hardware
+
+```hcl
+data "kcore_node_disks" "n1" {
+  node_id = "node-abc123"
+}
+
+output "disks" {
+  value = data.kcore_node_disks.n1.disks
+  # Each disk: { device, size_bytes, model, serial, in_use }
+}
+
+data "kcore_node_nics" "n1" {
+  node_id = "node-abc123"
+}
+
+output "nics" {
+  value = data.kcore_node_nics.n1.nics
+  # Each nic: { name, mac, speed, state, driver }
+}
+```
+
+### Full Provisioning Example
+
+```hcl
+resource "kcore_cluster_ca" "main" {
+  cluster_name = "prod"
+}
+
+data "kcore_node_disks" "n1" {
+  node_id = "node-abc123"
+}
+
+resource "kcore_node_install" "n1" {
+  node_id  = "node-abc123"
+  hostname = "kcore01"
+
+  disk {
+    device = "/dev/sda"
+    role   = "os"
+  }
+
+  disk {
+    device = "/dev/nvme0n1"
+    role   = "storage"
+  }
+
+  run_controller     = true
+  controller_address = "10.0.0.1:9090"
+}
+
+resource "kcore_node_network" "n1" {
+  node_id = kcore_node_install.n1.node_id
+
+  bridge {
+    name  = "br0"
+    ports = ["enp1s0"]
+  }
+
+  dns_servers = ["1.1.1.1"]
+  apply_now   = true
+}
+
+resource "kcore_node_nixconfig" "n1" {
+  node_id    = kcore_node_install.n1.node_id
+  nix_config = file("${path.module}/configuration.nix")
+  rebuild    = true
 }
 ```
 

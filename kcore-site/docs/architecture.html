@@ -48,6 +48,26 @@
             gap: 1rem;
             margin-bottom: 1rem;
         }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 0.75rem 0 1.25rem;
+        }
+        th, td {
+            text-align: left;
+            padding: 0.6rem 0.75rem;
+            border: 1px solid var(--border-primary);
+        }
+        th {
+            background: var(--bg-card);
+            font-weight: 600;
+        }
+        td {
+            color: var(--text-secondary);
+        }
+        ol {
+            padding-left: 1.25rem;
+        }
     </style>
 </head>
 <body>
@@ -91,77 +111,171 @@
                 <a href="cli-reference.html" data-i18n="docs.arch.link_cli">CLI Reference</a>
             </div>
             <h1 data-i18n="docs.arch.title">Architecture</h1>
-            <p data-i18n="docs.arch.intro">kcore is a clustered KVM virtualization platform built with Go, gRPC, and NixOS.</p>
+            <p data-i18n="docs.arch.intro">kcore is a clustered KVM virtualization platform built with Go, gRPC, and NixOS. This page describes the system topology, component responsibilities, and data flows.</p>
 
-            <h2 data-i18n="docs.arch.h2_topology">System Topology</h2>
-            <div class="diagram">┌─────────────────────────┐
-│    Your Workstation     │
-│   kcore-controller      │  ← Manages cluster state
-│   Go + SQLite + gRPC    │     Listens on port 9090
-└───────────┬─────────────┘
-            │ gRPC (mTLS)
-     ┌──────┴───────┬──────────────┐
-     │              │              │
-┌────▼───────┐ ┌────▼───────┐ ┌────▼───────┐
-│  kcore     │ │  kcore     │ │  kcore     │
-│  Node #1   │ │  Node #2   │ │  Node #N   │
-│            │ │            │ │            │
-│ node-agent │ │ node-agent │ │ node-agent │
-│ (port 9091)│ │ (port 9091)│ │ (port 9091)│
-│            │ │            │ │            │
-│ NixOS      │ │ NixOS      │ │ NixOS      │
-│ libvirtd   │ │ libvirtd   │ │ libvirtd   │
-│  VMs...    │ │  VMs...    │ │  VMs...    │
-└────────────┘ └────────────┘ └────────────┘</div>
+            <!-- 1. Controller-First Architecture -->
+            <h2 data-i18n="docs.arch.controller_first_title">Controller-First Architecture</h2>
+            <p data-i18n="docs.arch.controller_first_p1">All external clients — kctl and the Terraform provider — communicate exclusively with the controller on port 9090. Only the controller talks to node-agents on port 9091. This is a hard rule: kctl and Terraform never create direct connections to node-agents.</p>
+            <p data-i18n="docs.arch.controller_first_p2">This single-entry-point design simplifies security (one TLS endpoint to expose), avoids split-brain coordination issues, and keeps node-agents invisible to end users.</p>
+            <div class="diagram">                    ┌──────────┐   ┌───────────┐
+                    │   kctl   │   │ Terraform │
+                    └────┬─────┘   └─────┬─────┘
+                         │               │
+                         │  gRPC (mTLS)  │
+                         └───────┬───────┘
+                                 │
+                    ┌────────────▼─────────────┐
+                    │       Controller         │
+                    │   (port 9090, default)    │
+                    │                          │
+                    │   ┌──────────────────┐   │
+                    │   │  SQLite DB       │   │
+                    │   │  desired state   │   │
+                    │   │  actual state    │   │
+                    │   └──────────────────┘   │
+                    └──────┬──────────┬────────┘
+                           │          │
+                     gRPC mTLS   gRPC mTLS
+                           │          │
+                    ┌──────▼──┐  ┌────▼──────┐
+                    │ Node    │  │ Node      │
+                    │ Agent 1 │  │ Agent 2   │
+                    │ :9091   │  │ :9091     │
+                    │         │  │           │
+                    │ SQLite  │  │ SQLite    │
+                    │ libvirt │  │ libvirt   │
+                    │ ┌──┐┌──┐│  │ ┌──┐┌──┐ │
+                    │ │VM││VM││  │ │VM││VM│ │
+                    │ └──┘└──┘│  │ └──┘└──┘ │
+                    └─────────┘  └──────────┘</div>
 
-            <h2 data-i18n="docs.arch.h2_components">Core Components</h2>
+            <!-- 2. Desired State vs Actual State -->
+            <h2 data-i18n="docs.arch.desired_actual_title">Desired State vs Actual State</h2>
+            <p data-i18n="docs.arch.desired_actual_p1">When a user submits a YAML manifest or Terraform resource, the controller stores it as desired state in its SQLite database. The controller never modifies desired state autonomously — it is the user's source of truth.</p>
             <ul>
-                <li data-i18n-html="docs.arch.comp_controller"><strong>Controller</strong> — Written in Go. Stores desired state in SQLite, serves a gRPC API on port 9090, and coordinates VM operations across nodes.</li>
-                <li data-i18n-html="docs.arch.comp_node_agent"><strong>Node Agent</strong> — Runs on each NixOS compute node. Self-registers with the controller on startup and manages local VMs through libvirtd.</li>
-                <li data-i18n-html="docs.arch.comp_kctl"><strong>kctl</strong> — CLI client that sends gRPC requests to the controller. Supports declarative manifests (<code>kctl apply -f vm.yaml</code>) and imperative queries (<code>kctl get vms</code>).</li>
-                <li data-i18n-html="docs.arch.comp_terraform"><strong>Terraform Provider</strong> — Manages VMs as Terraform resources via the same gRPC API.</li>
+                <li data-i18n-html="docs.arch.desired_actual_li1"><strong>Desired state</strong> — the full resource spec including target lifecycle state (running, stopped, or deleted). Only changed by explicit user action.</li>
+                <li data-i18n-html="docs.arch.desired_actual_li2"><strong>Actual state</strong> — reported by node-agents: VM power state, actual node placement, resource usage. Updated via heartbeats and sync RPCs.</li>
+            </ul>
+            <p data-i18n="docs.arch.desired_actual_p2">A reconciliation loop continuously compares desired to actual for every VM and takes action to converge — creating, starting, stopping, or deleting VMs as needed.</p>
+
+            <!-- 3. Component Overview -->
+            <h2 data-i18n="docs.arch.components_title">Component Overview</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th data-i18n="docs.arch.table_component">Component</th>
+                        <th data-i18n="docs.arch.table_port">Port</th>
+                        <th data-i18n="docs.arch.table_role">Role</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Controller</td>
+                        <td>9090</td>
+                        <td data-i18n="docs.arch.table_controller_role">Cluster coordinator. Stores desired/actual state in SQLite, serves gRPC API, drives reconciliation.</td>
+                    </tr>
+                    <tr>
+                        <td>Node-agent</td>
+                        <td>9091</td>
+                        <td data-i18n="docs.arch.table_nodeagent_role">Per-node daemon. Manages local VMs via libvirt, reports state to controller, handles storage and networking.</td>
+                    </tr>
+                    <tr>
+                        <td>kctl</td>
+                        <td>—</td>
+                        <td data-i18n-html="docs.arch.table_kctl_role">CLI client. Sends gRPC requests to the controller. Supports declarative manifests (<code>kctl apply -f</code>) and imperative queries (<code>kctl get vms</code>).</td>
+                    </tr>
+                    <tr>
+                        <td>Terraform</td>
+                        <td>—</td>
+                        <td data-i18n="docs.arch.table_terraform_role">Terraform provider. Manages VMs as HCL resources via the same controller gRPC API.</td>
+                    </tr>
+                </tbody>
+            </table>
+
+            <!-- 4. Automator API -->
+            <h2 data-i18n="docs.arch.automator_title">Automator API</h2>
+            <p data-i18n="docs.arch.automator_p1">The Automator gRPC service (replacing the older NodeAdmin service) covers the full bare-metal node lifecycle. It is exposed on the same node-agent gRPC port (9091).</p>
+            <ul>
+                <li data-i18n-html="docs.arch.automator_li1"><strong>Hardware discovery</strong> — GetDisks, GetNics: enumerate local block devices and network interfaces.</li>
+                <li data-i18n-html="docs.arch.automator_li2"><strong>OS installation</strong> — InstallNode: multi-disk, role-based NixOS installation with automatic partitioning.</li>
+                <li data-i18n-html="docs.arch.automator_li3"><strong>Network configuration</strong> — ConfigureNetwork: bridges, bonds (LACP, active-backup), VLANs, DNS.</li>
+                <li data-i18n-html="docs.arch.automator_li4"><strong>NixOS config push</strong> — UpdateNixConfig: deploy a new NixOS configuration to a node.</li>
+                <li data-i18n-html="docs.arch.automator_li5"><strong>System update</strong> — UpdateSystem: trigger a nixos-rebuild switch on the node.</li>
             </ul>
 
-            <h2 data-i18n="docs.arch.h2_communication">Communication</h2>
-            <p data-i18n="docs.arch.comm_desc">All communication between components uses gRPC with Protocol Buffers. In production, connections are secured with mutual TLS (mTLS) using x509 certificates.</p>
+            <!-- 5. Bootstrap Flow -->
+            <h2 data-i18n="docs.arch.bootstrap_title">Bootstrap Flow</h2>
+            <p data-i18n="docs.arch.bootstrap_p1">When a bare-metal node first boots from the kcore ISO, no TLS infrastructure exists yet. The bootstrap sequence establishes trust and configures the node:</p>
+            <ol>
+                <li data-i18n-html="docs.arch.bootstrap_li1">Node boots from the kcore ISO (minimal NixOS with node-agent in insecure mode).</li>
+                <li data-i18n-html="docs.arch.bootstrap_li2"><code>kctl init cluster</code> generates the cluster CA and controller certificates on the operator's machine.</li>
+                <li data-i18n-html="docs.arch.bootstrap_li3"><code>kctl get disks</code> and <code>kctl get nics</code> discover the node's hardware via the Automator API.</li>
+                <li data-i18n-html="docs.arch.bootstrap_li4"><code>kctl install node</code> triggers NixOS installation on selected disks and issues TLS certificates for the node.</li>
+                <li data-i18n="docs.arch.bootstrap_li5">After reboot, the node-agent starts with TLS enabled and registers with the controller.</li>
+            </ol>
+
+            <!-- 6. CA Management -->
+            <h2 data-i18n="docs.arch.ca_title">CA Management</h2>
+            <p data-i18n-html="docs.arch.ca_p1">The cluster CA lives on the operator's machine at <code>~/.kcore/&lt;cluster&gt;/</code>. The CA private key never leaves the operator's machine — it is not copied to nodes or the controller.</p>
+            <p data-i18n="docs.arch.ca_p2">Node and controller certificates are issued during the installation process. Each component receives its own certificate signed by the cluster CA, enabling mutual TLS authentication across the cluster.</p>
+
+            <!-- 7. Multi-Disk Install -->
+            <h2 data-i18n="docs.arch.multidisk_title">Multi-Disk Install</h2>
+            <p data-i18n="docs.arch.multidisk_p1">The InstallNode RPC supports multiple disks, each assigned a role:</p>
             <ul>
-                <li data-i18n="docs.arch.comm1">Clients (kctl, Terraform) → Controller: port 9090</li>
-                <li data-i18n="docs.arch.comm2">Controller → Node Agents: port 9091</li>
-                <li data-i18n="docs.arch.comm3">Node agents self-register with the controller and report status periodically</li>
+                <li data-i18n-html="docs.arch.multidisk_li1"><strong>os</strong> — root filesystem. Exactly one disk must have this role. Partitioned with boot, swap, and root partitions.</li>
+                <li data-i18n-html="docs.arch.multidisk_li2"><strong>storage</strong> — LVM thin-pool for VM disks. Zero or more disks. Initialized as LVM physical volumes and added to a volume group for thin-provisioned VM storage.</li>
             </ul>
 
-            <h2 data-i18n="docs.arch.h2_api_consumers">API Consumers</h2>
-            <div class="diagram">┌──────────────┐  ┌───────────────┐  ┌──────────────┐
-│    kctl      │  │   Terraform   │  │  MCP Server  │
-│  (CLI)       │  │   Provider    │  │  (AI Agents) │
-└──────┬───────┘  └──────┬────────┘  └──────┬───────┘
-       │                 │                   │
-       └─────────────────┼───────────────────┘
-                         │
-                    gRPC API
-                         │
-              ┌──────────▼──────────┐
-              │    Controller       │
-              └─────────────────────┘</div>
-
-            <h2 data-i18n="docs.arch.h2_host_os">Host OS</h2>
-            <p data-i18n="docs.arch.host_os_desc">Each compute node runs NixOS, providing:</p>
+            <!-- 8. Network Configuration -->
+            <h2 data-i18n="docs.arch.network_title">Network Configuration</h2>
+            <p data-i18n="docs.arch.network_p1">The ConfigureNetwork RPC supports complex networking topologies rendered into NixOS networking modules:</p>
             <ul>
-                <li data-i18n-html="docs.arch.host_os1"><strong>Immutable system configuration</strong> — the entire OS is declaratively defined and reproducible</li>
-                <li data-i18n-html="docs.arch.host_os2"><strong>Atomic updates</strong> — system updates are all-or-nothing with instant rollback</li>
-                <li data-i18n-html="docs.arch.host_os3"><strong>Minimal attack surface</strong> — only the packages needed for virtualization are included in the ISO</li>
+                <li data-i18n-html="docs.arch.network_li1"><strong>Bridges</strong> — for VM connectivity, attaching VMs to physical networks.</li>
+                <li data-i18n-html="docs.arch.network_li2"><strong>Bonds</strong> — LACP (802.3ad) and active-backup modes for link aggregation and redundancy.</li>
+                <li data-i18n-html="docs.arch.network_li3"><strong>VLANs</strong> — 802.1Q tagged interfaces for network segmentation.</li>
+                <li data-i18n-html="docs.arch.network_li4"><strong>DNS</strong> — nameserver configuration.</li>
+            </ul>
+            <p data-i18n-html="docs.arch.network_p2">Configuration can be applied immediately using the <code>applyNow</code> flag, which triggers a NixOS rebuild after writing the network config.</p>
+
+            <!-- 9. gRPC Services -->
+            <h2 data-i18n="docs.arch.grpc_title">gRPC Services</h2>
+            <p data-i18n="docs.arch.grpc_p1">Controller services (port 9090):</p>
+            <ul>
+                <li data-i18n="docs.arch.grpc_ctrl_li1">RegisterNode, Heartbeat — node registration and health monitoring</li>
+                <li data-i18n="docs.arch.grpc_ctrl_li2">SyncVmState — node-agents report VM state changes</li>
+                <li data-i18n="docs.arch.grpc_ctrl_li3">VM lifecycle — CreateVm, StartVm, StopVm, DeleteVm, ListVms, GetVm</li>
+                <li data-i18n="docs.arch.grpc_ctrl_li4">Node inventory — ListNodes, GetNode</li>
+            </ul>
+            <p data-i18n="docs.arch.grpc_p2">Node-agent services (port 9091):</p>
+            <ul>
+                <li data-i18n="docs.arch.grpc_node_li1">NodeCompute — VM operations (create, start, stop, delete domains via libvirt)</li>
+                <li data-i18n="docs.arch.grpc_node_li2">NodeStorage — disk image management, LVM thin-pool operations</li>
+                <li data-i18n="docs.arch.grpc_node_li3">NodeInfo — hardware and system information</li>
+                <li data-i18n="docs.arch.grpc_node_li4">Automator — bare-metal lifecycle (install, network, update)</li>
             </ul>
 
-            <h2 data-i18n="docs.arch.h2_storage">Storage</h2>
-            <p data-i18n-html="docs.arch.storage_desc">Currently supports local storage and LVM. Cloud images are downloaded automatically when specified via <code>image</code> (YAML) or <code>image_uri</code> (Terraform). Storage backends are pluggable — ZFS and networked storage are on the roadmap.</p>
-
-            <h2 data-i18n="docs.arch.h2_reliability">Reliability</h2>
-            <ul>
-                <li data-i18n="docs.arch.rel1">Desired state is persisted in the controller's SQLite database</li>
-                <li data-i18n="docs.arch.rel2">Node agents report runtime status back to the controller</li>
-                <li data-i18n="docs.arch.rel3">Failed operations can be retried without configuration drift</li>
-                <li data-i18n="docs.arch.rel4">All services are managed by systemd with automatic restarts</li>
-            </ul>
+            <!-- 10. Data Flow -->
+            <h2 data-i18n="docs.arch.dataflow_title">Data Flow</h2>
+            <p data-i18n-html="docs.arch.dataflow_p1">The following diagram shows the end-to-end flow when a user creates a VM with <code>kctl apply -f vm.yaml</code>:</p>
+            <div class="diagram">User                Controller              Node-Agent          libvirt
+ │                      │                       │                  │
+ │  kctl apply -f vm.yaml                       │                  │
+ ├──────────────────────►│                       │                  │
+ │                      │  Store desired state   │                  │
+ │                      │  in SQLite             │                  │
+ │                      │                       │                  │
+ │                      │  CreateVm (gRPC)       │                  │
+ │                      ├───────────────────────►│                  │
+ │                      │                       │  Define domain   │
+ │                      │                       ├─────────────────►│
+ │                      │                       │  Start domain    │
+ │                      │                       ├─────────────────►│
+ │                      │       response        │                  │
+ │                      │◄───────────────────────│                  │
+ │                      │  Update actual state   │                  │
+ │       response       │  in SQLite             │                  │
+ │◄──────────────────────│                       │                  │</div>
         </div>
     </main>
 

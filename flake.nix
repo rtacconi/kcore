@@ -96,7 +96,7 @@
               pname = "kcore-node-agent";
               version = "0.1.0";
               src = ./.; # Include vendor directory
-              vendorHash = "sha256-K14plyEnAIibeETxGZaQhTasSp2Gw0CCm3IvqGizdDo=";
+              vendorHash = "sha256-ci/hEqEtBqw3Go6h1IMwxK9PqXqP1CZsYGR2yf8Jn5c=";
               subPackages = [ "cmd/node-agent" ];
               env.CGO_ENABLED = "1";
               buildFlags = [ "-tags" "libvirt" ];
@@ -109,6 +109,18 @@
               # Create a symlink so both names work (for compatibility)
               postInstall = ''
                 ln -sf node-agent $out/bin/kcore-node-agent
+              '';
+            };
+
+            controller = (pkgs.buildGoModule.override { go = pkgs.go_1_24; }) {
+              pname = "kcore-controller";
+              version = "0.1.0";
+              src = ./.;
+              vendorHash = "sha256-ci/hEqEtBqw3Go6h1IMwxK9PqXqP1CZsYGR2yf8Jn5c=";
+              subPackages = [ "cmd/controller" ];
+              env.CGO_ENABLED = "1";
+              postInstall = ''
+                ln -sf controller $out/bin/kcore-controller
               '';
             };
           };
@@ -303,9 +315,10 @@
           ./modules/kcore-branding.nix
           ({ config, pkgs, lib, ... }:
             let
-              # Reuse the shared node-agent package from outputs.packages
-              # This ensures the ISO contains the exact same binary that will be installed
+              # Reuse the shared packages from outputs.packages
+              # This ensures the ISO contains the exact same binaries that will be installed
               nodeAgent = self.packages.${pkgs.system}.node-agent;
+              controllerPkg = self.packages.${pkgs.system}.controller;
             in
             {
               system.stateVersion = "25.05";
@@ -326,7 +339,7 @@
               networking.hostName = "kvm-node";
               networking.useDHCP = true;  # Enable DHCP on all interfaces automatically
               networking.firewall.enable = true;
-              networking.firewall.allowedTCPPorts = [ 22 9091 ]; # SSH first, then node-agent
+              networking.firewall.allowedTCPPorts = [ 22 9090 9091 ]; # SSH, controller, node-agent
               
               # Root user with password for console login
               users.users.root.initialPassword = "kcore";
@@ -410,6 +423,27 @@
                   chmod 0600 /etc/kcore/ca.key /etc/kcore/node.key
                 '';
               };
+              systemd.services.kcore-controller = {
+                description = "kcore Controller (bootstrap/insecure)";
+                wantedBy = [ "multi-user.target" ];
+                after = [ "network-online.target" "kcore-bootstrap-certs.service" ];
+                wants = [ "network-online.target" "kcore-bootstrap-certs.service" ];
+                serviceConfig = {
+                  Type = "simple";
+                  ExecStart = "${controllerPkg}/bin/kcore-controller --listen :9090 --insecure --node-insecure --auto-register-local --db /var/lib/kcore/controller.db";
+                  Restart = "always";
+                  RestartSec = "10s";
+                  NoNewPrivileges = true;
+                  PrivateTmp = true;
+                  ProtectSystem = "strict";
+                  ProtectHome = true;
+                  ReadWritePaths = [ "/var/lib/kcore" ];
+                  ReadOnlyPaths = [ "/etc/kcore" ];
+                  User = "root";
+                  LimitNOFILE = 65536;
+                  LimitNPROC = 4096;
+                };
+              };
               systemd.services.kcore-node-agent = {
                 description = "kcore Node Agent";
                 wantedBy = [ "multi-user.target" ];
@@ -417,7 +451,6 @@
                 wants = [ "network-online.target" "kcore-bootstrap-certs.service" ];
                 serviceConfig = {
                   Type = "simple";
-                  # Use kcore-node-agent (the symlink created by postInstall)
                   ExecStart = "${nodeAgent}/bin/kcore-node-agent";
                   Restart = "always";
                   RestartSec = "10s";
@@ -447,80 +480,105 @@
                 "d /etc/kcore 0755 root root -"
               ];
               environment.systemPackages = with pkgs; [
-                qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq nodeAgent openssl
-                # Tools needed for install-to-disk script (parted is main missing one)
+                qemu_kvm libvirt lvm2 qemu-utils cloud-utils iproute2 jq nodeAgent controllerPkg openssl
                 parted
                 (pkgs.writeScriptBin "install-to-disk" ''
                   #!/usr/bin/env bash
                   set -euo pipefail
-                  
-                  echo "╔══════════════════════════════════════════════════════════╗"
-                  echo "║        KCORE Node - Automated Disk Installer            ║"
-                  echo "╚══════════════════════════════════════════════════════════╝"
-                  echo ""
-                  echo "⚠️  This will ERASE the selected disk and install NixOS!"
-                  echo ""
-                  
-                  # Show available disks
-                  echo "Available disks:"
-                  lsblk -d -o NAME,SIZE,TYPE,MODEL | grep disk
-                  echo ""
-                  
-                  # Ask for target disk
-                  read -p "Enter target disk (e.g., sda, nvme0n1, vda): " DISK
-                  DISK_PATH="/dev/$DISK"
-                  
-                  if [ ! -b "$DISK_PATH" ]; then
-                    echo "Error: $DISK_PATH is not a valid block device"
-                    exit 1
+
+                  # ── Environment variable defaults ──────────────────────────
+                  # When KCORE_OS_DISK is set, the installer runs non-interactively.
+                  KCORE_OS_DISK="''${KCORE_OS_DISK:-}"
+                  KCORE_STORAGE_DISKS="''${KCORE_STORAGE_DISKS:-}"
+                  KCORE_HOSTNAME="''${KCORE_HOSTNAME:-kvm-node}"
+                  KCORE_ROOT_PASSWORD="''${KCORE_ROOT_PASSWORD:-kcore}"
+                  KCORE_SSH_KEYS="''${KCORE_SSH_KEYS:-}"
+                  KCORE_RUN_CONTROLLER="''${KCORE_RUN_CONTROLLER:-false}"
+                  KCORE_CONTROLLER_ADDRESS="''${KCORE_CONTROLLER_ADDRESS:-}"
+                  KCORE_STATUS_FILE="''${KCORE_STATUS_FILE:-}"
+
+                  # ── Progress reporting ─────────────────────────────────────
+                  report_status() {
+                    local phase="$1"
+                    local message="''${2:-}"
+                    if [ -n "$KCORE_STATUS_FILE" ]; then
+                      printf '{"phase":"%s","message":"%s","timestamp":"%s"}\n' \
+                        "$phase" "$message" "$(date -Iseconds)" > "$KCORE_STATUS_FILE"
+                    fi
+                    echo "[$phase] $message"
+                  }
+
+                  # ── Disk selection (interactive vs. non-interactive) ──────
+                  if [ -n "$KCORE_OS_DISK" ]; then
+                    DISK_PATH="$KCORE_OS_DISK"
+                    DISK=$(basename "$DISK_PATH")
+                    if [ ! -b "$DISK_PATH" ]; then
+                      report_status "FAILED" "$DISK_PATH is not a valid block device"
+                      exit 1
+                    fi
+                  else
+                    echo "╔══════════════════════════════════════════════════════════╗"
+                    echo "║        KCORE Node - Automated Disk Installer            ║"
+                    echo "╚══════════════════════════════════════════════════════════╝"
+                    echo ""
+                    echo "⚠️  This will ERASE the selected disk and install NixOS!"
+                    echo ""
+
+                    echo "Available disks:"
+                    lsblk -d -o NAME,SIZE,TYPE,MODEL | grep disk
+                    echo ""
+
+                    read -p "Enter target disk (e.g., sda, nvme0n1, vda): " DISK
+                    DISK_PATH="/dev/$DISK"
+
+                    if [ ! -b "$DISK_PATH" ]; then
+                      echo "Error: $DISK_PATH is not a valid block device"
+                      exit 1
+                    fi
+
+                    echo ""
+                    echo "Selected: $DISK_PATH"
+                    lsblk "$DISK_PATH"
+                    echo ""
+                    read -p "⚠️  THIS WILL ERASE ALL DATA ON $DISK_PATH! Type 'yes' to continue: " CONFIRM
+
+                    if [ "$CONFIRM" != "yes" ]; then
+                      echo "Installation cancelled."
+                      exit 0
+                    fi
+
+                    # Detect SSH keys from live environment when interactive
+                    if [ -z "$KCORE_SSH_KEYS" ] && [ -f /root/.ssh/authorized_keys ]; then
+                      KCORE_SSH_KEYS=$(cat /root/.ssh/authorized_keys)
+                    fi
                   fi
-                  
-                  echo ""
-                  echo "Selected: $DISK_PATH"
-                  lsblk "$DISK_PATH"
-                  echo ""
-                  read -p "⚠️  THIS WILL ERASE ALL DATA ON $DISK_PATH! Type 'yes' to continue: " CONFIRM
-                  
-                  if [ "$CONFIRM" != "yes" ]; then
-                    echo "Installation cancelled."
-                    exit 0
-                  fi
-                  
-                  echo ""
-                  echo "🔧 Preparing disk (deactivating LVM and unmounting)..."
-                  
-                  # Deactivate any LVM volume groups on this disk
+
+                  # ── Phase: PARTITIONING ────────────────────────────────────
+                  report_status "PARTITIONING" "Preparing OS disk $DISK_PATH"
+
                   for vg in $(vgs --noheadings -o vg_name 2>/dev/null || true); do
-                    echo "Deactivating volume group: $vg"
                     vgchange -an "$vg" 2>/dev/null || true
                   done
-                  
-                  # Unmount any partitions on this disk
+
                   for part in "$DISK_PATH"*; do
                     if [ -b "$part" ]; then
                       umount "$part" 2>/dev/null || true
                     fi
                   done
-                  
-                  echo "🔧 Partitioning disk..."
-                  
-                  # Wipe any existing partition table (with retries). -f = force, no interactive prompt (for API/manifest-driven install)
+
                   for i in {1..3}; do
                     wipefs -af "$DISK_PATH" && break || sleep 2
                   done
-                  
-                  # Create GPT partition table with UEFI + root partitions
+
                   parted -s "$DISK_PATH" mklabel gpt
                   parted -s "$DISK_PATH" mkpart ESP fat32 1MiB 512MiB
                   parted -s "$DISK_PATH" set 1 esp on
                   parted -s "$DISK_PATH" mkpart primary ext4 512MiB 100%
-                  
-                  # Wait for kernel to recognize partitions
+
                   sleep 2
                   partprobe "$DISK_PATH" || true
                   sleep 2
-                  
-                  # Determine partition names (handle both /dev/sda1 and /dev/nvme0n1p1 styles)
+
                   if [[ "$DISK" == nvme* ]] || [[ "$DISK" == mmcblk* ]]; then
                     BOOT_PART="''${DISK_PATH}p1"
                     ROOT_PART="''${DISK_PATH}p2"
@@ -528,130 +586,143 @@
                     BOOT_PART="''${DISK_PATH}1"
                     ROOT_PART="''${DISK_PATH}2"
                   fi
-                  
-                  echo "🔧 Formatting partitions..."
+
+                  # ── Phase: FORMATTING ──────────────────────────────────────
+                  report_status "FORMATTING" "Formatting OS partitions"
+
                   mkfs.fat -F 32 -n BOOT "$BOOT_PART"
                   mkfs.ext4 -F -L nixos "$ROOT_PART"
-                  
-                  echo "🔧 Mounting partitions..."
-                  # Ensure /mnt directory exists
+
                   mkdir -p /mnt
                   mount "$ROOT_PART" /mnt
                   mkdir -p /mnt/boot
                   mount "$BOOT_PART" /mnt/boot
-                  
-                  echo "🔧 Generating NixOS configuration..."
-                  nixos-generate-config --root /mnt
-                  
-                  # Copy the current flake configuration
-                  echo "🔧 Copying kcore configuration..."
-                  
-                  # Detect SSH authorized keys from live environment
-                  SSH_KEYS=""
-                  if [ -f /root/.ssh/authorized_keys ]; then
-                    echo "📋 Found SSH authorized keys, adding to installed system..."
-                    SSH_KEYS=$(cat /root/.ssh/authorized_keys | sed 's/^/      "/' | sed 's/$/"/' | paste -sd '\n')
+
+                  # ── Phase: CONFIGURING_STORAGE (optional) ──────────────────
+                  if [ -n "$KCORE_STORAGE_DISKS" ]; then
+                    report_status "CONFIGURING_STORAGE" "Preparing storage disks for LVM"
+
+                    IFS=',' read -ra SDISKS <<< "$KCORE_STORAGE_DISKS"
+                    PV_DEVS=()
+                    for sdisk in "''${SDISKS[@]}"; do
+                      sdisk=$(echo "$sdisk" | xargs)
+                      if [ ! -b "$sdisk" ]; then
+                        report_status "FAILED" "Storage disk $sdisk is not a valid block device"
+                        exit 1
+                      fi
+                      wipefs -af "$sdisk"
+                      pvcreate -ff -y "$sdisk"
+                      PV_DEVS+=("$sdisk")
+                    done
+
+                    vgcreate kcore-storage "''${PV_DEVS[@]}"
+                    echo "VG kcore-storage created with: ''${PV_DEVS[*]}"
                   fi
-                  
-                  # Copy node-agent binary to installed system
-                  # The binary is already in the Nix store and available via PATH (from systemPackages)
-                  # We use the store path directly (Nix substitutes ${nodeAgent} at build time)
-                  echo "📋 Copying node-agent binary..."
+
+                  # ── Phase: INSTALLING_OS ───────────────────────────────────
+                  report_status "INSTALLING_OS" "Generating NixOS configuration"
+
+                  nixos-generate-config --root /mnt
+
+                  # Copy node-agent binary
                   mkdir -p /mnt/opt/kcore/bin
-                  
-                  # Primary method: Use the store path directly (Nix substitutes this at ISO build time)
-                  # The ${nodeAgent} variable is replaced with the actual Nix store path during ISO build
                   NODE_AGENT_BIN="${nodeAgent}/bin/kcore-node-agent"
-                  
-                  # Verify the binary exists and is executable
                   if [ ! -f "$NODE_AGENT_BIN" ] || [ ! -x "$NODE_AGENT_BIN" ]; then
-                    echo "❌ Error: kcore-node-agent binary not found at expected store path: $NODE_AGENT_BIN"
-                    echo ""
-                    echo "Debug information:"
-                    echo "  Store path: ${nodeAgent}"
-                    echo "  Expected binary: $NODE_AGENT_BIN"
-                    echo "  PATH: $PATH"
-                    echo ""
-                    echo "Fallback: Trying to find binary via PATH..."
                     if command -v kcore-node-agent >/dev/null 2>&1; then
                       NODE_AGENT_BIN=$(command -v kcore-node-agent)
-                      echo "✅ Found via PATH: $NODE_AGENT_BIN"
                     else
-                      echo "❌ Binary not found in PATH either"
+                      report_status "FAILED" "kcore-node-agent binary not found"
                       exit 1
                     fi
-                  else
-                    echo "✅ Found binary at store path: $NODE_AGENT_BIN"
                   fi
-                  
-                  # Copy the binary to the installed system
                   cp "$NODE_AGENT_BIN" /mnt/opt/kcore/bin/kcore-node-agent
                   chmod +x /mnt/opt/kcore/bin/kcore-node-agent
-                  
-                  # Verify it was copied successfully
-                  if [ ! -f /mnt/opt/kcore/bin/kcore-node-agent ] || [ ! -x /mnt/opt/kcore/bin/kcore-node-agent ]; then
-                    echo "❌ Error: Failed to copy or make node-agent binary executable"
-                    exit 1
+
+                  # Copy controller binary when controller role is enabled
+                  if [ "$KCORE_RUN_CONTROLLER" = "true" ]; then
+                    CONTROLLER_BIN="${controllerPkg}/bin/kcore-controller"
+                    if [ ! -f "$CONTROLLER_BIN" ] || [ ! -x "$CONTROLLER_BIN" ]; then
+                      if command -v kcore-controller >/dev/null 2>&1; then
+                        CONTROLLER_BIN=$(command -v kcore-controller)
+                      else
+                        report_status "FAILED" "kcore-controller binary not found"
+                        exit 1
+                      fi
+                    fi
+                    cp "$CONTROLLER_BIN" /mnt/opt/kcore/bin/kcore-controller
+                    chmod +x /mnt/opt/kcore/bin/kcore-controller
                   fi
-                  echo "✅ Node-agent binary copied successfully ($(du -h /mnt/opt/kcore/bin/kcore-node-agent | cut -f1))"
-                  
-                  # Copy kcore config and certs if they exist
+
+                  # Copy kcore config and certs from the live environment
                   if [ -d /etc/kcore ]; then
-                    echo "📋 Copying kcore configuration and certificates..."
                     mkdir -p /mnt/etc/kcore
                     cp -r /etc/kcore/* /mnt/etc/kcore/ 2>/dev/null || true
                   fi
-                  
-                  cat > /mnt/etc/nixos/configuration.nix << EOF
+
+                  # ── Phase: CONFIGURING_SERVICES ────────────────────────────
+                  report_status "CONFIGURING_SERVICES" "Writing NixOS configuration"
+
+                  # Build SSH authorized-keys block
+                  SSH_KEYS_NIX=""
+                  if [ -n "$KCORE_SSH_KEYS" ]; then
+                    while IFS= read -r _key; do
+                      [ -z "$_key" ] && continue
+                      SSH_KEYS_NIX="$SSH_KEYS_NIX      \"$_key\"
+"
+                    done <<< "$KCORE_SSH_KEYS"
+                  fi
+
+                  # Firewall ports
+                  FW_PORTS="22 9091"
+                  if [ "$KCORE_RUN_CONTROLLER" = "true" ]; then
+                    FW_PORTS="22 9090 9091"
+                  fi
+
+                  # Write base configuration.nix (closing brace added separately)
+                  cat > /mnt/etc/nixos/configuration.nix << NIXEOF
 { config, pkgs, ... }:
 {
   imports = [ ./hardware-configuration.nix ];
-  
-  # Enable Nix flakes in the installed system
+
   nix.settings.experimental-features = [ "nix-command" "flakes" ];
-  
+
   boot.loader.systemd-boot.enable = true;
   boot.loader.efi.canTouchEfiVariables = true;
-  
-  # Simple networking - auto-detect all interfaces with DHCP
-  networking.hostName = "kvm-node";
+
+  networking.hostName = "$KCORE_HOSTNAME";
   networking.useDHCP = true;
   networking.firewall.enable = true;
-  networking.firewall.allowedTCPPorts = [ 22 9091 ];  # SSH + node-agent
-  
+  networking.firewall.allowedTCPPorts = [ $FW_PORTS ];
+
   users.users.root = {
-    initialPassword = "kcore";
+    initialPassword = "$KCORE_ROOT_PASSWORD";
     openssh.authorizedKeys.keys = [
-$SSH_KEYS
-    ];
+$SSH_KEYS_NIX    ];
   };
   users.mutableUsers = true;
   users.groups.libvirt = {};
-  
+
   services.openssh = {
     enable = true;
-    listenAddresses = [ { addr = "0.0.0.0"; port = 22; } ]; # Listen on all interfaces (including br0)
+    listenAddresses = [ { addr = "0.0.0.0"; port = 22; } ];
     settings = {
       PermitRootLogin = "yes";
       PasswordAuthentication = true;
     };
   };
-  
-  # Enable libvirtd for VM management
+
   virtualisation.libvirtd = {
     enable = true;
     qemu.runAsRoot = true;
   };
-  
-  # Ensure virtlogd starts with libvirtd
+
   systemd.services.virtlogd = {
     wantedBy = [ "multi-user.target" ];
     before = [ "libvirtd.service" ];
   };
 
   boot.kernelModules = [ "kvm" "kvm-intel" "kvm-amd" "br_netfilter" "tap" ];
-  
-  # kcore node-agent service
+
   systemd.services.kcore-node-agent = {
     description = "kcore Node Agent";
     wantedBy = [ "multi-user.target" ];
@@ -665,35 +736,26 @@ $SSH_KEYS
         "/etc/kcore/node.key"
       ];
     };
-    
     serviceConfig = {
       Type = "simple";
       ExecStart = "/opt/kcore/bin/kcore-node-agent";
       Restart = "always";
       RestartSec = "10s";
-      
-      # Security hardening
       NoNewPrivileges = true;
       PrivateTmp = true;
       ProtectSystem = "strict";
       ProtectHome = true;
       ReadWritePaths = [ "/var/lib/kcore" "/var/run/libvirt" ];
       ReadOnlyPaths = [ "/etc/kcore" ];
-      
-      # Capabilities for libvirt/KVM and networking
       CapabilityBoundingSet = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
       AmbientCapabilities = [ "CAP_SYS_ADMIN" "CAP_NET_ADMIN" ];
-      
       User = "root";
       Group = "libvirt";
-      
-      # Resource limits
       LimitNOFILE = 65536;
       LimitNPROC = 4096;
     };
   };
-  
-  # Create required directories
+
   systemd.tmpfiles.rules = [
     "d /var/lib/kcore 0755 root root -"
     "d /var/lib/kcore/disks 0755 root root -"
@@ -701,39 +763,95 @@ $SSH_KEYS
     "d /opt/kcore/bin 0755 root root -"
     "d /etc/kcore 0755 root root -"
   ];
-  
-                  environment.systemPackages = with pkgs; [
-                    vim
-                    htop
-                    curl
-                    wget
-                    iproute2
-                    qemu_kvm
-                    libvirt
-                    lvm2
-                    parted
-                    openssl
-                    cloud-utils
-                  ];
-  
+
+  environment.systemPackages = with pkgs; [
+    vim htop curl wget iproute2
+    qemu_kvm libvirt lvm2 parted openssl cloud-utils
+  ];
+
   system.stateVersion = "25.05";
 }
-EOF
-                  
-                  echo "🔧 Configuring Nix with flakes support..."
-                  # Configure flakes for the installed system
+NIXEOF
+
+                  # Conditionally append controller service before the closing brace
+                  if [ "$KCORE_RUN_CONTROLLER" = "true" ]; then
+                    # Remove final closing brace, append controller block, re-close
+                    sed -i '$ d' /mnt/etc/nixos/configuration.nix
+                    cat >> /mnt/etc/nixos/configuration.nix << 'CTRLEOF'
+
+  systemd.services.kcore-controller = {
+    description = "kcore Controller";
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
+    unitConfig = {
+      ConditionPathExists = [
+        "/etc/kcore/ca.crt"
+        "/etc/kcore/node.crt"
+        "/etc/kcore/node.key"
+      ];
+    };
+    serviceConfig = {
+      Type = "simple";
+      ExecStart = "/opt/kcore/bin/kcore-controller --listen :9090 --cert /etc/kcore/node.crt --key /etc/kcore/node.key --ca /etc/kcore/ca.crt --db /var/lib/kcore/controller.db";
+      Restart = "always";
+      RestartSec = "10s";
+      NoNewPrivileges = true;
+      PrivateTmp = true;
+      ProtectSystem = "strict";
+      ProtectHome = true;
+      ReadWritePaths = [ "/var/lib/kcore" ];
+      ReadOnlyPaths = [ "/etc/kcore" ];
+      User = "root";
+      LimitNOFILE = 65536;
+      LimitNPROC = 4096;
+    };
+  };
+}
+CTRLEOF
+                  fi
+
+                  # Configure Nix flakes
                   mkdir -p /mnt/etc/nix
                   echo "experimental-features = nix-command flakes" > /mnt/etc/nix/nix.conf
-                  
-                  # NOTE: The live ISO root filesystem is read-only, so we cannot
-                  # write to /etc/nix/nix.conf here. Instead, we rely on NIX_CONFIG
-                  # for nixos-install, and /mnt/etc/nix/nix.conf for the installed system.
-                  
-                  echo "🔧 Installing NixOS (this will take 10-20 minutes)..."
+
+                  # Node-agent configuration with optional controller registration
+                  mkdir -p /mnt/etc/kcore
+                  CTRL_ADDR=""
+                  if [ -n "$KCORE_CONTROLLER_ADDRESS" ]; then
+                    CTRL_ADDR="$KCORE_CONTROLLER_ADDRESS"
+                  fi
+
+                  cat > /mnt/etc/kcore/node-agent.yaml << YAMLEOF
+nodeId: $KCORE_HOSTNAME
+controllerAddr: "$CTRL_ADDR"
+
+tls:
+  caFile: /etc/kcore/ca.crt
+  certFile: /etc/kcore/node.crt
+  keyFile: /etc/kcore/node.key
+
+networks:
+  default: default
+
+storage:
+  drivers:
+    local-dir:
+      type: local-dir
+      parameters:
+        path: /var/lib/kcore/disks
+YAMLEOF
+
+                  report_status "INSTALLING_OS" "Running nixos-install (10-20 minutes)..."
                   export NIX_CONFIG="experimental-features = nix-command flakes"
-                  # Root password is set non-interactively via users.users.root.initialPassword = "kcore"
-                  nixos-install
-                  
+                  nixos-install --no-root-password
+
+                  # Installed marker
+                  mkdir -p /mnt/etc/kcore
+                  date -Iseconds > /mnt/etc/kcore/installed
+
+                  report_status "COMPLETE" "Installation finished successfully"
+
                   echo ""
                   echo "╔══════════════════════════════════════════════════════════╗"
                   echo "║  ✅ Installation complete!                               ║"
@@ -741,7 +859,7 @@ EOF
                   echo ""
                   echo "Login credentials:"
                   echo "  Username: root"
-                  echo "  Password: kcore"
+                  echo "  Password: $KCORE_ROOT_PASSWORD"
                   echo ""
                   echo "The system is ready. Remove the USB drive and type:"
                   echo "  reboot"

@@ -44,6 +44,7 @@ type NodeInfo struct {
 	LastHeartbeat time.Time
 	Status        string
 	Client        nodepb.NodeComputeClient
+	Automator     nodepb.NodeAutomatorClient
 	Conn          *grpc.ClientConn
 }
 
@@ -138,6 +139,11 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 		}
 	}
 
+	var automator nodepb.NodeAutomatorClient
+	if conn != nil {
+		automator = nodepb.NewNodeAutomatorClient(conn)
+	}
+
 	nodeInfo := &NodeInfo{
 		ID:            req.NodeId,
 		Hostname:      req.Hostname,
@@ -147,6 +153,7 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 		LastHeartbeat: time.Now(),
 		Status:        nodeStatus,
 		Client:        client,
+		Automator:     automator,
 		Conn:          conn,
 	}
 
@@ -716,4 +723,239 @@ func vmStateString(state ctrlpb.VmState) string {
 	default:
 		return "unknown"
 	}
+}
+
+// --- Automator RPC forwarding ---
+
+func (s *Server) getNodeAutomator(nodeID string) (*NodeInfo, error) {
+	s.mu.RLock()
+	node, exists := s.nodes[nodeID]
+	s.mu.RUnlock()
+
+	if !exists {
+		return nil, status.Errorf(codes.NotFound, "node not found: %s", nodeID)
+	}
+	if node.Automator == nil {
+		return nil, status.Errorf(codes.Unavailable, "no automator connection to node %s", nodeID)
+	}
+	return node, nil
+}
+
+func (s *Server) ListNodeDisks(ctx context.Context, req *ctrlpb.ListNodeDisksRequest) (*ctrlpb.ListNodeDisksResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := node.Automator.ListDisks(ctx, &nodepb.AutomatorListDisksRequest{})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list disks on node %s: %v", req.NodeId, err)
+	}
+
+	disks := make([]*ctrlpb.NodeDisk, len(resp.Disks))
+	for i, d := range resp.Disks {
+		disks[i] = &ctrlpb.NodeDisk{
+			Name:          d.Name,
+			SizeBytes:     d.SizeBytes,
+			Model:         d.Model,
+			Serial:        d.Serial,
+			Removable:     d.Removable,
+			HasPartitions: d.HasPartitions,
+		}
+	}
+
+	return &ctrlpb.ListNodeDisksResponse{
+		Disks:         disks,
+		BootstrapMode: resp.BootstrapMode,
+	}, nil
+}
+
+func (s *Server) ListNetworkInterfaces(ctx context.Context, req *ctrlpb.ListNetworkInterfacesRequest) (*ctrlpb.ListNetworkInterfacesResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := node.Automator.ListNetworkInterfaces(ctx, &nodepb.AutomatorListNICsRequest{})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "list NICs on node %s: %v", req.NodeId, err)
+	}
+
+	ifaces := make([]*ctrlpb.NetworkInterface, len(resp.Interfaces))
+	for i, n := range resp.Interfaces {
+		ifaces[i] = &ctrlpb.NetworkInterface{
+			Name:       n.Name,
+			MacAddress: n.MacAddress,
+			IpAddress:  n.IpAddress,
+			SubnetMask: n.SubnetMask,
+			IsUp:       n.IsUp,
+			SpeedMbps:  n.SpeedMbps,
+			Driver:     n.Driver,
+			IsVirtual:  n.IsVirtual,
+		}
+	}
+
+	return &ctrlpb.ListNetworkInterfacesResponse{
+		Interfaces: ifaces,
+	}, nil
+}
+
+func (s *Server) InstallNode(ctx context.Context, req *ctrlpb.InstallNodeRequest) (*ctrlpb.InstallNodeResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	var disks []*nodepb.AutomatorDiskConfig
+	for _, d := range req.Disks {
+		disks = append(disks, &nodepb.AutomatorDiskConfig{
+			Device: d.Device,
+			Role:   d.Role,
+		})
+	}
+
+	resp, err := node.Automator.InstallToDisk(ctx, &nodepb.InstallToDiskRequest{
+		Disks:             disks,
+		Hostname:          req.Hostname,
+		RootPassword:      req.RootPassword,
+		SshKeys:           req.SshKeys,
+		RunController:     req.RunController,
+		ControllerAddress: req.ControllerAddress,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "install on node %s: %v", req.NodeId, err)
+	}
+
+	return &ctrlpb.InstallNodeResponse{
+		InstallId: resp.InstallId,
+		Status:    resp.Status,
+		Message:   resp.Message,
+	}, nil
+}
+
+func (s *Server) GetInstallStatus(ctx context.Context, req *ctrlpb.GetInstallStatusRequest) (*ctrlpb.GetInstallStatusResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := node.Automator.GetInstallStatus(ctx, &nodepb.AutomatorGetInstallStatusRequest{
+		InstallId: req.InstallId,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "get install status on node %s: %v", req.NodeId, err)
+	}
+
+	return &ctrlpb.GetInstallStatusResponse{
+		InstallId:   resp.InstallId,
+		Phase:       resp.Phase,
+		Message:     resp.Message,
+		ProgressPct: resp.ProgressPct,
+	}, nil
+}
+
+func (s *Server) ConfigureNetwork(ctx context.Context, req *ctrlpb.ConfigureNetworkRequest) (*ctrlpb.ConfigureNetworkResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	var bridges []*nodepb.AutomatorBridgeConfig
+	for _, b := range req.Bridges {
+		bridges = append(bridges, &nodepb.AutomatorBridgeConfig{
+			Name: b.Name, MemberPorts: b.MemberPorts,
+			IpAddress: b.IpAddress, SubnetMask: b.SubnetMask,
+			Gateway: b.Gateway, Dhcp: b.Dhcp,
+		})
+	}
+
+	var bonds []*nodepb.AutomatorBondConfig
+	for _, b := range req.Bonds {
+		bonds = append(bonds, &nodepb.AutomatorBondConfig{
+			Name: b.Name, MemberPorts: b.MemberPorts, Mode: b.Mode,
+			IpAddress: b.IpAddress, SubnetMask: b.SubnetMask, Dhcp: b.Dhcp,
+		})
+	}
+
+	var vlans []*nodepb.AutomatorVlanConfig
+	for _, v := range req.Vlans {
+		vlans = append(vlans, &nodepb.AutomatorVlanConfig{
+			ParentInterface: v.ParentInterface, VlanId: v.VlanId,
+			IpAddress: v.IpAddress, SubnetMask: v.SubnetMask, Dhcp: v.Dhcp,
+		})
+	}
+
+	resp, err := node.Automator.ConfigureNetwork(ctx, &nodepb.AutomatorConfigureNetworkRequest{
+		Bridges: bridges, Bonds: bonds, Vlans: vlans,
+		DnsServers: req.DnsServers, ApplyNow: req.ApplyNow,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "configure network on node %s: %v", req.NodeId, err)
+	}
+
+	return &ctrlpb.ConfigureNetworkResponse{
+		Success:             resp.Success,
+		Message:             resp.Message,
+		GeneratedNixSnippet: resp.GeneratedNixSnippet,
+	}, nil
+}
+
+func (s *Server) UpdateNixConfig(ctx context.Context, req *ctrlpb.UpdateNixConfigRequest) (*ctrlpb.UpdateNixConfigResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := node.Automator.UpdateNixConfig(ctx, &nodepb.AutomatorUpdateNixConfigRequest{
+		ConfigurationNix: req.ConfigurationNix,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "update nix config on node %s: %v", req.NodeId, err)
+	}
+
+	return &ctrlpb.UpdateNixConfigResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+	}, nil
+}
+
+func (s *Server) RebuildNix(ctx context.Context, req *ctrlpb.RebuildNixRequest) (*ctrlpb.RebuildNixResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := node.Automator.RebuildNix(ctx, &nodepb.AutomatorRebuildNixRequest{
+		Strategy: req.Strategy,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "rebuild nix on node %s: %v", req.NodeId, err)
+	}
+
+	return &ctrlpb.RebuildNixResponse{
+		Success:     resp.Success,
+		Message:     resp.Message,
+		BuildOutput: resp.BuildOutput,
+	}, nil
+}
+
+func (s *Server) UpdateSystem(ctx context.Context, req *ctrlpb.UpdateSystemRequest) (*ctrlpb.UpdateSystemResponse, error) {
+	node, err := s.getNodeAutomator(req.NodeId)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := node.Automator.UpdateSystem(ctx, &nodepb.AutomatorUpdateSystemRequest{
+		UpdateChannels: req.UpdateChannels,
+		Rebuild:        req.Rebuild,
+		UpdateAgent:    req.UpdateAgent,
+	})
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "update system on node %s: %v", req.NodeId, err)
+	}
+
+	return &ctrlpb.UpdateSystemResponse{
+		Success: resp.Success,
+		Message: resp.Message,
+	}, nil
 }

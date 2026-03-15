@@ -202,6 +202,209 @@ spec:
 	}
 }
 
+// --- NodeInstall manifest tests ---
+
+func TestIsNodeInstallKind(t *testing.T) {
+	t.Parallel()
+	if !isNodeInstallKind("NodeInstall") {
+		t.Error("should match NodeInstall")
+	}
+	if !isNodeInstallKind("nodeinstall") {
+		t.Error("should match nodeinstall (case-insensitive)")
+	}
+	if isNodeInstallKind("VM") {
+		t.Error("should not match VM")
+	}
+}
+
+func TestParseNodeInstallManifest_Valid(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeInstall
+metadata:
+  name: new-node-01
+spec:
+  address: "192.168.40.108:9090"
+  disks:
+    - device: sda
+      role: os
+    - device: sdb
+      role: storage
+  hostname: kvm-node-02
+  rootPassword: kcore
+  sshKeys:
+    - "ssh-ed25519 AAAA... user@host"
+  runController: true
+  controllerAddress: "192.168.40.100:9090"
+`
+	m, err := parseNodeInstallManifest([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Metadata.Name != "new-node-01" {
+		t.Errorf("name = %q", m.Metadata.Name)
+	}
+	if len(m.Spec.Disks) != 2 {
+		t.Fatalf("disks count = %d, want 2", len(m.Spec.Disks))
+	}
+	if m.Spec.Disks[0].Role != "os" {
+		t.Errorf("disk[0].Role = %q", m.Spec.Disks[0].Role)
+	}
+	if !m.Spec.RunController {
+		t.Error("runController should be true")
+	}
+	if m.Spec.ControllerAddress != "192.168.40.100:9090" {
+		t.Errorf("controllerAddress = %q", m.Spec.ControllerAddress)
+	}
+}
+
+func TestParseNodeInstallManifest_NoOSDisk(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeInstall
+metadata:
+  name: bad-node
+spec:
+  disks:
+    - device: sdb
+      role: storage
+`
+	_, err := parseNodeInstallManifest([]byte(yaml))
+	if err == nil {
+		t.Error("expected error for missing os disk")
+	}
+}
+
+func TestParseNodeInstallManifest_NoDisks(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeInstall
+metadata:
+  name: bad-node
+spec: {}
+`
+	_, err := parseNodeInstallManifest([]byte(yaml))
+	if err == nil {
+		t.Error("expected error for empty disks")
+	}
+}
+
+// --- NodeNetwork manifest tests ---
+
+func TestIsNodeNetworkKind(t *testing.T) {
+	t.Parallel()
+	if !isNodeNetworkKind("NodeNetwork") {
+		t.Error("should match")
+	}
+	if isNodeNetworkKind("VM") {
+		t.Error("should not match")
+	}
+}
+
+func TestParseNodeNetworkManifest_Valid(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeNetwork
+metadata:
+  name: node-01-network
+spec:
+  nodeId: kvm-node-01
+  bridges:
+    - name: br0
+      memberPorts: [enp0s31f6]
+      dhcp: true
+  vlans:
+    - parentInterface: enp0s31f6
+      vlanId: 100
+      ipAddress: 10.0.100.10
+      subnetMask: "255.255.255.0"
+  dnsServers: "8.8.8.8,8.8.4.4"
+  applyNow: true
+`
+	m, err := parseNodeNetworkManifest([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Spec.NodeID != "kvm-node-01" {
+		t.Errorf("nodeId = %q", m.Spec.NodeID)
+	}
+	if len(m.Spec.Bridges) != 1 {
+		t.Fatalf("bridges count = %d", len(m.Spec.Bridges))
+	}
+	if !m.Spec.Bridges[0].DHCP {
+		t.Error("bridge should have dhcp=true")
+	}
+	if len(m.Spec.Vlans) != 1 {
+		t.Fatalf("vlans count = %d", len(m.Spec.Vlans))
+	}
+	if m.Spec.Vlans[0].VlanID != 100 {
+		t.Errorf("vlanId = %d", m.Spec.Vlans[0].VlanID)
+	}
+}
+
+func TestParseNodeNetworkManifest_MissingNodeID(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeNetwork
+metadata:
+  name: bad
+spec: {}
+`
+	_, err := parseNodeNetworkManifest([]byte(yaml))
+	if err == nil {
+		t.Error("expected error for missing nodeId")
+	}
+}
+
+// --- NodeConfig manifest tests ---
+
+func TestIsNodeConfigKind(t *testing.T) {
+	t.Parallel()
+	if !isNodeConfigKind("NodeConfig") {
+		t.Error("should match")
+	}
+	if isNodeConfigKind("VM") {
+		t.Error("should not match")
+	}
+}
+
+func TestParseNodeConfigManifest_Valid(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeConfig
+metadata:
+  name: config-01
+spec:
+  nodeId: kvm-node-01
+  configurationNix: "{ ... }"
+  rebuild: true
+`
+	m, err := parseNodeConfigManifest([]byte(yaml))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if m.Spec.NodeID != "kvm-node-01" {
+		t.Errorf("nodeId = %q", m.Spec.NodeID)
+	}
+	if !m.Spec.Rebuild {
+		t.Error("rebuild should be true")
+	}
+}
+
+func TestParseNodeConfigManifest_MissingNodeID(t *testing.T) {
+	t.Parallel()
+	yaml := `apiVersion: kcore.io/v1
+kind: NodeConfig
+metadata:
+  name: bad
+spec: {}
+`
+	_, err := parseNodeConfigManifest([]byte(yaml))
+	if err == nil {
+		t.Error("expected error for missing nodeId")
+	}
+}
+
 func TestParseVMManifest_ValidationErrors(t *testing.T) {
 	t.Parallel()
 

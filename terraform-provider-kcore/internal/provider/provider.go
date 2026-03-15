@@ -55,12 +55,18 @@ func New() *schema.Provider {
 			"kcore_enrollment_token": resourceEnrollmentToken(),
 			"kcore_node_enrollment":  resourceNodeEnrollment(),
 			"kcore_node_wait_ready":  resourceNodeWaitReady(),
+			"kcore_cluster_ca":       resourceClusterCA(),
+			"kcore_node_install":     resourceNodeInstall(),
+			"kcore_node_network":     resourceNodeNetwork(),
+			"kcore_node_nixconfig":   resourceNodeNixConfig(),
 		},
 		DataSourcesMap: map[string]*schema.Resource{
 			"kcore_vm":               dataSourceVM(),
 			"kcore_node":             dataSourceNode(),
 			"kcore_nodes":            dataSourceNodes(),
 			"kcore_bootstrap_config": dataSourceBootstrapConfig(),
+			"kcore_node_disks":       dataSourceNodeDisks(),
+			"kcore_node_nics":        dataSourceNodeNics(),
 		},
 		ConfigureContextFunc: providerConfigure,
 	}

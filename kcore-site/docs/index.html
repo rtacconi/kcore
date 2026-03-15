@@ -90,28 +90,33 @@
             <div class="docs-header">
                 <h1 data-i18n="docs.index.title">Documentation</h1>
                 <p data-i18n="docs.index.subtitle">
-                    Everything you need to build, install, and operate kcore. Start with the quick start guide,
-                    then explore the architecture and CLI reference.
+                    Everything you need to build, install, and operate kcore. From cluster initialization and node provisioning to VM management and the Automator API.
                 </p>
             </div>
 
             <div class="docs-grid">
                 <a class="docs-card" href="quickstart.html">
                     <h3 data-i18n="docs.index.card1_title">Quick Start</h3>
-                    <p data-i18n="docs.index.card1_desc">Build the ISO, boot a node, configure kctl, and create your first VM with a YAML manifest.</p>
+                    <p data-i18n="docs.index.card1_desc">From bare metal to running VMs. Build the ISO, initialize a cluster, install nodes, and create your first VM.</p>
                     <span data-i18n="docs.index.card1_link">Open guide →</span>
                 </a>
 
                 <a class="docs-card" href="architecture.html">
                     <h3 data-i18n="docs.index.card2_title">Architecture</h3>
-                    <p data-i18n="docs.index.card2_desc">Understand how the Go controller, NixOS node agents, and gRPC API work together.</p>
+                    <p data-i18n="docs.index.card2_desc">Controller-first design, Automator API, desired vs actual state reconciliation, bootstrap flow, and gRPC services.</p>
                     <span data-i18n="docs.index.card2_link">Read architecture →</span>
                 </a>
 
                 <a class="docs-card" href="cli-reference.html">
                     <h3 data-i18n="docs.index.card3_title">CLI Reference</h3>
-                    <p data-i18n="docs.index.card3_desc">kctl commands for applying manifests, listing VMs, managing nodes, and inspecting resources.</p>
+                    <p data-i18n="docs.index.card3_desc">kctl commands for cluster init, node provisioning, hardware discovery, VM management, and network configuration.</p>
                     <span data-i18n="docs.index.card3_link">Browse commands →</span>
+                </a>
+
+                <a class="docs-card" href="cli-reference.html#provisioning-manifests">
+                    <h3 data-i18n="docs.index.card5_title">Node Provisioning</h3>
+                    <p data-i18n="docs.index.card5_desc">NodeInstall, NodeNetwork, and NodeConfig manifests for automated bare-metal setup via the Automator API.</p>
+                    <span data-i18n="docs.index.card5_link">View manifests →</span>
                 </a>
 
                 <a class="docs-card" href="https://github.com/rtacconi/kcore/tree/main/docs" target="_blank" rel="noopener">

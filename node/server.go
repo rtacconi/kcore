@@ -27,9 +27,11 @@ type Server struct {
 
 	libvirtMgr *libvirtmgr.Manager
 	storageReg *storage.DriverRegistry
-	networks   map[string]string // network name -> bridge name
+	networks   map[string]string
 	nodeID     string
 	hostname   string
+
+	Automator *AutomatorServer
 }
 
 func NewServer(nodeID string, libvirtMgr *libvirtmgr.Manager, storageReg *storage.DriverRegistry, networks map[string]string) (*Server, error) {

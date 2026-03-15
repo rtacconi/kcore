@@ -53,6 +53,10 @@ Examples:
 	rootCmd.AddCommand(newPullCmd())
 	rootCmd.AddCommand(newApplyCmd())
 	rootCmd.AddCommand(newControlPlaneCmd())
+	rootCmd.AddCommand(newInitCmd())
+	rootCmd.AddCommand(newInstallCmd())
+	rootCmd.AddCommand(newConfigureCmd())
+	rootCmd.AddCommand(newUpdateCmd())
 	rootCmd.AddCommand(newVersionCmd())
 
 	if err := rootCmd.Execute(); err != nil {

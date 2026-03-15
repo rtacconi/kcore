@@ -92,7 +92,7 @@
                 <a href="cli-reference.html" data-i18n="docs.qs.link_cli">CLI Reference</a>
             </div>
             <h1 data-i18n="docs.qs.title">Quick Start</h1>
-            <p data-i18n="docs.qs.intro">Build the kcore ISO, boot a node from USB, and create your first VM.</p>
+            <p data-i18n="docs.qs.intro">From bare metal to running VMs &mdash; using kctl for the full lifecycle.</p>
 
             <div class="note">
                 <p data-i18n="docs.qs.note_alpha">kcore is alpha software. This guide assumes you have a dedicated machine or lab environment for testing.</p>
@@ -103,55 +103,62 @@
                 <li data-i18n-html="docs.qs.prereq1"><strong>Nix</strong> with flakes enabled (for building the ISO)</li>
                 <li data-i18n-html="docs.qs.prereq2"><strong>Go 1.22+</strong></li>
                 <li data-i18n-html="docs.qs.prereq3"><strong>Make</strong></li>
-                <li data-i18n="docs.qs.prereq4">A USB drive (for booting the node)</li>
-                <li data-i18n="docs.qs.prereq5">A dedicated x86_64 machine or server for the kcore node</li>
+                <li data-i18n="docs.qs.prereq4">A USB drive (4 GB+)</li>
+                <li data-i18n-html="docs.qs.prereq5">A dedicated x86_64 machine with KVM support (<strong>Intel VT-x</strong> or <strong>AMD-V</strong>)</li>
             </ul>
 
-            <h2 data-i18n="docs.qs.h2_clone">1) Clone and Build</h2>
+            <h2 data-i18n="docs.qs.h2_build_iso">1) Build the ISO</h2>
             <pre><code>git clone https://github.com/rtacconi/kcore.git
 cd kcore
+make build-iso</code></pre>
+            <p data-i18n="docs.qs.build_iso_includes">The ISO includes the kcore node-agent, libvirtd, virtlogd, the Automator API, and all dependencies.</p>
 
-# Build the ISO
-make build-iso
+            <h2 data-i18n="docs.qs.h2_write_usb">2) Write to USB and Boot</h2>
+            <pre><code>USB_DEVICE=/dev/sdX make write-usb</code></pre>
+            <p data-i18n-html="docs.qs.write_usb_desc">Boot from USB and log in with <code>root</code> / <code>kcore</code>. The network auto-configures via DHCP.</p>
 
-# Write to USB
-USB_DEVICE=/dev/sdX make write-usb</code></pre>
+            <h2 data-i18n="docs.qs.h2_init_cluster">3) Initialize the Cluster</h2>
+            <p data-i18n="docs.qs.init_cluster_desc">On your workstation, create a cluster identity and CA:</p>
+            <pre><code>kctl init cluster --name my-cluster</code></pre>
+            <p data-i18n-html="docs.qs.init_cluster_note">This generates a cluster CA under <code>~/.kcore/my-cluster/</code>. The CA key stays on your machine.</p>
 
-            <h2 data-i18n="docs.qs.h2_boot">2) Boot and Install</h2>
-            <p data-i18n-html="docs.qs.boot_desc">Boot the target machine from the USB drive, then log in with the default credentials (<code>root</code> / <code>kcore</code>).</p>
-            <pre><code># Run the installer — it writes to disk and configures everything
-install-to-disk
+            <h2 data-i18n="docs.qs.h2_discover">4) Discover Hardware</h2>
+            <p data-i18n="docs.qs.discover_desc">Query the node for available disks and NICs:</p>
+            <pre><code>kctl get disks --node &lt;node-id&gt;
+kctl get nics --node &lt;node-id&gt;</code></pre>
 
-# After reboot, all services start automatically
-# The node agent self-registers with the controller</code></pre>
+            <h2 data-i18n="docs.qs.h2_install_node">5) Install the Node</h2>
+            <p data-i18n="docs.qs.install_node_desc">Trigger OS installation with multi-disk support:</p>
+            <pre><code>kctl install node --node &lt;node-id&gt; --os-disk /dev/sda --storage-disk /dev/nvme0n1 \
+  --hostname kcore01 --run-controller --controller-address 10.0.0.1:9090</code></pre>
+            <p data-i18n="docs.qs.install_node_declarative">Or declaratively:</p>
+            <pre><code>kctl apply -f node-install.yaml</code></pre>
+            <p data-i18n-html="docs.qs.install_node_manifest">Example <code>node-install.yaml</code> manifest:</p>
+            <pre><code>apiVersion: kcore.io/v1
+kind: NodeInstall
+metadata:
+  name: kcore01
+spec:
+  nodeId: "&lt;node-id&gt;"
+  osDisk: /dev/sda
+  storageDisk: /dev/nvme0n1
+  hostname: kcore01
+  runController: true
+  controllerAddress: "10.0.0.1:9090"</code></pre>
+            <p data-i18n="docs.qs.install_node_reboot">After reboot, the node auto-registers with the controller via mTLS.</p>
 
-            <h2 data-i18n="docs.qs.h2_controller">3) Configure the Controller</h2>
-            <p data-i18n="docs.qs.controller_desc">The controller runs on your workstation and manages the cluster. Create a config file:</p>
-            <pre><code># controller.yaml
-databasePath: ./kcore.db
-listenAddr: ":9090"
+            <h2 data-i18n="docs.qs.h2_network">6) Configure Networking</h2>
+            <pre><code>kctl configure network --node &lt;node-id&gt; --bridge br0 --bridge-ports enp1s0 --dns 1.1.1.1 --apply</code></pre>
+            <p data-i18n-html="docs.qs.network_declarative">Or declaratively with <code>kctl apply -f node-network.yaml</code> (kind: NodeNetwork).</p>
 
-tls:
-  caFile: ./certs/ca.crt
-  certFile: ./certs/controller.crt
-  keyFile: ./certs/controller.key
-
-nodeNetworks:
-  default: br0</code></pre>
-            <p data-i18n="docs.qs.controller_start">Start the controller:</p>
-            <pre><code>make controller
-./kcore-controller --config controller.yaml</code></pre>
-
-            <h2 data-i18n="docs.qs.h2_kctl">4) Configure kctl</h2>
-            <p data-i18n-html="docs.qs.kctl_desc">kctl is the CLI for interacting with your kcore cluster. Create a config file at <code>~/.kcore/config</code>:</p>
-            <pre><code># ~/.kcore/config
-current-context: local
-
+            <h2 data-i18n="docs.qs.h2_kctl">7) Configure kctl</h2>
+            <p data-i18n-html="docs.qs.kctl_desc">kctl config lives at <code>~/.kcore/config</code>:</p>
+            <pre><code>current-context: local
 contexts:
   local:
     controller: "localhost:9090"
     insecure: true</code></pre>
-            <p data-i18n="docs.qs.kctl_tls">For TLS-secured connections:</p>
+            <p data-i18n="docs.qs.kctl_tls">For TLS:</p>
             <pre><code>contexts:
   production:
     controller: "controller.example.com:9090"
@@ -160,8 +167,8 @@ contexts:
     key: "certs/controller.key"
     ca: "certs/ca.crt"</code></pre>
 
-            <h2 data-i18n="docs.qs.h2_create_vm">5) Create a VM</h2>
-            <p data-i18n-html="docs.qs.create_vm_desc">VMs are created declaratively via YAML manifests. Create a file called <code>vm.yaml</code>:</p>
+            <h2 data-i18n="docs.qs.h2_create_vm">8) Create a VM</h2>
+            <p data-i18n="docs.qs.create_vm_desc">VMs are created declaratively via YAML manifests:</p>
             <pre><code>apiVersion: kcore.io/v1
 kind: VM
 metadata:
@@ -175,20 +182,12 @@ spec:
     - network: default
       model: virtio</code></pre>
             <p data-i18n="docs.qs.create_vm_apply">Apply it:</p>
-            <pre><code># Apply the manifest
-kctl apply -f vm.yaml
-
-# Check VM status
+            <pre><code>kctl apply -f vm.yaml
 kctl get vms
+kctl describe vm debian12-test</code></pre>
 
-# Get details for a specific VM
-kctl get vm debian12-test</code></pre>
-
-            <h2 data-i18n="docs.qs.h2_manage">6) Manage VMs</h2>
-            <pre><code># Describe a VM (detailed info)
-kctl describe vm debian12-test
-
-# Delete a VM
+            <h2 data-i18n="docs.qs.h2_manage">9) Manage VMs</h2>
+            <pre><code>kctl describe vm debian12-test
 kctl delete vm debian12-test</code></pre>
 
             <h2 data-i18n="docs.qs.h2_terraform">Using Terraform</h2>
@@ -222,9 +221,9 @@ resource "kcore_vm" "example" {
 
             <h2 data-i18n="docs.qs.h2_next">Next Steps</h2>
             <ul>
-                <li data-i18n-html="docs.qs.next1"><a href="architecture.html">Architecture</a> — understand the controller, node agent, and gRPC API</li>
-                <li data-i18n-html="docs.qs.next2"><a href="cli-reference.html">CLI Reference</a> — full list of kctl commands</li>
-                <li data-i18n-html="docs.qs.next3"><a href="../roadmap.html">Roadmap</a> — see what's planned</li>
+                <li data-i18n-html="docs.qs.next1"><a href="architecture.html">Architecture</a> &mdash; understand the controller, Automator API, and gRPC services</li>
+                <li data-i18n-html="docs.qs.next2"><a href="cli-reference.html">CLI Reference</a> &mdash; full list of kctl commands including node provisioning</li>
+                <li data-i18n-html="docs.qs.next3"><a href="../roadmap.html">Roadmap</a> &mdash; see what&rsquo;s planned</li>
             </ul>
         </div>
     </main>

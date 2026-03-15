@@ -29,6 +29,34 @@ alwaysApply: true
 - `vms.state` stores the actual state reported by node-agents.
 - The reconciliation loop in `pkg/controller/reconciler.go` drives actual state toward desired state.
 
+## Automator API
+
+- The Automator replaces and subsumes the old NodeAdmin service. All node management goes through the Automator.
+- Automator RPCs are defined in `proto/controller.proto` (client-facing) and `proto/node.proto` (NodeAutomator service).
+- Day-0: ListDisks, ListNetworkInterfaces, InstallNode, GetInstallStatus, ConfigureNetwork.
+- Day-N: UpdateNixConfig, RebuildNix, UpdateSystem.
+- The controller forwards Automator RPCs to the node-agent's NodeAutomator service.
+
+## No Hardcoded Paths
+
+- Never hardcode system paths like `/etc/nixos/configuration.nix`. Use injectable config structs.
+- The `AutomatorConfig` struct in `node/automator.go` holds all paths: `InstalledMarkerPath`, `ConfigNixPath`, `StatusFilePath`, `InstallScriptPath`.
+- In tests, use `t.TempDir()` to create temporary paths.
+
+## SystemExecutor Pattern
+
+- All system command execution in the Automator goes through the `SystemExecutor` interface.
+- Production code uses `RealSystemExecutor` which calls `os/exec`.
+- Tests use `MockSystemExecutor` with canned responses, recorded command logs, and a virtual filesystem.
+- Never call `exec.Command` directly in Automator handlers; always use the executor.
+
+## CA Management
+
+- The cluster CA private key lives only on the operator's machine at `~/.kcore/clusters/<name>/`.
+- `pkg/pki/CAManager` handles CA generation, cert signing, and file I/O.
+- `BasePath` is injectable for testing.
+- `kctl init cluster` and the `kcore_cluster_ca` Terraform resource both use `pkg/pki/`.
+
 ## Testing
 
 - Every change to the system needs tests to run 100% successfully.
@@ -37,4 +65,7 @@ alwaysApply: true
 - Tests for SQLite operations are in `pkg/sqlite/db_test.go`.
 - Tests for the controller are in `pkg/controller/server_test.go` and `test/integration/controller/`.
 - Tests for node-agent DB are in `node/db_test.go`.
+- Tests for Automator are in `node/automator_test.go` (uses `MockSystemExecutor`).
+- Tests for CA management are in `pkg/pki/ca_test.go`.
 - The controller default port in tests and config is 9090 (not 9091).
+- All Automator tests must use injectable paths and MockSystemExecutor. No real system calls.

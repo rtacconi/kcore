@@ -36,6 +36,9 @@ Available resource types:
 	cmd.AddCommand(newGetVolumesCmd(&output))
 	cmd.AddCommand(newGetNetworksCmd(&output))
 
+	addGetDisksCmd(cmd)
+	addGetNicsCmd(cmd)
+
 	return cmd
 }
 

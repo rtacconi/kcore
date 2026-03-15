@@ -97,6 +97,77 @@ Notes:
 
 ---
 
+## 🔧 Cluster & Node Provisioning (Automator API)
+
+### Initialize a Cluster
+
+```bash
+kctl init cluster --name my-cluster
+kctl init cluster --name my-cluster --controller-ip 10.0.0.1 --base-path ~/.kcore
+```
+
+Generates a cluster CA and identity under `~/.kcore/<name>/`. The CA key stays on the operator machine.
+
+### Discover Node Hardware
+
+```bash
+kctl get disks --node <node-id>
+kctl get nics --node <node-id>
+```
+
+Queries the node-agent for available block devices and network interfaces. Used before installation to choose target disks and NICs.
+
+### Install a Node
+
+```bash
+# CLI
+kctl install node --node <id> --os-disk /dev/sda
+kctl install node --node <id> --os-disk /dev/sda --storage-disk /dev/nvme0n1 \
+  --hostname kcore01 --root-password s3cret --run-controller --controller-address 10.0.0.1:9090
+
+# Declarative
+kctl apply -f node-install.yaml   # kind: NodeInstall
+```
+
+Installs NixOS on the target node. `--os-disk` is required; `--storage-disk` adds an LVM thin-pool for VM storage. `--run-controller` deploys the controller on this node.
+
+### Configure Network
+
+```bash
+# CLI
+kctl configure network --node <id> --bridge br0 --bridge-ports enp1s0 --dns 1.1.1.1,8.8.8.8 --apply
+
+# Declarative
+kctl apply -f node-network.yaml   # kind: NodeNetwork
+```
+
+Configures bridges, bonds, VLANs, and DNS on an installed node. `--apply` activates the config immediately.
+
+### Push NixOS Configuration
+
+```bash
+# CLI
+kctl update nixconfig --node <id> --file ./configuration.nix
+
+# Declarative
+kctl apply -f node-config.yaml   # kind: NodeConfig
+```
+
+Sends a NixOS configuration to the node and optionally triggers `nixos-rebuild switch`.
+
+### Update System
+
+```bash
+kctl update system --node <id> --channels --rebuild --agent
+```
+
+Flags:
+- `--channels` -- update NixOS channels
+- `--rebuild` -- run `nixos-rebuild switch`
+- `--agent` -- upgrade the node-agent binary
+
+---
+
 ## ☁️ Node Management
 
 All node management commands require `NODE_IP` environment variable:

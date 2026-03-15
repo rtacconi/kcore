@@ -3,6 +3,7 @@ module github.com/kcore/kcore
 go 1.24.0
 
 require (
+	github.com/golang/protobuf v1.5.4
 	github.com/google/uuid v1.6.0
 	github.com/libvirt/libvirt-go v7.0.0+incompatible
 	github.com/libvirt/libvirt-go-xml v7.0.0+incompatible

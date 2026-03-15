@@ -24,6 +24,20 @@ service Controller {
   // Node operations
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+
+  // Automator: Day-0 hardware discovery
+  rpc ListNodeDisks(ListNodeDisksRequest) returns (ListNodeDisksResponse);
+  rpc ListNetworkInterfaces(ListNetworkInterfacesRequest) returns (ListNetworkInterfacesResponse);
+
+  // Automator: Day-0 node provisioning
+  rpc InstallNode(InstallNodeRequest) returns (InstallNodeResponse);
+  rpc GetInstallStatus(GetInstallStatusRequest) returns (GetInstallStatusResponse);
+  rpc ConfigureNetwork(ConfigureNetworkRequest) returns (ConfigureNetworkResponse);
+
+  // Automator: Day-N system management
+  rpc UpdateNixConfig(UpdateNixConfigRequest) returns (UpdateNixConfigResponse);
+  rpc RebuildNix(RebuildNixRequest) returns (RebuildNixResponse);
+  rpc UpdateSystem(UpdateSystemRequest) returns (UpdateSystemResponse);
 }
 
 message RegisterNodeRequest {
@@ -227,5 +241,151 @@ service ControllerAdmin {
   // ApplyNixConfig replaces the controller's /etc/nixos/configuration.nix with
   // the provided content and (optionally) triggers a nixos-rebuild.
   rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+}
+
+// --- Automator messages (day-0 + day-N) ---
+
+message NodeDisk {
+  string name = 1;
+  uint64 size_bytes = 2;
+  string model = 3;
+  string serial = 4;
+  bool removable = 5;
+  bool has_partitions = 6;
+}
+
+message ListNodeDisksRequest {
+  string node_id = 1;
+}
+
+message ListNodeDisksResponse {
+  repeated NodeDisk disks = 1;
+  bool bootstrap_mode = 2;
+}
+
+message NetworkInterface {
+  string name = 1;
+  string mac_address = 2;
+  string ip_address = 3;
+  string subnet_mask = 4;
+  bool is_up = 5;
+  int64 speed_mbps = 6;
+  string driver = 7;
+  bool is_virtual = 8;
+}
+
+message ListNetworkInterfacesRequest {
+  string node_id = 1;
+}
+
+message ListNetworkInterfacesResponse {
+  repeated NetworkInterface interfaces = 1;
+}
+
+message DiskConfig {
+  string device = 1;
+  string role = 2; // "os" or "storage"
+}
+
+message InstallNodeRequest {
+  string node_id = 1;
+  repeated DiskConfig disks = 2;
+  string hostname = 3;
+  string root_password = 4;
+  repeated string ssh_keys = 5;
+  bool run_controller = 6;
+  string controller_address = 7;
+}
+
+message InstallNodeResponse {
+  string install_id = 1;
+  string status = 2;
+  string message = 3;
+}
+
+message GetInstallStatusRequest {
+  string node_id = 1;
+  string install_id = 2;
+}
+
+message GetInstallStatusResponse {
+  string install_id = 1;
+  string phase = 2;
+  string message = 3;
+  int32 progress_pct = 4;
+}
+
+message BridgeConfig {
+  string name = 1;
+  repeated string member_ports = 2;
+  string ip_address = 3;
+  string subnet_mask = 4;
+  string gateway = 5;
+  bool dhcp = 6;
+}
+
+message BondConfig {
+  string name = 1;
+  repeated string member_ports = 2;
+  string mode = 3;
+  string ip_address = 4;
+  string subnet_mask = 5;
+  bool dhcp = 6;
+}
+
+message VlanConfig {
+  string parent_interface = 1;
+  int32 vlan_id = 2;
+  string ip_address = 3;
+  string subnet_mask = 4;
+  bool dhcp = 5;
+}
+
+message ConfigureNetworkRequest {
+  string node_id = 1;
+  repeated BridgeConfig bridges = 2;
+  repeated BondConfig bonds = 3;
+  repeated VlanConfig vlans = 4;
+  string dns_servers = 5;
+  bool apply_now = 6;
+}
+
+message ConfigureNetworkResponse {
+  bool success = 1;
+  string message = 2;
+  string generated_nix_snippet = 3;
+}
+
+message UpdateNixConfigRequest {
+  string node_id = 1;
+  string configuration_nix = 2;
+}
+
+message UpdateNixConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RebuildNixRequest {
+  string node_id = 1;
+  string strategy = 2; // "switch", "boot", "test", "dry-build"
+}
+
+message RebuildNixResponse {
+  bool success = 1;
+  string message = 2;
+  string build_output = 3;
+}
+
+message UpdateSystemRequest {
+  string node_id = 1;
+  bool update_channels = 2;
+  bool rebuild = 3;
+  bool update_agent = 4;
+}
+
+message UpdateSystemResponse {
+  bool success = 1;
+  string message = 2;
 }
 
