@@ -1,0 +1,33 @@
+apiVersion: kcore.io/v1
+kind: VM
+metadata:
+  name: debian12-kcore
+spec:
+  cpu: 1
+  memory: 2G
+  image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+  enableKcoreLogin: true
+  cloudInit: |
+    #cloud-config
+    users:
+      - default
+      - name: root
+        lock_passwd: false
+        plain_text_passwd: kcore
+      - name: kcore
+        groups: [sudo]
+        shell: /bin/bash
+        lock_passwd: false
+        plain_text_passwd: kcore
+        sudo: "ALL=(ALL) NOPASSWD:ALL"
+    chpasswd:
+      list: |
+        root:kcore
+      expire: false
+    ssh_pwauth: true
+    disable_root: false
+    runcmd:
+      - [ systemctl, enable, --now, serial-getty@ttyS0.service ]
+  nics:
+    - network: default
+      model: virtio

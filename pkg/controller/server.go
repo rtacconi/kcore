@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -18,14 +19,18 @@ import (
 
 	ctrlpb "github.com/kcore/kcore/api/controller"
 	nodepb "github.com/kcore/kcore/api/node"
+	"github.com/kcore/kcore/pkg/sqlite"
 )
 
-// Server implements the Controller service
+// Server implements the Controller service.
+// When db is non-nil, node registrations and VM records are persisted to SQLite.
+// When db is nil, everything is in-memory only (used in unit tests).
 type Server struct {
 	ctrlpb.UnimplementedControllerServer
 	ctrlpb.UnimplementedControllerAdminServer
-	nodes         map[string]*NodeInfo // nodeID -> NodeInfo
-	vmToNode      map[string]string    // vmID -> nodeID
+	db            *sqlite.DB
+	nodes         map[string]*NodeInfo // nodeID -> NodeInfo (always in-memory for gRPC conns)
+	vmToNode      map[string]string    // vmID -> nodeID (fallback when db is nil)
 	nodeDialCreds credentials.TransportCredentials
 	mu            sync.RWMutex
 }
@@ -42,8 +47,18 @@ type NodeInfo struct {
 	Conn          *grpc.ClientConn
 }
 
+// NewServer creates an in-memory-only server (used by tests).
 func NewServer() *Server {
 	return &Server{
+		nodes:    make(map[string]*NodeInfo),
+		vmToNode: make(map[string]string),
+	}
+}
+
+// NewServerWithDB creates a server backed by SQLite for persistence.
+func NewServerWithDB(db *sqlite.DB) *Server {
+	return &Server{
+		db:       db,
 		nodes:    make(map[string]*NodeInfo),
 		vmToNode: make(map[string]string),
 	}
@@ -57,9 +72,6 @@ func (s *Server) SetNodeDialCredentials(creds credentials.TransportCredentials) 
 
 // ControllerAdmin implementation
 
-// ApplyNixConfig writes the provided configuration.nix to /etc/nixos/configuration.nix
-// and optionally runs `nixos-rebuild switch`. This mirrors the node-side API and is
-// intended for development / lab usage (no auth, no RBAC yet).
 func (s *Server) ApplyNixConfig(ctx context.Context, req *ctrlpb.ApplyNixConfigRequest) (*ctrlpb.ApplyNixConfigResponse, error) {
 	if req.GetConfigurationNix() == "" {
 		return &ctrlpb.ApplyNixConfigResponse{
@@ -110,14 +122,14 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 	var (
 		conn         *grpc.ClientConn
 		client       nodepb.NodeComputeClient
-		status       = "ready"
+		nodeStatus   = "ready"
 		responseMsg  = "Node registered successfully"
 		dialWarnText string
 	)
 	if s.nodeDialCreds != nil && req.Address != "" {
 		dialConn, err := grpc.Dial(req.Address, grpc.WithTransportCredentials(s.nodeDialCreds))
-	if err != nil {
-			status = "degraded"
+		if err != nil {
+			nodeStatus = "degraded"
 			dialWarnText = fmt.Sprintf(" (initial node dial failed: %v)", err)
 			responseMsg = "Node registered, but initial controller-to-node connection failed"
 		} else {
@@ -133,12 +145,27 @@ func (s *Server) RegisterNode(ctx context.Context, req *ctrlpb.RegisterNodeReque
 		Capacity:      req.Capacity,
 		Usage:         &ctrlpb.NodeUsage{},
 		LastHeartbeat: time.Now(),
-		Status:        status,
+		Status:        nodeStatus,
 		Client:        client,
 		Conn:          conn,
 	}
 
 	s.nodes[req.NodeId] = nodeInfo
+
+	// Persist to SQLite
+	if s.db != nil {
+		dbNode := &sqlite.Node{
+			ID:          req.NodeId,
+			Hostname:    req.Hostname,
+			Address:     req.Address,
+			CPUCores:    int(req.Capacity.GetCpuCores()),
+			MemoryBytes: req.Capacity.GetMemoryBytes(),
+			Labels:      req.Labels,
+		}
+		if err := s.db.UpsertNode(dbNode); err != nil {
+			log.Printf("Warning: failed to persist node %s to SQLite: %v", req.NodeId, err)
+		}
+	}
 
 	log.Printf("Node registered: %s (%s) at %s%s", req.NodeId, req.Hostname, req.Address, dialWarnText)
 
@@ -161,6 +188,10 @@ func (s *Server) Heartbeat(ctx context.Context, req *ctrlpb.HeartbeatRequest) (*
 	node.LastHeartbeat = time.Now()
 	node.Status = "ready"
 
+	if s.db != nil {
+		s.db.UpdateNodeHeartbeat(req.NodeId)
+	}
+
 	return &ctrlpb.HeartbeatResponse{
 		Success: true,
 	}, nil
@@ -175,13 +206,11 @@ func (s *Server) SyncVmState(ctx context.Context, req *ctrlpb.SyncVmStateRequest
 		return nil, status.Errorf(codes.NotFound, "node not found: %s", req.NodeId)
 	}
 
-	// Get current VMs for this node
 	currentVMIDs := make(map[string]bool)
 	for _, vm := range req.Vms {
 		currentVMIDs[vm.Id] = true
 	}
 
-	// Remove VMs that no longer exist on the node
 	for vmID, nodeID := range s.vmToNode {
 		if nodeID == req.NodeId && !currentVMIDs[vmID] {
 			log.Printf("VM %s removed from node %s (no longer exists in libvirt)", vmID, req.NodeId)
@@ -189,7 +218,6 @@ func (s *Server) SyncVmState(ctx context.Context, req *ctrlpb.SyncVmStateRequest
 		}
 	}
 
-	// Add/update VMs that exist on the node
 	for _, vm := range req.Vms {
 		existingNode, exists := s.vmToNode[vm.Id]
 		if !exists {
@@ -198,6 +226,18 @@ func (s *Server) SyncVmState(ctx context.Context, req *ctrlpb.SyncVmStateRequest
 		} else if existingNode != req.NodeId {
 			log.Printf("VM %s moved from node %s to %s", vm.Id, existingNode, req.NodeId)
 			s.vmToNode[vm.Id] = req.NodeId
+		}
+
+		// Update actual state in SQLite
+		if s.db != nil {
+			actualState := vmStateString(vm.State)
+			s.db.UpdateVMState(vm.Id, actualState)
+			nodeIDStr := req.NodeId
+			s.db.UpdateVMPlacement(&sqlite.VMPlacement{
+				VMID:         vm.Id,
+				ActualNodeID: &nodeIDStr,
+				ActualState:  actualState,
+			})
 		}
 	}
 
@@ -210,46 +250,82 @@ func (s *Server) SyncVmState(ctx context.Context, req *ctrlpb.SyncVmStateRequest
 // VM Operations
 
 func (s *Server) CreateVm(ctx context.Context, req *ctrlpb.CreateVmRequest) (*ctrlpb.CreateVmResponse, error) {
-	// Find target node
 	var targetNode *NodeInfo
 	var err error
 
 	if req.TargetNode != "" {
-		// Explicit node specified
 		targetNode, err = s.getNodeByAddress(req.TargetNode)
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "target node not found: %s", req.TargetNode)
 		}
 	} else {
-		// Auto-select node (future: smart scheduling)
 		targetNode = s.selectNode()
 		if targetNode == nil {
 			return nil, status.Error(codes.Unavailable, "no available nodes")
 		}
 	}
 
-	// Convert controller VmSpec to node VmSpec
+	// Convert controller VmSpec to node VmSpec, forwarding all fields
 	nodeSpec := &nodepb.VmSpec{
-		Id:          req.Spec.Id,
-		Name:        req.Spec.Name,
-		Cpu:         req.Spec.Cpu,
-		MemoryBytes: req.Spec.MemoryBytes,
-		Disks:       convertDisks(req.Spec.Disks),
-		Nics:        convertNics(req.Spec.Nics),
+		Id:               req.Spec.Id,
+		Name:             req.Spec.Name,
+		Cpu:              req.Spec.Cpu,
+		MemoryBytes:      req.Spec.MemoryBytes,
+		Disks:            convertDisks(req.Spec.Disks),
+		Nics:             convertNics(req.Spec.Nics),
+		EnableKcoreLogin: req.Spec.EnableKcoreLogin,
 	}
 
-	// Forward to node
+	// Forward image_uri and cloud_init_user_data to node
 	resp, err := targetNode.Client.CreateVm(ctx, &nodepb.CreateVmRequest{
-		Spec: nodeSpec,
+		Spec:              nodeSpec,
+		ImageUri:          req.ImageUri,
+		CloudInitUserData: req.CloudInitUserData,
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to create VM on node: %v", err)
 	}
 
-	// Track VM location
+	// Track in-memory
 	s.mu.Lock()
 	s.vmToNode[req.Spec.Id] = targetNode.ID
 	s.mu.Unlock()
+
+	// Persist desired state to SQLite
+	if s.db != nil {
+		specJSON, _ := json.Marshal(map[string]interface{}{
+			"name":               req.Spec.Name,
+			"cpu":                req.Spec.Cpu,
+			"memory_bytes":       req.Spec.MemoryBytes,
+			"image_uri":          req.ImageUri,
+			"cloud_init":         req.CloudInitUserData,
+			"enable_kcore_login": req.Spec.EnableKcoreLogin,
+		})
+		nodeIDStr := targetNode.ID
+		vm := &sqlite.VM{
+			ID:           req.Spec.Id,
+			Name:         req.Spec.Name,
+			Namespace:    "default",
+			CPU:          int(req.Spec.Cpu),
+			MemoryBytes:  req.Spec.MemoryBytes,
+			NodeID:       &nodeIDStr,
+			State:        vmStateString(convertVmState(resp.Status.State)),
+			DesiredSpec:  string(specJSON),
+			DesiredState: "running",
+			ImageURI:     req.ImageUri,
+		}
+		if err := s.db.CreateVM(vm); err != nil {
+			log.Printf("Warning: failed to persist VM %s to SQLite: %v", req.Spec.Id, err)
+		} else {
+			s.db.UpdateVMPlacement(&sqlite.VMPlacement{
+				VMID:          req.Spec.Id,
+				DesiredNodeID: &nodeIDStr,
+				ActualNodeID:  &nodeIDStr,
+				DesiredState:  "running",
+				ActualState:   vmStateString(convertVmState(resp.Status.State)),
+			})
+		}
+	}
 
 	log.Printf("VM created: %s on node %s", req.Spec.Name, targetNode.ID)
 
@@ -261,7 +337,6 @@ func (s *Server) CreateVm(ctx context.Context, req *ctrlpb.CreateVmRequest) (*ct
 }
 
 func (s *Server) DeleteVm(ctx context.Context, req *ctrlpb.DeleteVmRequest) (*ctrlpb.DeleteVmResponse, error) {
-	// Find node with this VM
 	var targetNode *NodeInfo
 	var err error
 
@@ -288,7 +363,6 @@ func (s *Server) DeleteVm(ctx context.Context, req *ctrlpb.DeleteVmRequest) (*ct
 		}
 	}
 
-	// Forward to node
 	_, err = targetNode.Client.DeleteVm(ctx, &nodepb.DeleteVmRequest{
 		VmId: req.VmId,
 	})
@@ -296,10 +370,15 @@ func (s *Server) DeleteVm(ctx context.Context, req *ctrlpb.DeleteVmRequest) (*ct
 		return nil, status.Errorf(codes.Internal, "failed to delete VM: %v", err)
 	}
 
-	// Remove tracking
 	s.mu.Lock()
 	delete(s.vmToNode, req.VmId)
 	s.mu.Unlock()
+
+	// Mark desired state as deleted in SQLite
+	if s.db != nil {
+		s.db.UpdateVMDesiredState(req.VmId, "deleted")
+		s.db.UpdateVMState(req.VmId, "deleted")
+	}
 
 	log.Printf("VM deleted: %s from node %s", req.VmId, targetNode.ID)
 
@@ -321,6 +400,11 @@ func (s *Server) StartVm(ctx context.Context, req *ctrlpb.StartVmRequest) (*ctrl
 		return nil, status.Errorf(codes.Internal, "failed to start VM: %v", err)
 	}
 
+	if s.db != nil {
+		s.db.UpdateVMDesiredState(req.VmId, "running")
+		s.db.UpdateVMState(req.VmId, "running")
+	}
+
 	return &ctrlpb.StartVmResponse{
 		State: convertVmState(resp.Status.State),
 	}, nil
@@ -338,6 +422,11 @@ func (s *Server) StopVm(ctx context.Context, req *ctrlpb.StopVmRequest) (*ctrlpb
 	})
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to stop VM: %v", err)
+	}
+
+	if s.db != nil {
+		s.db.UpdateVMDesiredState(req.VmId, "stopped")
+		s.db.UpdateVMState(req.VmId, "stopped")
 	}
 
 	return &ctrlpb.StopVmResponse{
@@ -381,7 +470,6 @@ func (s *Server) ListVms(ctx context.Context, req *ctrlpb.ListVmsRequest) (*ctrl
 	var vms []*ctrlpb.VmInfo
 
 	if req.TargetNode != "" {
-		// List from specific node
 		targetNode, err := s.getNodeByAddress(req.TargetNode)
 		if err != nil {
 			return nil, status.Errorf(codes.NotFound, "target node not found: %s", req.TargetNode)
@@ -404,7 +492,6 @@ func (s *Server) ListVms(ctx context.Context, req *ctrlpb.ListVmsRequest) (*ctrl
 			})
 		}
 	} else {
-		// List from all nodes
 		s.mu.RLock()
 		nodes := make([]*NodeInfo, 0, len(s.nodes))
 		for _, node := range s.nodes {
@@ -413,6 +500,9 @@ func (s *Server) ListVms(ctx context.Context, req *ctrlpb.ListVmsRequest) (*ctrl
 		s.mu.RUnlock()
 
 		for _, node := range nodes {
+			if node.Client == nil {
+				continue
+			}
 			resp, err := node.Client.ListVms(ctx, &nodepb.ListVmsRequest{})
 			if err != nil {
 				log.Printf("Warning: failed to list VMs from node %s: %v", node.ID, err)
@@ -526,8 +616,6 @@ func (s *Server) selectNode() *NodeInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	// Simple: return first available node
-	// Future: implement smart scheduling based on capacity
 	for _, node := range s.nodes {
 		if node.Status == "ready" {
 			return node
@@ -612,5 +700,20 @@ func convertVmStatus(status *nodepb.VmStatus) *ctrlpb.VmStatus {
 		State:     convertVmState(status.State),
 		CreatedAt: status.CreatedAt,
 		UpdatedAt: status.UpdatedAt,
+	}
+}
+
+func vmStateString(state ctrlpb.VmState) string {
+	switch state {
+	case ctrlpb.VmState_VM_STATE_RUNNING:
+		return "running"
+	case ctrlpb.VmState_VM_STATE_STOPPED:
+		return "stopped"
+	case ctrlpb.VmState_VM_STATE_PAUSED:
+		return "paused"
+	case ctrlpb.VmState_VM_STATE_ERROR:
+		return "error"
+	default:
+		return "unknown"
 	}
 }

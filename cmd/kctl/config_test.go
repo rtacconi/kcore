@@ -13,10 +13,10 @@ func TestNormalizeAddress(t *testing.T) {
 		input string
 		want  string
 	}{
-		{"192.168.1.1", "192.168.1.1:9091"},
+		{"192.168.1.1", "192.168.1.1:9090"},
 		{"192.168.1.1:9091", "192.168.1.1:9091"},
 		{"myhost:8080", "myhost:8080"},
-		{"myhost", "myhost:9091"},
+		{"myhost", "myhost:9090"},
 		{"", ""},
 	}
 
@@ -40,8 +40,8 @@ func TestGetConnectionInfo_InsecureSkipsCerts(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if addr != "192.168.40.107:9091" {
-		t.Errorf("addr=%q, want 192.168.40.107:9091", addr)
+	if addr != "192.168.40.107:9090" {
+		t.Errorf("addr=%q, want 192.168.40.107:9090", addr)
 	}
 	if !insecure {
 		t.Error("insecure should be true")
@@ -59,8 +59,8 @@ func TestGetConnectionInfo_SecureReturnsCerts(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if addr != "192.168.40.107:9091" {
-		t.Errorf("addr=%q, want 192.168.40.107:9091", addr)
+	if addr != "192.168.40.107:9090" {
+		t.Errorf("addr=%q, want 192.168.40.107:9090", addr)
 	}
 	if insecure {
 		t.Error("insecure should be false")

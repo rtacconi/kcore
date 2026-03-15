@@ -13,9 +13,22 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+NIX_SHELL_RC=$(mktemp)
+cat > "${NIX_SHELL_RC}" << 'RCEOF'
+# Minimal rc: readline + history without full ~/.bashrc
+[ -f /etc/inputrc ] && bind -f /etc/inputrc
+[ -f ~/.inputrc ]   && bind -f ~/.inputrc
+HISTSIZE=10000
+HISTFILESIZE=20000
+HISTCONTROL=ignoredups:erasedups
+shopt -s histappend
+PS1='\[\e[1;34m\][nix-dev]\[\e[0m\] \w \$ '
+RCEOF
+trap "rm -f '${NIX_SHELL_RC}'" EXIT
+
 if [ "$#" -eq 0 ]; then
   exec nix --extra-experimental-features "nix-command flakes" \
-    develop "${REPO_ROOT}" -c bash --norc --noprofile
+    develop "${REPO_ROOT}" -c bash --rcfile "${NIX_SHELL_RC}"
 fi
 
 exec nix --extra-experimental-features "nix-command flakes" \

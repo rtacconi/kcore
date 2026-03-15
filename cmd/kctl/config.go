@@ -119,9 +119,9 @@ func NormalizeAddress(addr string) string {
 		return ""
 	}
 	
-	// If address doesn't contain a colon, add default port
+	// If address doesn't contain a colon, add default controller port
 	if !strings.Contains(addr, ":") {
-		return addr + ":9091"
+		return addr + ":9090"
 	}
 	
 	return addr

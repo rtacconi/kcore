@@ -2,6 +2,8 @@
 
 `kctl` is the command-line interface for managing kcore clusters. VMs are created declaratively from YAML manifests.
 
+**Important:** kctl communicates with the **controller**, not with node-agents directly. The controller forwards VM operations to the appropriate node-agent. The default controller port is **9090**.
+
 ---
 
 ## Installation
@@ -94,8 +96,8 @@ kctl apply -f vm.yaml
 # Dry-run to preview
 kctl apply -f vm.yaml --dry-run
 
-# With explicit controller/node address
-kctl apply -f vm.yaml --controller 192.168.40.107:9091
+# With explicit controller address
+kctl apply -f vm.yaml --controller 192.168.40.107:9090
 
 # Skip TLS verification
 kctl apply -f vm.yaml --insecure
@@ -187,7 +189,7 @@ Print the kctl version.
 | Flag | Description |
 |---|---|
 | `-c, --config` | Path to kctl config file (default: `~/.kcore/config`) |
-| `-s, --controller` | Controller/node address (overrides config) |
+| `-s, --controller` | Controller address (overrides config, default port 9090) |
 | `-k, --insecure` | Skip TLS certificate verification |
 
 ---
@@ -200,13 +202,13 @@ kctl reads configuration from `~/.kcore/config`:
 current-context: lenovo
 contexts:
   lenovo:
-    controller: "192.168.40.107:9091"
+    controller: "192.168.40.107:9090"
     insecure: false
-    cert: "/path/to/node.crt"
-    key: "/path/to/node.key"
+    cert: "/path/to/client.crt"
+    key: "/path/to/client.key"
     ca: "/path/to/ca.crt"
   dev:
-    controller: "localhost:9091"
+    controller: "localhost:9090"
     insecure: true
 ```
 

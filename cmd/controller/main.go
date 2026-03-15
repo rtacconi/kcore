@@ -17,6 +17,7 @@ import (
 	cppb "github.com/kcore/kcore/api/controlplane"
 	"github.com/kcore/kcore/pkg/controller"
 	"github.com/kcore/kcore/pkg/controlplane"
+	"github.com/kcore/kcore/pkg/sqlite"
 )
 
 func main() {
@@ -24,7 +25,16 @@ func main() {
 	certFile := flag.String("cert", "certs/controller.crt", "TLS certificate file")
 	keyFile := flag.String("key", "certs/controller.key", "TLS key file")
 	caFile := flag.String("ca", "certs/ca.crt", "CA certificate file")
+	dbPath := flag.String("db", "./kcore-controller.db", "SQLite database path")
 	flag.Parse()
+
+	// Open SQLite database with versioned migrations
+	db, err := sqlite.New(*dbPath)
+	if err != nil {
+		log.Fatalf("Failed to open database at %s: %v", *dbPath, err)
+	}
+	defer db.Close()
+	log.Printf("Database opened: %s (schema version %d)", *dbPath, db.SchemaVersion())
 
 	// Load TLS credentials
 	cert, err := tls.LoadX509KeyPair(*certFile, *keyFile)
@@ -49,14 +59,13 @@ func main() {
 		MinVersion:   tls.VersionTLS12,
 	}
 
-	// Create controller server
-	server := controller.NewServer()
+	// Create controller server with SQLite persistence
+	server := controller.NewServerWithDB(db)
 	controlPlaneServer := controlplane.NewService(server)
-	// Reuse runtime TLS materials for controller->node RPCs too.
 	server.SetNodeDialCredentials(credentials.NewTLS(&tls.Config{
 		Certificates:       []tls.Certificate{cert},
 		RootCAs:            certPool,
-		InsecureSkipVerify: true, // Node cert SANs may not include dial target yet.
+		InsecureSkipVerify: true,
 		MinVersion:         tls.VersionTLS12,
 	}))
 
@@ -82,9 +91,10 @@ func main() {
 		grpcServer.GracefulStop()
 	}()
 
-	log.Printf("🚀 kcore Controller starting on %s", *listenAddr)
+	log.Printf("kcore Controller starting on %s", *listenAddr)
+	log.Printf("   Database: %s", *dbPath)
 	log.Printf("   Waiting for nodes to register...")
-	log.Printf("   Ready to accept VM operations from kctl")
+	log.Printf("   Ready to accept VM operations from kctl and Terraform")
 
 	if err := grpcServer.Serve(listener); err != nil {
 		log.Fatalf("Failed to serve: %v", err)

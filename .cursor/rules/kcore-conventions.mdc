@@ -1,0 +1,40 @@
+---
+description: kcore project conventions for controller-first architecture, SQLite migrations, and testing
+alwaysApply: true
+---
+
+# kcore Conventions
+
+## Controller-First Architecture
+
+- Only the controller communicates with node-agents. kctl and Terraform talk to the controller. Never create direct node-agent clients for VM operations in kctl or Terraform code.
+- The controller listens on port 9090 by default. Node-agents listen on port 9091.
+- VM operations (create, delete, start, stop, get, list) always go through the controller's gRPC API (proto/controller.proto).
+- Node-agent admin operations (image management, nix config) may use direct node connections but this is the exception, not the rule.
+
+## SQLite Persistence
+
+- Both the controller and node-agent use SQLite for state persistence.
+- Schema changes must be implemented as numbered migration functions (migration001_xxx, migration002_xxx, ...) in the migrate() method.
+- Never use `CREATE TABLE IF NOT EXISTS` for new schema -- always add a new migration.
+- The only `CREATE TABLE IF NOT EXISTS` allowed is for the `schema_version` table itself.
+- Each migration runs in a transaction.
+- See `pkg/sqlite/db.go` for the controller DB and `node/db.go` for the node-agent DB.
+
+## Desired State vs Actual State
+
+- The controller stores what the user wants (desired state) separately from what actually exists (actual state).
+- `vms.desired_spec` stores the full JSON-encoded user spec.
+- `vms.desired_state` stores the user's intent (running, stopped, deleted).
+- `vms.state` stores the actual state reported by node-agents.
+- The reconciliation loop in `pkg/controller/reconciler.go` drives actual state toward desired state.
+
+## Testing
+
+- Every change to the system needs tests to run 100% successfully.
+- Run `make test` to verify all unit tests pass before committing.
+- Tests for kctl commands, manifest parsing, and config are in `cmd/kctl/*_test.go`.
+- Tests for SQLite operations are in `pkg/sqlite/db_test.go`.
+- Tests for the controller are in `pkg/controller/server_test.go` and `test/integration/controller/`.
+- Tests for node-agent DB are in `node/db_test.go`.
+- The controller default port in tests and config is 9090 (not 9091).

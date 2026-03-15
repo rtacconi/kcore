@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	pb "github.com/kcore/kcore/api/node"
+	ctrlpb "github.com/kcore/kcore/api/controller"
 	"github.com/spf13/cobra"
 )
 
@@ -79,19 +79,19 @@ func applyVM(cmd *cobra.Command, data []byte, dryRun bool) error {
 
 	vmID := uuid.New().String()
 
-	var nics []*pb.Nic
+	var nics []*ctrlpb.Nic
 	for _, n := range manifest.Spec.Nics {
 		model := n.Model
 		if model == "" {
 			model = "virtio"
 		}
-		nics = append(nics, &pb.Nic{
+		nics = append(nics, &ctrlpb.Nic{
 			Network: n.Network,
 			Model:   model,
 		})
 	}
 
-	spec := &pb.VmSpec{
+	spec := &ctrlpb.VmSpec{
 		Id:               vmID,
 		Name:             manifest.Metadata.Name,
 		Cpu:              int32(manifest.Spec.CPU),
@@ -132,16 +132,16 @@ func applyVM(cmd *cobra.Command, data []byte, dryRun bool) error {
 	controllerAddr, _ := root.PersistentFlags().GetString("controller")
 	insecureFlag, _ := root.PersistentFlags().GetBool("insecure")
 
-	nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerAddr, insecureFlag)
+	ctrlAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerAddr, insecureFlag)
 	if err != nil {
 		return err
 	}
 
-	fmt.Printf("Applying VM '%s' on %s...\n", manifest.Metadata.Name, nodeAddr)
+	fmt.Printf("Applying VM '%s' via controller %s...\n", manifest.Metadata.Name, ctrlAddr)
 
-	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	client, err := NewControllerVMClient(ctrlAddr, insecure, certFile, keyFile, caFile)
 	if err != nil {
-		return fmt.Errorf("failed to connect to node: %w", err)
+		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
 	defer client.Close()
 
@@ -152,14 +152,15 @@ func applyVM(cmd *cobra.Command, data []byte, dryRun bool) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	status, err := client.CreateVM(ctx, spec, imageURI, "", cloudInit)
+	resp, err := client.CreateVM(ctx, spec, imageURI, cloudInit)
 	if err != nil {
 		return fmt.Errorf("failed to create VM: %w", err)
 	}
 
 	fmt.Printf("\nVM '%s' created successfully\n", manifest.Metadata.Name)
-	fmt.Printf("  ID:     %s\n", status.Id)
-	fmt.Printf("  State:  %s\n", status.State.String())
+	fmt.Printf("  ID:     %s\n", resp.VmId)
+	fmt.Printf("  Node:   %s\n", resp.NodeId)
+	fmt.Printf("  State:  %s\n", resp.State.String())
 	fmt.Printf("  CPU:    %d cores\n", manifest.Spec.CPU)
 	fmt.Printf("  Memory: %s\n", manifest.Spec.Memory)
 	if imageURI != "" {

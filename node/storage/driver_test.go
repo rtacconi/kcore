@@ -66,3 +66,67 @@ func TestDriverRegistry_Empty(t *testing.T) {
 		t.Errorf("List() on empty registry=%v, want empty", names)
 	}
 }
+
+func TestDriverRegistry_OverwriteDriver(t *testing.T) {
+	reg := NewDriverRegistry()
+	reg.Register(&fakeDriver{name: "drv"})
+	reg.Register(&fakeDriver{name: "drv"})
+
+	names := reg.List()
+	if len(names) != 1 {
+		t.Errorf("List()=%d, want 1 after overwrite", len(names))
+	}
+}
+
+func TestFakeDriver_Create(t *testing.T) {
+	drv := &fakeDriver{name: "local-dir"}
+	handle, err := drv.Create(context.Background(), VolumeSpecOnNode{VolumeID: "v1", SizeBytes: 1024})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if handle != "/fake/local-dir" {
+		t.Errorf("handle=%q", handle)
+	}
+}
+
+func TestFakeDriver_Capacity(t *testing.T) {
+	drv := &fakeDriver{name: "test"}
+	total, free, err := drv.Capacity(context.Background())
+	if err != nil {
+		t.Fatalf("Capacity: %v", err)
+	}
+	if total != 100 || free != 50 {
+		t.Errorf("total=%d, free=%d", total, free)
+	}
+}
+
+func TestLocalLVMDriver_Name(t *testing.T) {
+	drv := &LocalLVMDriver{volumeGroup: "vg0"}
+	if drv.Name() != "local-lvm" {
+		t.Errorf("Name()=%q", drv.Name())
+	}
+}
+
+func TestLocalLVMDriver_Attach_Noop(t *testing.T) {
+	drv := &LocalLVMDriver{volumeGroup: "vg0"}
+	err := drv.Attach(context.Background(), "/dev/vg0/lv", "vm-1", "vda", "virtio")
+	if err != nil {
+		t.Errorf("Attach should be no-op: %v", err)
+	}
+}
+
+func TestLocalLVMDriver_Detach_Noop(t *testing.T) {
+	drv := &LocalLVMDriver{volumeGroup: "vg0"}
+	err := drv.Detach(context.Background(), "/dev/vg0/lv", "vm-1")
+	if err != nil {
+		t.Errorf("Detach should be no-op: %v", err)
+	}
+}
+
+func TestLocalLVMDriver_Delete_InvalidPath(t *testing.T) {
+	drv := &LocalLVMDriver{volumeGroup: "vg0"}
+	err := drv.Delete(context.Background(), "badpath")
+	if err == nil {
+		t.Fatal("expected error for invalid device path")
+	}
+}

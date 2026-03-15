@@ -12,11 +12,100 @@ import (
 	"google.golang.org/grpc/credentials"
 
 	ctrlpb "github.com/kcore/kcore/api/controller"
-	pb "github.com/kcore/kcore/api/node"
 	nodepb "github.com/kcore/kcore/api/node"
 )
 
-// NodeClient wraps gRPC client for node operations
+// ---------------------------------------------------------------------------
+// ControllerVMClient – all VM operations go through the controller
+// ---------------------------------------------------------------------------
+
+type ControllerVMClient struct {
+	conn *grpc.ClientConn
+	api  ctrlpb.ControllerClient
+}
+
+func NewControllerVMClient(address string, tlsInsecure bool, certFile, keyFile, caFile string) (*ControllerVMClient, error) {
+	opts, err := buildGRPCDialOpts(tlsInsecure, certFile, keyFile, caFile)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, address, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to controller %s: %w", address, err)
+	}
+
+	return &ControllerVMClient{
+		conn: conn,
+		api:  ctrlpb.NewControllerClient(conn),
+	}, nil
+}
+
+func (c *ControllerVMClient) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
+
+func (c *ControllerVMClient) CreateVM(ctx context.Context, spec *ctrlpb.VmSpec, imageURI, cloudInit string) (*ctrlpb.CreateVmResponse, error) {
+	return c.api.CreateVm(ctx, &ctrlpb.CreateVmRequest{
+		Spec:              spec,
+		ImageUri:          imageURI,
+		CloudInitUserData: cloudInit,
+	})
+}
+
+func (c *ControllerVMClient) DeleteVM(ctx context.Context, vmID string) error {
+	_, err := c.api.DeleteVm(ctx, &ctrlpb.DeleteVmRequest{VmId: vmID})
+	return err
+}
+
+func (c *ControllerVMClient) StartVM(ctx context.Context, vmID string) error {
+	_, err := c.api.StartVm(ctx, &ctrlpb.StartVmRequest{VmId: vmID})
+	return err
+}
+
+func (c *ControllerVMClient) StopVM(ctx context.Context, vmID string, force bool) error {
+	_, err := c.api.StopVm(ctx, &ctrlpb.StopVmRequest{VmId: vmID, Force: force})
+	return err
+}
+
+func (c *ControllerVMClient) GetVM(ctx context.Context, vmID string) (*ctrlpb.GetVmResponse, error) {
+	return c.api.GetVm(ctx, &ctrlpb.GetVmRequest{VmId: vmID})
+}
+
+func (c *ControllerVMClient) ListVMs(ctx context.Context) ([]*ctrlpb.VmInfo, error) {
+	resp, err := c.api.ListVms(ctx, &ctrlpb.ListVmsRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Vms, nil
+}
+
+func (c *ControllerVMClient) ListNodes(ctx context.Context) ([]*ctrlpb.NodeInfo, error) {
+	resp, err := c.api.ListNodes(ctx, &ctrlpb.ListNodesRequest{})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Nodes, nil
+}
+
+func (c *ControllerVMClient) GetNode(ctx context.Context, nodeID string) (*ctrlpb.NodeInfo, error) {
+	resp, err := c.api.GetNode(ctx, &ctrlpb.GetNodeRequest{NodeId: nodeID})
+	if err != nil {
+		return nil, err
+	}
+	return resp.Node, nil
+}
+
+// ---------------------------------------------------------------------------
+// NodeClient – kept for node-specific admin ops (images, nix config)
+// ---------------------------------------------------------------------------
+
 type NodeClient struct {
 	conn    *grpc.ClientConn
 	compute nodepb.NodeComputeClient
@@ -24,48 +113,12 @@ type NodeClient struct {
 	info    nodepb.NodeInfoClient
 }
 
-// NewNodeClient creates a new node client
 func NewNodeClient(address string, tlsInsecure bool, certFile, keyFile, caFile string) (*NodeClient, error) {
-	var opts []grpc.DialOption
-
-	if certFile != "" && keyFile != "" {
-		// Load client cert
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load client cert: %w", err)
-		}
-
-		// Load CA cert if provided
-		var certPool *x509.CertPool
-		if caFile != "" {
-			caCert, err := os.ReadFile(caFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read CA cert: %w", err)
-			}
-			certPool = x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(caCert) {
-				return nil, fmt.Errorf("failed to append CA cert")
-			}
-		}
-
-		tlsConfig := &tls.Config{
-			Certificates:       []tls.Certificate{cert},
-			RootCAs:            certPool,
-			InsecureSkipVerify: tlsInsecure,
-			MinVersion:         tls.VersionTLS12,
-		}
-
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
-	} else {
-		// No certs provided: use TLS but skip verification
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true,
-			MinVersion:         tls.VersionTLS12,
-		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	opts, err := buildGRPCDialOpts(tlsInsecure, certFile, keyFile, caFile)
+	if err != nil {
+		return nil, err
 	}
 
-	// Add timeout
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -82,7 +135,6 @@ func NewNodeClient(address string, tlsInsecure bool, certFile, keyFile, caFile s
 	}, nil
 }
 
-// Close closes the client connection
 func (c *NodeClient) Close() error {
 	if c.conn != nil {
 		return c.conn.Close()
@@ -90,93 +142,23 @@ func (c *NodeClient) Close() error {
 	return nil
 }
 
-// CreateVM creates a new VM on the node
-func (c *NodeClient) CreateVM(ctx context.Context, spec *pb.VmSpec, imageURI, imagePath, cloudInitUserData string) (*pb.VmStatus, error) {
-	resp, err := c.compute.CreateVm(ctx, &nodepb.CreateVmRequest{
-		Spec:               spec,
-		ImageUri:           imageURI,
-		ImagePath:          imagePath,
-		CloudInitUserData:  cloudInitUserData,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return resp.Status, nil
-}
-
-// GetVM gets VM details
-func (c *NodeClient) GetVM(ctx context.Context, vmID string) (*pb.VmSpec, *pb.VmStatus, error) {
-	resp, err := c.compute.GetVm(ctx, &nodepb.GetVmRequest{
-		VmId: vmID,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	return resp.Spec, resp.Status, nil
-}
-
-// ListVMs lists all VMs on the node
-func (c *NodeClient) ListVMs(ctx context.Context) ([]*pb.VmInfo, error) {
-	resp, err := c.compute.ListVms(ctx, &nodepb.ListVmsRequest{})
-	if err != nil {
-		return nil, err
-	}
-	return resp.Vms, nil
-}
-
-// DeleteVM deletes a VM
-func (c *NodeClient) DeleteVM(ctx context.Context, vmID string) error {
-	_, err := c.compute.DeleteVm(ctx, &nodepb.DeleteVmRequest{
-		VmId: vmID,
-	})
-	return err
-}
-
-// GetNodeInfo gets node information
-func (c *NodeClient) GetNodeInfo(ctx context.Context) (*pb.GetNodeInfoResponse, error) {
+func (c *NodeClient) GetNodeInfo(ctx context.Context) (*nodepb.GetNodeInfoResponse, error) {
 	return c.info.GetNodeInfo(ctx, &nodepb.GetNodeInfoRequest{})
 }
 
-// ControllerAdminClient is a thin wrapper for controller admin RPCs
+// ---------------------------------------------------------------------------
+// ControllerAdminClient
+// ---------------------------------------------------------------------------
+
 type ControllerAdminClient struct {
 	conn *grpc.ClientConn
 	api  ctrlpb.ControllerAdminClient
 }
 
 func NewControllerAdminClient(address string, tlsInsecure bool, certFile, keyFile, caFile string) (*ControllerAdminClient, error) {
-	var opts []grpc.DialOption
-
-	if certFile != "" && keyFile != "" {
-		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load client cert: %w", err)
-		}
-
-		var certPool *x509.CertPool
-		if caFile != "" {
-			caCert, err := os.ReadFile(caFile)
-			if err != nil {
-				return nil, fmt.Errorf("failed to read CA cert: %w", err)
-			}
-			certPool = x509.NewCertPool()
-			if !certPool.AppendCertsFromPEM(caCert) {
-				return nil, fmt.Errorf("failed to append CA cert")
-			}
-		}
-
-		tlsConfig := &tls.Config{
-			Certificates:       []tls.Certificate{cert},
-			RootCAs:            certPool,
-			InsecureSkipVerify: tlsInsecure,
-			MinVersion:         tls.VersionTLS12,
-		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
-	} else {
-		tlsConfig := &tls.Config{
-			InsecureSkipVerify: true,
-			MinVersion:         tls.VersionTLS12,
-		}
-		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
+	opts, err := buildGRPCDialOpts(tlsInsecure, certFile, keyFile, caFile)
+	if err != nil {
+		return nil, err
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -207,25 +189,62 @@ func (c *ControllerAdminClient) ApplyNixConfig(ctx context.Context, config strin
 	})
 }
 
-// NodeAdminClient is a thin wrapper for node admin RPCs
+// ---------------------------------------------------------------------------
+// NodeAdminClient
+// ---------------------------------------------------------------------------
+
 type NodeAdminClient struct {
 	conn *grpc.ClientConn
 	api  nodepb.NodeAdminClient
 }
 
-// NewNodeAdminClient creates a new NodeAdmin client using the same TLS logic
-// as NewNodeClient.
 func NewNodeAdminClient(address string, tlsInsecure bool, certFile, keyFile, caFile string) (*NodeAdminClient, error) {
+	opts, err := buildGRPCDialOpts(tlsInsecure, certFile, keyFile, caFile)
+	if err != nil {
+		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	conn, err := grpc.DialContext(ctx, address, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to connect to %s: %w", address, err)
+	}
+
+	return &NodeAdminClient{
+		conn: conn,
+		api:  nodepb.NewNodeAdminClient(conn),
+	}, nil
+}
+
+func (c *NodeAdminClient) Close() error {
+	if c.conn != nil {
+		return c.conn.Close()
+	}
+	return nil
+}
+
+func (c *NodeAdminClient) ApplyNixConfig(ctx context.Context, config string, rebuild bool) (*nodepb.ApplyNixConfigResponse, error) {
+	return c.api.ApplyNixConfig(ctx, &nodepb.ApplyNixConfigRequest{
+		ConfigurationNix: config,
+		Rebuild:          rebuild,
+	})
+}
+
+// ---------------------------------------------------------------------------
+// Shared TLS helpers
+// ---------------------------------------------------------------------------
+
+func buildGRPCDialOpts(tlsInsecure bool, certFile, keyFile, caFile string) ([]grpc.DialOption, error) {
 	var opts []grpc.DialOption
 
 	if certFile != "" && keyFile != "" {
-		// Load client cert
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load client cert: %w", err)
 		}
 
-		// Load CA cert if provided
 		var certPool *x509.CertPool
 		if caFile != "" {
 			caCert, err := os.ReadFile(caFile)
@@ -244,10 +263,8 @@ func NewNodeAdminClient(address string, tlsInsecure bool, certFile, keyFile, caF
 			InsecureSkipVerify: tlsInsecure,
 			MinVersion:         tls.VersionTLS12,
 		}
-
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	} else {
-		// No certs provided: use TLS but skip verification (dev convenience)
 		tlsConfig := &tls.Config{
 			InsecureSkipVerify: true,
 			MinVersion:         tls.VersionTLS12,
@@ -255,37 +272,13 @@ func NewNodeAdminClient(address string, tlsInsecure bool, certFile, keyFile, caF
 		opts = append(opts, grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig)))
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	conn, err := grpc.DialContext(ctx, address, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("failed to connect to %s: %w", address, err)
-	}
-
-	return &NodeAdminClient{
-		conn: conn,
-		api:  nodepb.NewNodeAdminClient(conn),
-	}, nil
+	return opts, nil
 }
 
-// Close closes the NodeAdmin client connection.
-func (c *NodeAdminClient) Close() error {
-	if c.conn != nil {
-		return c.conn.Close()
-	}
-	return nil
-}
+// ---------------------------------------------------------------------------
+// Size helpers
+// ---------------------------------------------------------------------------
 
-// ApplyNixConfig pushes a NixOS configuration to the node.
-func (c *NodeAdminClient) ApplyNixConfig(ctx context.Context, config string, rebuild bool) (*nodepb.ApplyNixConfigResponse, error) {
-	return c.api.ApplyNixConfig(ctx, &nodepb.ApplyNixConfigRequest{
-		ConfigurationNix: config,
-		Rebuild:          rebuild,
-	})
-}
-
-// parseMemorySize converts memory string (2G, 4096M) to bytes
 func parseMemorySize(size string) (int64, error) {
 	if len(size) < 2 {
 		return 0, fmt.Errorf("invalid memory size: %s", size)
@@ -312,12 +305,10 @@ func parseMemorySize(size string) (int64, error) {
 	}
 }
 
-// parseDiskSize converts disk string (100G, 50000M) to bytes
 func parseDiskSize(size string) (int64, error) {
-	return parseMemorySize(size) // Same logic
+	return parseMemorySize(size)
 }
 
-// formatBytes converts bytes to human-readable format
 func formatBytes(bytes int64) string {
 	const unit = 1024
 	if bytes < unit {

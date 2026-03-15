@@ -59,16 +59,13 @@ Examples:
   # Get VM in JSON format
   kctl get vm web-server -o json`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Get connection info
 			configPath, _ := cmd.Flags().GetString("config")
 			controllerFlag, _ := cmd.Flags().GetString("controller")
 			insecureFlag, _ := cmd.Flags().GetBool("insecure")
 
 			if len(args) == 0 {
-				// List all VMs
 				return listVMs(*output, configPath, controllerFlag, insecureFlag)
 			}
-			// Get specific VM
 			return getVM(args[0], *output, configPath, controllerFlag, insecureFlag)
 		},
 	}
@@ -86,15 +83,16 @@ Examples:
   kctl get nodes
 
   # Get specific node
-  kctl get node kvm-node-01
-
-  # List nodes with wide output
-  kctl get nodes -o wide`,
+  kctl get node kvm-node-01`,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			configPath, _ := cmd.Flags().GetString("config")
+			controllerFlag, _ := cmd.Flags().GetString("controller")
+			insecureFlag, _ := cmd.Flags().GetBool("insecure")
+
 			if len(args) == 0 {
-				return listNodes(*output)
+				return listNodes(*output, configPath, controllerFlag, insecureFlag)
 			}
-			return getNode(args[0], *output)
+			return getNode(args[0], *output, configPath, controllerFlag, insecureFlag)
 		},
 	}
 }
@@ -104,14 +102,6 @@ func newGetVolumesCmd(output *string) *cobra.Command {
 		Use:     "volumes [NAME]",
 		Aliases: []string{"volume", "vol"},
 		Short:   "List storage volumes",
-		Long: `List all storage volumes or get details of a specific volume.
-
-Examples:
-  # List all volumes
-  kctl get volumes
-
-  # Get specific volume
-  kctl get volume data-vol`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return listVolumes(*output)
@@ -126,14 +116,6 @@ func newGetNetworksCmd(output *string) *cobra.Command {
 		Use:     "networks [NAME]",
 		Aliases: []string{"network", "net"},
 		Short:   "List virtual networks",
-		Long: `List all virtual networks or get details of a specific network.
-
-Examples:
-  # List all networks
-  kctl get networks
-
-  # Get specific network
-  kctl get network private-net`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if len(args) == 0 {
 				return listNetworks(*output)
@@ -143,23 +125,20 @@ Examples:
 	}
 }
 
-// Implementation functions
+// --- VM operations (through controller) ------------------------------------
 
 func listVMs(output, configPath, controllerFlag string, insecureFlag bool) error {
-	// Get connection info
-	nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+	ctrlAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
 	if err != nil {
 		return err
 	}
 
-	// Create client
-	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	client, err := NewControllerVMClient(ctrlAddr, insecure, certFile, keyFile, caFile)
 	if err != nil {
-		return fmt.Errorf("failed to connect to node: %w", err)
+		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
 	defer client.Close()
 
-	// List VMs
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -168,131 +147,162 @@ func listVMs(output, configPath, controllerFlag string, insecureFlag bool) error
 		return fmt.Errorf("failed to list VMs: %w", err)
 	}
 
-	// Print header (ID first for easy copy-paste)
-	fmt.Printf("%-36s  %-20s %-12s %-6s %-10s\n", "ID", "NAME", "STATUS", "CPU", "MEMORY")
-	
-	// Print VMs
+	fmt.Printf("%-36s  %-20s %-12s %-6s %-10s %-20s\n", "ID", "NAME", "STATUS", "CPU", "MEMORY", "NODE")
 	for _, vm := range vms {
-		status := vm.State.String()[9:] // Remove "VM_STATE_" prefix
+		stateStr := vm.State.String()[9:] // strip "VM_STATE_" prefix
 		memory := formatBytes(vm.MemoryBytes)
-		
-		// Show full UUID for easy copy-paste to delete/describe commands
-		fmt.Printf("%-36s  %-20s %-12s %-6d %-10s\n",
-			vm.Id,
-			vm.Name,
-			status,
-			vm.Cpu,
-			memory,
-		)
+		fmt.Printf("%-36s  %-20s %-12s %-6d %-10s %-20s\n",
+			vm.Id, vm.Name, stateStr, vm.Cpu, memory, vm.NodeId)
 	}
 
 	return nil
 }
 
 func getVM(name, output, configPath, controllerFlag string, insecureFlag bool) error {
-	// Get connection info
-	nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+	ctrlAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
 	if err != nil {
 		return err
 	}
 
-	// Create client
-	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	client, err := NewControllerVMClient(ctrlAddr, insecure, certFile, keyFile, caFile)
 	if err != nil {
-		return fmt.Errorf("failed to connect to node: %w", err)
+		return fmt.Errorf("failed to connect to controller: %w", err)
 	}
 	defer client.Close()
 
-	// Get VM
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	spec, status, err := client.GetVM(ctx, name)
+	resp, err := client.GetVM(ctx, name)
 	if err != nil {
 		return fmt.Errorf("failed to get VM: %w", err)
 	}
 
-	// Print VM details
 	fmt.Printf("Name:         %s\n", name)
-	fmt.Printf("ID:           %s\n", status.Id)
-	fmt.Printf("Status:       %s\n", status.State.String()[9:])
-	
-	if spec != nil {
-		fmt.Printf("CPU:          %d cores\n", spec.Cpu)
-		fmt.Printf("Memory:       %s\n", formatBytes(spec.MemoryBytes))
-		
-		if len(spec.Disks) > 0 {
+	if resp.Status != nil {
+		fmt.Printf("ID:           %s\n", resp.Status.Id)
+		fmt.Printf("Status:       %s\n", resp.Status.State.String()[9:])
+	}
+	fmt.Printf("Node:         %s\n", resp.NodeId)
+
+	if resp.Spec != nil {
+		fmt.Printf("CPU:          %d cores\n", resp.Spec.Cpu)
+		fmt.Printf("Memory:       %s\n", formatBytes(resp.Spec.MemoryBytes))
+
+		if len(resp.Spec.Disks) > 0 {
 			fmt.Printf("Disks:\n")
-			for _, disk := range spec.Disks {
+			for _, disk := range resp.Spec.Disks {
 				fmt.Printf("  - %s: %s\n", disk.Device, disk.BackendHandle)
 			}
 		}
-		
-		if len(spec.Nics) > 0 {
+
+		if len(resp.Spec.Nics) > 0 {
 			fmt.Printf("Network:\n")
-			for _, nic := range spec.Nics {
+			for _, nic := range resp.Spec.Nics {
 				fmt.Printf("  - %s (%s)\n", nic.Network, nic.MacAddress)
 			}
 		}
 	}
-	
-	if status.CreatedAt != nil {
-		fmt.Printf("Created:      %s\n", status.CreatedAt.AsTime().Format(time.RFC3339))
+
+	if resp.Status != nil && resp.Status.CreatedAt != nil {
+		fmt.Printf("Created:      %s\n", resp.Status.CreatedAt.AsTime().Format(time.RFC3339))
 	}
 
 	return nil
 }
 
-func listNodes(output string) error {
-	fmt.Println("NAME           STATUS    ROLE      VERSION    VMS    CPU       MEMORY")
-	fmt.Println("kvm-node-01    Ready     compute   0.1.0      5      32/64     64/128GB")
-	fmt.Println("kvm-node-02    Ready     compute   0.1.0      3      16/64     32/128GB")
-	fmt.Println("kvm-node-03    Ready     compute   0.1.0      8      48/64     96/128GB")
+// --- Node operations (through controller) ----------------------------------
+
+func listNodes(output, configPath, controllerFlag string, insecureFlag bool) error {
+	ctrlAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+	if err != nil {
+		return err
+	}
+
+	client, err := NewControllerVMClient(ctrlAddr, insecure, certFile, keyFile, caFile)
+	if err != nil {
+		return fmt.Errorf("failed to connect to controller: %w", err)
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	nodes, err := client.ListNodes(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to list nodes: %w", err)
+	}
+
+	fmt.Printf("%-20s %-20s %-10s %-10s %-12s\n", "ID", "HOSTNAME", "STATUS", "CPU", "MEMORY")
+	for _, n := range nodes {
+		cpuStr := fmt.Sprintf("%d cores", n.Capacity.GetCpuCores())
+		memStr := formatBytes(n.Capacity.GetMemoryBytes())
+		fmt.Printf("%-20s %-20s %-10s %-10s %-12s\n",
+			n.NodeId, n.Hostname, n.Status, cpuStr, memStr)
+	}
+
 	return nil
 }
 
-func getNode(name, output string) error {
-	fmt.Printf("Name:              %s\n", name)
-	fmt.Printf("Status:            Ready\n")
-	fmt.Printf("Role:              compute\n")
-	fmt.Printf("Version:           0.1.0\n")
-	fmt.Printf("IP Address:        192.168.1.50\n")
-	fmt.Printf("VMs Running:       5\n")
-	fmt.Printf("CPU:               32 used / 64 total\n")
-	fmt.Printf("Memory:            64GB used / 128GB total\n")
-	fmt.Printf("Storage:           2TB used / 4TB total\n")
-	fmt.Printf("Last Heartbeat:    30s ago\n")
+func getNode(name, output, configPath, controllerFlag string, insecureFlag bool) error {
+	ctrlAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerFlag, insecureFlag)
+	if err != nil {
+		return err
+	}
+
+	client, err := NewControllerVMClient(ctrlAddr, insecure, certFile, keyFile, caFile)
+	if err != nil {
+		return fmt.Errorf("failed to connect to controller: %w", err)
+	}
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	node, err := client.GetNode(ctx, name)
+	if err != nil {
+		return fmt.Errorf("failed to get node: %w", err)
+	}
+
+	fmt.Printf("Node ID:       %s\n", node.NodeId)
+	fmt.Printf("Hostname:      %s\n", node.Hostname)
+	fmt.Printf("Address:       %s\n", node.Address)
+	fmt.Printf("Status:        %s\n", node.Status)
+	if node.Capacity != nil {
+		fmt.Printf("CPU:           %d cores\n", node.Capacity.CpuCores)
+		fmt.Printf("Memory:        %s\n", formatBytes(node.Capacity.MemoryBytes))
+	}
+	if node.Usage != nil {
+		fmt.Printf("CPU Used:      %d cores\n", node.Usage.CpuCoresUsed)
+		fmt.Printf("Memory Used:   %s\n", formatBytes(node.Usage.MemoryBytesUsed))
+	}
+	if node.LastHeartbeat != nil {
+		fmt.Printf("Last Heartbeat: %s\n", node.LastHeartbeat.AsTime().Format(time.RFC3339))
+	}
+
 	return nil
 }
+
+// --- Placeholder operations (volumes, networks) ----------------------------
 
 func listVolumes(output string) error {
 	fmt.Println("NAME           SIZE     STORAGE-CLASS    NODE           STATUS")
-	fmt.Println("data-vol       100G     local-lvm        kvm-node-01    Available")
-	fmt.Println("db-vol         500G     local-lvm        kvm-node-02    Bound")
+	fmt.Println("(no volumes - future feature)")
 	return nil
 }
 
 func getVolume(name, output string) error {
-	fmt.Printf("Name:             %s\n", name)
-	fmt.Printf("Size:             100GB\n")
-	fmt.Printf("Storage Class:    local-lvm\n")
-	fmt.Printf("Node:             kvm-node-01\n")
-	fmt.Printf("Status:           Available\n")
+	fmt.Printf("Volume '%s' not found (volumes are a future feature)\n", name)
 	return nil
 }
 
 func listNetworks(output string) error {
 	fmt.Println("NAME           SUBNET              BRIDGE    VMS")
-	fmt.Println("default        192.168.1.0/24      br0       15")
-	fmt.Println("private-net    192.168.100.0/24    br1       3")
+	fmt.Println("(no networks - future feature)")
 	return nil
 }
 
 func getNetwork(name, output string) error {
-	fmt.Printf("Name:        %s\n", name)
-	fmt.Printf("Subnet:      192.168.1.0/24\n")
-	fmt.Printf("Bridge:      br0\n")
-	fmt.Printf("VMs:         15\n")
+	fmt.Printf("Network '%s' not found (networks are a future feature)\n", name)
 	return nil
 }
-

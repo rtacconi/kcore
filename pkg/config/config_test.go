@@ -129,3 +129,125 @@ func TestLoadControllerConfig_MissingFile(t *testing.T) {
 		t.Fatal("expected error for missing file")
 	}
 }
+
+func TestLoadNodeAgentConfig_MissingFile(t *testing.T) {
+	_, err := LoadNodeAgentConfig("/nonexistent/node-agent.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing file")
+	}
+}
+
+func TestLoadControllerConfig_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bad.yaml")
+	os.WriteFile(cfgPath, []byte("{{invalid yaml{{"), 0600)
+
+	_, err := LoadControllerConfig(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadNodeAgentConfig_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "bad.yaml")
+	os.WriteFile(cfgPath, []byte("{{invalid yaml{{"), 0600)
+
+	_, err := LoadNodeAgentConfig(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadControllerConfig_AllDefaults(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "minimal.yaml")
+	os.WriteFile(cfgPath, []byte("{}\n"), 0600)
+
+	cfg, err := LoadControllerConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadControllerConfig: %v", err)
+	}
+	if cfg.ListenAddr != ":9090" {
+		t.Errorf("ListenAddr=%q, want :9090", cfg.ListenAddr)
+	}
+	if cfg.DatabasePath != "./kcore.db" {
+		t.Errorf("DatabasePath=%q", cfg.DatabasePath)
+	}
+	if cfg.NodeNetworks["default"] != "br0" {
+		t.Errorf("NodeNetworks=%v", cfg.NodeNetworks)
+	}
+}
+
+func TestLoadNodeAgentConfig_WithStorage(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "node-agent.yaml")
+	data := []byte(`nodeId: storage-node
+listenAddr: ":9091"
+storage:
+  drivers:
+    local-lvm:
+      type: local-lvm
+      parameters:
+        volumeGroup: vg0
+`)
+	os.WriteFile(cfgPath, data, 0600)
+
+	cfg, err := LoadNodeAgentConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadNodeAgentConfig: %v", err)
+	}
+	if cfg.NodeID != "storage-node" {
+		t.Errorf("NodeID=%q", cfg.NodeID)
+	}
+	drv, ok := cfg.Storage.Drivers["local-lvm"]
+	if !ok {
+		t.Fatal("missing local-lvm driver")
+	}
+	if drv.Type != "local-lvm" {
+		t.Errorf("driver type=%q", drv.Type)
+	}
+	if drv.Parameters["volumeGroup"] != "vg0" {
+		t.Errorf("volumeGroup=%q", drv.Parameters["volumeGroup"])
+	}
+}
+
+func TestDefaultControllerConfig_TLS(t *testing.T) {
+	cfg := DefaultControllerConfig()
+	if cfg.TLS.CAFile != "./certs/ca.crt" {
+		t.Errorf("TLS.CAFile=%q", cfg.TLS.CAFile)
+	}
+	if cfg.TLS.CertFile != "./certs/controller.crt" {
+		t.Errorf("TLS.CertFile=%q", cfg.TLS.CertFile)
+	}
+	if cfg.TLS.KeyFile != "./certs/controller.key" {
+		t.Errorf("TLS.KeyFile=%q", cfg.TLS.KeyFile)
+	}
+}
+
+func TestDefaultNodeAgentConfig_TLS(t *testing.T) {
+	cfg := DefaultNodeAgentConfig()
+	if cfg.TLS.CAFile != "./certs/ca.crt" {
+		t.Errorf("TLS.CAFile=%q", cfg.TLS.CAFile)
+	}
+	if cfg.TLS.CertFile != "./certs/node.crt" {
+		t.Errorf("TLS.CertFile=%q", cfg.TLS.CertFile)
+	}
+	if cfg.TLS.KeyFile != "./certs/node.key" {
+		t.Errorf("TLS.KeyFile=%q", cfg.TLS.KeyFile)
+	}
+}
+
+func TestLoadNodeAgentConfig_DefaultNetworks(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "node-agent.yaml")
+	os.WriteFile(cfgPath, []byte("nodeId: test\n"), 0600)
+
+	cfg, err := LoadNodeAgentConfig(cfgPath)
+	if err != nil {
+		t.Fatalf("LoadNodeAgentConfig: %v", err)
+	}
+	if cfg.Networks["default"] != "br0" {
+		t.Errorf("default network=%q, want br0", cfg.Networks["default"])
+	}
+}

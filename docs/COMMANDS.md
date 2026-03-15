@@ -130,32 +130,21 @@ Deploys to an existing kcore node (for updates):
 **Note:** This is for updating nodes. Fresh installs get node-agent automatically from the ISO.  
 Script: `scripts/deploy-node.sh`
 
-### Create VM
+### Create VM (direct node, admin/debug only)
 ```bash
 NODE_IP=192.168.40.146 make create-vm
 ```
-Creates a test VM on kcore node with:
-- Random UUID
-- Name: `test-vm`
-- 2 CPUs
-- 2GB RAM
+Creates a test VM directly on a node-agent (bypasses the controller). Use `kctl apply` or Terraform for production workflows.
 
-Returns VM ID and state.  
 Script: `scripts/create-vm.sh`
 
-### Delete VM
+### Delete VM (direct node, admin/debug only)
 ```bash
 NODE_IP=192.168.40.146 VM_ID=<uuid> make delete-vm
 ```
-Deletes a VM by ID from kcore node.  
-Script: `scripts/delete-vm.sh`
+Deletes a VM by ID directly from a node-agent. Use `kctl delete vm` or Terraform for production workflows.
 
-**Example:**
-```bash
-NODE_IP=192.168.40.146 \
-  VM_ID=5fc2b3d5-57e0-4991-bc1e-349ee5ec3784 \
-  make delete-vm
-```
+Script: `scripts/delete-vm.sh`
 
 ---
 
@@ -205,7 +194,10 @@ make help
 
 ### Documentation Files
 - [QUICKSTART.md](QUICKSTART.md) - Installation guide
-- [ARCHITECTURE.md](ARCHITECTURE.md) - System design and workflow
+- [ARCHITECTURE.md](ARCHITECTURE.md) - System design and workflow (controller-first)
+- [KCTL.md](KCTL.md) - kctl CLI reference
+- [TERRAFORM_PROVIDER.md](TERRAFORM_PROVIDER.md) - Terraform provider guide
+- [DATABASE_MIGRATIONS.md](DATABASE_MIGRATIONS.md) - SQLite migration conventions
 - [FIXES.md](FIXES.md) - Troubleshooting and manual fixes
 - [COMMANDS.md](COMMANDS.md) - This file
 - [scripts.md](scripts.md) - Scripts documentation
@@ -242,12 +234,15 @@ install-to-disk
 NODE_IP=192.168.40.146 make test-node
 ```
 
-### 3. VM Management
+### 3. VM Management (via Controller)
+
+All `kctl` VM commands talk to the **controller** (default port 9090), which forwards operations to the appropriate node-agent.
+
 ```bash
 # Create VM from manifest
 kctl apply -f examples/vm.yaml
 
-# List VMs on kcore node
+# List VMs
 kctl get vms
 
 # Delete VM

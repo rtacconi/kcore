@@ -4,12 +4,14 @@ This document provides information about the KCore Terraform provider for infras
 
 ## Overview
 
-The KCore Terraform provider allows you to manage KCore virtual machines using Terraform's declarative configuration language. This enables:
+The KCore Terraform provider allows you to manage KCore virtual machines using Terraform's declarative configuration language. The provider communicates with the **controller** (not node-agents directly). This enables:
 
 - Infrastructure as Code (IaC) for your VMs
 - Version control for your VM configurations
 - Automated provisioning and lifecycle management
 - Integration with existing Terraform workflows
+
+**Important:** The Terraform provider talks to the kcore controller (default port 9090). The controller then forwards operations to the appropriate node-agent.
 
 ## Directory Structure
 
