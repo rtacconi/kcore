@@ -142,6 +142,17 @@ a:hover {
     color: var(--text-primary);
 }
 
+.nav-github {
+    display: flex;
+    align-items: center;
+    color: var(--text-secondary);
+    transition: color 0.2s ease;
+}
+
+.nav-github:hover {
+    color: var(--text-primary);
+}
+
 /* Buttons */
 .btn {
     display: inline-block;
