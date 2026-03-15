@@ -306,67 +306,36 @@ Network:     192.168.122.100</span>
             <div class="code-tabs">
                 <button class="tab-button active" data-tab="terraform">Terraform</button>
                 <button class="tab-button" data-tab="yaml">YAML</button>
-                <button class="tab-button" data-tab="cli">CLI</button>
             </div>
             <div class="code-panels">
                 <div class="code-panel active" id="terraform">
-<pre><code><span class="code-comment"># Define a VM with storage and networking</span>
-<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"web"</span> {
-  <span class="code-property">name</span>   = <span class="code-string">"web-01"</span>
-  <span class="code-property">memory</span> = <span class="code-number">8192</span>
-  <span class="code-property">vcpu</span>   = <span class="code-number">4</span>
+<pre><code><span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"example"</span> {
+  <span class="code-property">name</span>         = <span class="code-string">"debian12-test"</span>
+  <span class="code-property">cpu</span>          = <span class="code-number">1</span>
+  <span class="code-property">memory_bytes</span> = <span class="code-number">2147483648</span>  <span class="code-comment"># 2GB</span>
 
-  <span class="code-keyword">disk</span> {
-    <span class="code-property">size</span>         = <span class="code-string">"100GB"</span>
-    <span class="code-property">storage_class</span> = <span class="code-string">"local-lvm"</span>
-  }
+  <span class="code-property">image_uri</span>          = <span class="code-string">"https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"</span>
+  <span class="code-property">enable_kcore_login</span> = <span class="code-number">true</span>
 
-  <span class="code-keyword">network</span> {
-    <span class="code-property">type</span> = <span class="code-string">"bridge"</span>
-    <span class="code-property">name</span> = <span class="code-string">"br0"</span>
-  }
-
-  <span class="code-property">tags</span> = {
-    <span class="code-property">environment</span> = <span class="code-string">"staging"</span>
-    <span class="code-property">managed_by</span>  = <span class="code-string">"terraform"</span>
+  <span class="code-keyword">nic</span> {
+    <span class="code-property">network</span> = <span class="code-string">"default"</span>
+    <span class="code-property">model</span>   = <span class="code-string">"virtio"</span>
   }
 }</code></pre>
                 </div>
                 <div class="code-panel" id="yaml">
-<pre><code><span class="code-comment"># vm.yaml</span>
-<span class="code-property">apiVersion</span>: <span class="code-string">v1</span>
-<span class="code-property">kind</span>: <span class="code-string">VirtualMachine</span>
+<pre><code><span class="code-property">apiVersion</span>: <span class="code-string">kcore.io/v1</span>
+<span class="code-property">kind</span>: <span class="code-string">VM</span>
 <span class="code-property">metadata</span>:
-  <span class="code-property">name</span>: <span class="code-string">web-01</span>
-  <span class="code-property">labels</span>:
-    <span class="code-property">environment</span>: <span class="code-string">staging</span>
+  <span class="code-property">name</span>: <span class="code-string">debian12-test</span>
 <span class="code-property">spec</span>:
-  <span class="code-property">memory</span>: <span class="code-number">8192</span>
-  <span class="code-property">vcpu</span>: <span class="code-number">4</span>
-  <span class="code-property">disks</span>:
-    - <span class="code-property">size</span>: <span class="code-string">100GB</span>
-      <span class="code-property">storageClass</span>: <span class="code-string">local-lvm</span>
-  <span class="code-property">network</span>:
-    <span class="code-property">type</span>: <span class="code-string">bridge</span>
-    <span class="code-property">name</span>: <span class="code-string">br0</span></code></pre>
-                </div>
-                <div class="code-panel" id="cli">
-<pre><code><span class="code-comment"># Create a VM from the command line</span>
-<span class="prompt">$</span> kctl create vm web-01 \
-  --memory 8192 \
-  --vcpu 4 \
-  --disk size=100GB,storage-class=local-lvm \
-  --network type=bridge,name=br0 \
-  --label environment=staging
-
-<span class="output">✓ VM web-01 created
-✓ Starting VM...</span>
-
-<span class="code-comment"># Or apply from a file</span>
-<span class="prompt">$</span> kctl apply -f vm.yaml
-
-<span class="output">✓ VM web-01 configured
-✓ Status: running</span></code></pre>
+  <span class="code-property">cpu</span>: <span class="code-number">1</span>
+  <span class="code-property">memory</span>: <span class="code-string">2G</span>
+  <span class="code-property">image</span>: <span class="code-string">https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2</span>
+  <span class="code-property">enableKcoreLogin</span>: <span class="code-number">true</span>
+  <span class="code-property">nics</span>:
+    - <span class="code-property">network</span>: <span class="code-string">default</span>
+      <span class="code-property">model</span>: <span class="code-string">virtio</span></code></pre>
                 </div>
             </div>
         </div>
