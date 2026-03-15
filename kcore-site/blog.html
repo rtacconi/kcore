@@ -11,7 +11,7 @@
     <!-- Alpha Banner -->
     <div class="alpha-banner">
         <span class="alpha-badge">ALPHA</span>
-        kcore is alpha software under active development. Not production ready.
+        <span data-i18n="shared.alpha_banner">kcore is alpha software under active development. Not production ready.</span>
     </div>
 
     <!-- Navigation -->
@@ -24,14 +24,15 @@
                 </a>
             </div>
             <ul class="nav-menu">
-                <li><a href="features.html">Features</a></li>
-                <li><a href="roadmap.html">Roadmap</a></li>
-                <li><a href="architecture.html">Architecture</a></li>
-                <li><a href="faq.html">FAQ</a></li>
-                <li><a href="blog.html">Blog</a></li>
-                <li><a href="/docs/">Docs</a></li>
+                <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
+                <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
+                <li><a href="/docs/" data-i18n="shared.nav.docs">Docs</a></li>
                 <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
-                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+                <li><button class="lang-toggle-btn" aria-label="Switch language">IT</button></li>
+                <li><a href="index.html#early-access" class="btn-primary" data-i18n="shared.nav.early_access">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -39,8 +40,8 @@
     <!-- Hero -->
     <section class="page-hero">
         <div class="container">
-            <h1>Blog</h1>
-            <p>Development updates, technical decisions, and progress reports.</p>
+            <h1 data-i18n="blog.hero_title">Blog</h1>
+            <p data-i18n="blog.hero_subtitle">Development updates, technical decisions, and progress reports.</p>
         </div>
     </section>
 
@@ -54,20 +55,20 @@
                     <div class="blog-meta">
                         <time datetime="2026-03-15">15 March 2026</time>
                     </div>
-                    <h2>Website Relaunch: Honest Positioning</h2>
+                    <h2 data-i18n="blog.post3_title">Website Relaunch: Honest Positioning</h2>
                     <div class="blog-body">
-                        <p>
+                        <p data-i18n="blog.post3_p1">
                             We've relaunched the kcore website with clearer, more honest positioning.
                             The previous version leaned too heavily on AI marketing language and
                             implied a maturity level we haven't reached. That's been corrected.
                         </p>
-                        <p>
+                        <p data-i18n="blog.post3_p2">
                             kcore is now positioned as what it is: a modern Proxmox alternative
                             in alpha. The messaging is straightforward — API-first, declarative,
                             built for automation, not production ready. AI agents are first-class
                             citizens in the platform design, but kcore is not an "AI platform."
                         </p>
-                        <p>
+                        <p data-i18n-html="blog.post3_p3">
                             New pages include this blog, a <a href="roadmap.html">detailed roadmap</a>,
                             a <a href="architecture.html">technical architecture overview</a>,
                             and a <a href="faq.html">FAQ</a> that addresses maturity, Proxmox
@@ -81,25 +82,25 @@
                     <div class="blog-meta">
                         <time datetime="2026-02-20">20 February 2026</time>
                     </div>
-                    <h2>Multi-Node Architecture Working</h2>
+                    <h2 data-i18n="blog.post2_title">Multi-Node Architecture Working</h2>
                     <div class="blog-body">
-                        <p>
+                        <p data-i18n="blog.post2_p1">
                             The controller + node-agent architecture is functional. Nodes
                             self-register with the controller on boot and report their
                             capabilities (CPU, memory, storage). The controller tracks
                             cluster state in SQLite and routes VM operations to the
                             appropriate node agent via gRPC.
                         </p>
-                        <p>
+                        <p data-i18n="blog.post2_p2">
                             Current topology: one controller (runs on your workstation or a
                             management node) and N compute nodes. Each compute node runs
                             NixOS with libvirtd and the kcore node-agent service.
                         </p>
-                        <h3>What's next</h3>
+                        <h3 data-i18n="blog.post2_next">What's next</h3>
                         <ul>
-                            <li>mTLS between controller and agents (currently using insecure gRPC for development)</li>
-                            <li>Automatic certificate provisioning on node registration</li>
-                            <li>Node health checks and heartbeat monitoring</li>
+                            <li data-i18n="blog.post2_next_1">mTLS between controller and agents (currently using insecure gRPC for development)</li>
+                            <li data-i18n="blog.post2_next_2">Automatic certificate provisioning on node registration</li>
+                            <li data-i18n="blog.post2_next_3">Node health checks and heartbeat monitoring</li>
                         </ul>
                     </div>
                 </article>
@@ -109,9 +110,9 @@
                     <div class="blog-meta">
                         <time datetime="2026-01-15">15 January 2026</time>
                     </div>
-                    <h2>Why We Started Building kcore</h2>
+                    <h2 data-i18n="blog.post1_title">Why We Started Building kcore</h2>
                     <div class="blog-body">
-                        <p>
+                        <p data-i18n="blog.post1_p1">
                             We've been running Proxmox in production for years. It works. But
                             every time we needed to automate something — provision a VM from
                             CI, template a cluster, reproduce an environment — we hit the
@@ -119,22 +120,22 @@
                             configuration model is imperative. The host OS is mutable Debian
                             with all the drift that implies.
                         </p>
-                        <p>
+                        <p data-i18n="blog.post1_p2">
                             We wanted a virtualization platform that:
                         </p>
                         <ul>
-                            <li>Has an API as its primary interface, not a web UI</li>
-                            <li>Uses declarative configuration — describe what you want, not the steps to get there</li>
-                            <li>Runs on an immutable host OS with atomic updates and instant rollback</li>
-                            <li>Is built for automation from day one — scripts, Terraform, AI agents, whatever tools you use</li>
+                            <li data-i18n="blog.post1_li1">Has an API as its primary interface, not a web UI</li>
+                            <li data-i18n="blog.post1_li2">Uses declarative configuration — describe what you want, not the steps to get there</li>
+                            <li data-i18n="blog.post1_li3">Runs on an immutable host OS with atomic updates and instant rollback</li>
+                            <li data-i18n="blog.post1_li4">Is built for automation from day one — scripts, Terraform, AI agents, whatever tools you use</li>
                         </ul>
-                        <p>
+                        <p data-i18n="blog.post1_p3">
                             Nothing like this existed, so we started building it. kcore is the
                             result. It's very early — alpha, not production ready — but the
                             foundation is solid: Go control plane, NixOS hosts, gRPC APIs,
                             and a clean codebase with no legacy baggage.
                         </p>
-                        <p>
+                        <p data-i18n-html="blog.post1_p4">
                             If you're an operator who thinks about infrastructure this way,
                             <a href="mailto:team@tacconiconsulting.com">we'd like to hear from you</a>.
                         </p>
@@ -149,14 +150,14 @@
     <section class="cta">
         <div class="container">
             <div class="cta-content">
-                <h2>Stay Updated</h2>
-                <p>
+                <h2 data-i18n="blog.cta_title">Stay Updated</h2>
+                <p data-i18n="blog.cta_desc">
                     We post development updates here as we ship. For questions or early
                     access, reach out directly.
                 </p>
                 <div class="cta-buttons">
-                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Contact Us</a>
-                    <a href="roadmap.html" class="btn btn-secondary btn-large">View Roadmap</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large" data-i18n="blog.cta_btn_contact">Contact Us</a>
+                    <a href="roadmap.html" class="btn btn-secondary btn-large" data-i18n="blog.cta_btn_roadmap">View Roadmap</a>
                 </div>
             </div>
         </div>
@@ -167,40 +168,41 @@
         <div class="container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <h4>kcore Hypervisor</h4>
-                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                    <h4 data-i18n="shared.footer.title">kcore Hypervisor</h4>
+                    <p data-i18n="shared.footer.tagline">A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
-                    <h4>Product</h4>
+                    <h4 data-i18n="shared.footer.product">Product</h4>
                     <ul>
-                        <li><a href="features.html">Features</a></li>
-                        <li><a href="architecture.html">Architecture</a></li>
-                        <li><a href="roadmap.html">Roadmap</a></li>
+                        <li><a href="features.html" data-i18n="shared.footer.features">Features</a></li>
+                        <li><a href="architecture.html" data-i18n="shared.footer.architecture">Architecture</a></li>
+                        <li><a href="roadmap.html" data-i18n="shared.footer.roadmap">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Resources</h4>
+                    <h4 data-i18n="shared.footer.resources">Resources</h4>
                     <ul>
-                        <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="faq.html">FAQ</a></li>
-                        <li><a href="blog.html">Blog</a></li>
+                        <li><a href="/docs/" data-i18n="shared.footer.docs">Documentation</a></li>
+                        <li><a href="faq.html" data-i18n="shared.footer.faq">FAQ</a></li>
+                        <li><a href="blog.html" data-i18n="shared.footer.blog">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Project</h4>
+                    <h4 data-i18n="shared.footer.project">Project</h4>
                     <ul>
-                        <li><a href="index.html#early-access">Early Access</a></li>
-                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                        <li><a href="index.html#early-access" data-i18n="shared.footer.early_access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com" data-i18n="shared.footer.contact">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
-                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+                <p data-i18n="shared.footer.copyright">&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company" data-i18n-html="shared.footer.company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
 
     <script src="js/main.js"></script>
+    <script src="js/i18n.js"></script>
 </body>
 </html>

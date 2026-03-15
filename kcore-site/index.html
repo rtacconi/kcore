@@ -11,7 +11,7 @@
     <!-- Alpha Banner -->
     <div class="alpha-banner">
         <span class="alpha-badge">ALPHA</span>
-        kcore is alpha software under active development. Not production ready.
+        <span data-i18n="shared.alpha_banner">kcore is alpha software under active development. Not production ready.</span>
     </div>
 
     <!-- Navigation -->
@@ -22,14 +22,15 @@
                 <span class="logo-tag">hypervisor</span>
             </div>
             <ul class="nav-menu">
-                <li><a href="features.html">Features</a></li>
-                <li><a href="roadmap.html">Roadmap</a></li>
-                <li><a href="architecture.html">Architecture</a></li>
-                <li><a href="faq.html">FAQ</a></li>
-                <li><a href="blog.html">Blog</a></li>
-                <li><a href="/docs/">Docs</a></li>
+                <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
+                <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
+                <li><a href="/docs/" data-i18n="shared.nav.docs">Docs</a></li>
                 <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
-                <li><a href="#early-access" class="btn-primary">Early Access</a></li>
+                <li><button class="lang-toggle-btn" aria-label="Switch language">IT</button></li>
+                <li><a href="#early-access" class="btn-primary" data-i18n="shared.nav.early_access">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -39,20 +40,20 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    A Modern<br>
-                    <span class="gradient-text">Virtualization Alternative</span>
+                    <span data-i18n="index.hero.title_line1">A Modern</span><br>
+                    <span class="gradient-text" data-i18n="index.hero.title_line2">Virtualization Alternative</span>
                 </h1>
-                <p class="hero-subtitle">
+                <p class="hero-subtitle" data-i18n="index.hero.subtitle">
                     kcore is an API-first virtualization platform built for operators who want
                     a cleaner, more programmable way to manage VMs. Declarative configuration,
                     automation-friendly design, and a modern control plane.
                 </p>
-                <div class="hero-alpha-warning">
+                <div class="hero-alpha-warning" data-i18n="index.hero.alpha_warning">
                     Alpha software. Not production ready. For early testers, labs, and design partners.
                 </div>
                 <div class="hero-buttons">
-                    <a href="#early-access" class="btn btn-primary">Request Early Access</a>
-                    <a href="/docs/" class="btn btn-secondary">Read the Docs</a>
+                    <a href="#early-access" class="btn btn-primary" data-i18n="index.hero.btn_early_access">Request Early Access</a>
+                    <a href="/docs/" class="btn btn-secondary" data-i18n="index.hero.btn_docs">Read the Docs</a>
                 </div>
                 <div class="hero-code">
                     <pre><code><span class="code-comment"># Define a VM declaratively</span>
@@ -74,8 +75,8 @@
     <section id="why" class="features">
         <div class="container">
             <div class="section-header">
-                <h2>Why kcore</h2>
-                <p>Virtualization platforms haven't kept up with how operators actually work</p>
+                <h2 data-i18n="index.why.title">Why kcore</h2>
+                <p data-i18n="index.why.subtitle">Virtualization platforms haven't kept up with how operators actually work</p>
             </div>
             <div class="features-grid">
                 <div class="feature-card">
@@ -85,8 +86,8 @@
                             <polyline points="8 6 2 12 8 18"></polyline>
                         </svg>
                     </div>
-                    <h3>API-First Design</h3>
-                    <p>Every operation is available through a gRPC API. No more clicking through web UIs to do what a script should handle.</p>
+                    <h3 data-i18n="index.why.api_first_title">API-First Design</h3>
+                    <p data-i18n="index.why.api_first_desc">Every operation is available through a gRPC API. No more clicking through web UIs to do what a script should handle.</p>
                 </div>
 
                 <div class="feature-card">
@@ -97,8 +98,8 @@
                             <line x1="12" y1="17" x2="12" y2="21"></line>
                         </svg>
                     </div>
-                    <h3>Declarative Configuration</h3>
-                    <p>Define your infrastructure as code. Version control your VMs, networks, and storage. Reproduce environments reliably.</p>
+                    <h3 data-i18n="index.why.declarative_title">Declarative Configuration</h3>
+                    <p data-i18n="index.why.declarative_desc">Define your infrastructure as code. Version control your VMs, networks, and storage. Reproduce environments reliably.</p>
                 </div>
 
                 <div class="feature-card">
@@ -109,8 +110,8 @@
                             <line x1="12" y1="22.08" x2="12" y2="12"></line>
                         </svg>
                     </div>
-                    <h3>Built for Automation</h3>
-                    <p>Designed from the ground up so tools, scripts, and agents can manage infrastructure without human intervention.</p>
+                    <h3 data-i18n="index.why.automation_title">Built for Automation</h3>
+                    <p data-i18n="index.why.automation_desc">Designed from the ground up so tools, scripts, and agents can manage infrastructure without human intervention.</p>
                 </div>
 
                 <div class="feature-card">
@@ -121,8 +122,8 @@
                             <polyline points="2 12 12 17 22 12"></polyline>
                         </svg>
                     </div>
-                    <h3>Immutable Base System</h3>
-                    <p>The host OS is immutable. Updates are atomic with instant rollback. No more broken nodes after a bad upgrade.</p>
+                    <h3 data-i18n="index.why.immutable_title">Immutable Base System</h3>
+                    <p data-i18n="index.why.immutable_desc">The host OS is immutable. Updates are atomic with instant rollback. No more broken nodes after a bad upgrade.</p>
                 </div>
 
                 <div class="feature-card">
@@ -132,8 +133,8 @@
                             <polyline points="12 6 12 12 16 14"></polyline>
                         </svg>
                     </div>
-                    <h3>Modern Architecture</h3>
-                    <p>Go control plane, gRPC APIs, NixOS-based host. No legacy PHP, no Perl scripts, no decades of accumulated cruft.</p>
+                    <h3 data-i18n="index.why.modern_title">Modern Architecture</h3>
+                    <p data-i18n="index.why.modern_desc">Go control plane, gRPC APIs, NixOS-based host. No legacy PHP, no Perl scripts, no decades of accumulated cruft.</p>
                 </div>
 
                 <div class="feature-card">
@@ -142,8 +143,8 @@
                             <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
                         </svg>
                     </div>
-                    <h3>Agent-Friendly</h3>
-                    <p>AI agents are first-class citizens. The platform is designed so automation agents can interact with it naturally through APIs and declarative workflows.</p>
+                    <h3 data-i18n="index.why.agent_title">Agent-Friendly</h3>
+                    <p data-i18n="index.why.agent_desc">AI agents are first-class citizens. The platform is designed so automation agents can interact with it naturally through APIs and declarative workflows.</p>
                 </div>
             </div>
         </div>
@@ -154,8 +155,8 @@
         <div class="container">
             <div class="platform-content">
                 <div class="platform-text">
-                    <h2>What Makes kcore Different</h2>
-                    <p class="section-lead">
+                    <h2 data-i18n="index.different.title">What Makes kcore Different</h2>
+                    <p class="section-lead" data-i18n="index.different.subtitle">
                         Proxmox works. But it was designed in a different era. kcore starts fresh
                         with the assumption that infrastructure should be programmable, reproducible,
                         and managed by software — not just by humans clicking through a web UI.
@@ -164,29 +165,29 @@
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>API-First, Not UI-First</strong>
-                                <p>The API is the primary interface. The UI is a consumer of the API, not the other way around.</p>
+                                <strong data-i18n="index.different.api_first_title">API-First, Not UI-First</strong>
+                                <p data-i18n="index.different.api_first_desc">The API is the primary interface. The UI is a consumer of the API, not the other way around.</p>
                             </div>
                         </li>
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>Declarative Workflows</strong>
-                                <p>Describe what you want. kcore converges to that state. No imperative step-by-step provisioning.</p>
+                                <strong data-i18n="index.different.declarative_title">Declarative Workflows</strong>
+                                <p data-i18n="index.different.declarative_desc">Describe what you want. kcore converges to that state. No imperative step-by-step provisioning.</p>
                             </div>
                         </li>
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>Agents as First-Class Citizens</strong>
-                                <p>The platform is designed so AI agents and automation tools can control it through the same APIs humans use. Machine-friendly by default.</p>
+                                <strong data-i18n="index.different.agents_title">Agents as First-Class Citizens</strong>
+                                <p data-i18n="index.different.agents_desc">The platform is designed so AI agents and automation tools can control it through the same APIs humans use. Machine-friendly by default.</p>
                             </div>
                         </li>
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>Clean Codebase</strong>
-                                <p>Written in Go. No legacy dependencies. No accumulated technical debt from two decades of patches.</p>
+                                <strong data-i18n="index.different.clean_title">Clean Codebase</strong>
+                                <p data-i18n="index.different.clean_desc">Written in Go. No legacy dependencies. No accumulated technical debt from two decades of patches.</p>
                             </div>
                         </li>
                     </ul>
@@ -227,42 +228,42 @@ Network:     192.168.122.100</span>
     <section id="status" class="status-section">
         <div class="container">
             <div class="section-header">
-                <h2>Current Status</h2>
-                <p>Honest about where we are</p>
+                <h2 data-i18n="index.status.title">Current Status</h2>
+                <p data-i18n="index.status.subtitle">Honest about where we are</p>
             </div>
             <div class="status-content">
                 <div class="status-card status-alpha">
-                    <div class="status-label">Project Maturity</div>
-                    <div class="status-value">Alpha</div>
-                    <p>kcore is under active development. Core functionality is being built and tested. APIs and interfaces may change without notice.</p>
+                    <div class="status-label" data-i18n="index.status.maturity_label">Project Maturity</div>
+                    <div class="status-value" data-i18n="index.status.maturity_value">Alpha</div>
+                    <p data-i18n="index.status.maturity_desc">kcore is under active development. Core functionality is being built and tested. APIs and interfaces may change without notice.</p>
                 </div>
                 <div class="status-details">
                     <div class="status-item">
-                        <h4>What works today</h4>
+                        <h4 data-i18n="index.status.works_title">What works today</h4>
                         <ul>
-                            <li>NixOS-based immutable host OS</li>
-                            <li>VM lifecycle management via CLI</li>
-                            <li>gRPC API for programmatic access</li>
-                            <li>Multi-node architecture with controller + agents</li>
-                            <li>Local and LVM storage backends</li>
+                            <li data-i18n="index.status.works_1">NixOS-based immutable host OS</li>
+                            <li data-i18n="index.status.works_2">VM lifecycle management via CLI</li>
+                            <li data-i18n="index.status.works_3">gRPC API for programmatic access</li>
+                            <li data-i18n="index.status.works_4">Multi-node architecture with controller + agents</li>
+                            <li data-i18n="index.status.works_5">Local and LVM storage backends</li>
                         </ul>
                     </div>
                     <div class="status-item">
-                        <h4>What's in progress</h4>
+                        <h4 data-i18n="index.status.progress_title">What's in progress</h4>
                         <ul>
-                            <li>Terraform provider</li>
-                            <li>Networking and bridge management</li>
-                            <li>MCP server for agent integration</li>
-                            <li>Web dashboard</li>
-                            <li>Image management and distribution</li>
+                            <li data-i18n="index.status.progress_1">Terraform provider</li>
+                            <li data-i18n="index.status.progress_2">Networking and bridge management</li>
+                            <li data-i18n="index.status.progress_3">MCP server for agent integration</li>
+                            <li data-i18n="index.status.progress_4">Web dashboard</li>
+                            <li data-i18n="index.status.progress_5">Image management and distribution</li>
                         </ul>
                     </div>
                     <div class="status-item">
-                        <h4>Not recommended for</h4>
+                        <h4 data-i18n="index.status.not_for_title">Not recommended for</h4>
                         <ul>
-                            <li>Production workloads</li>
-                            <li>Business-critical infrastructure</li>
-                            <li>Environments that require stability guarantees</li>
+                            <li data-i18n="index.status.not_for_1">Production workloads</li>
+                            <li data-i18n="index.status.not_for_2">Business-critical infrastructure</li>
+                            <li data-i18n="index.status.not_for_3">Environments that require stability guarantees</li>
                         </ul>
                     </div>
                 </div>
@@ -274,25 +275,25 @@ Network:     192.168.122.100</span>
     <section class="who-section">
         <div class="container">
             <div class="section-header">
-                <h2>Who kcore Is For</h2>
-                <p>Built for people who think about infrastructure differently</p>
+                <h2 data-i18n="index.who.title">Who kcore Is For</h2>
+                <p data-i18n="index.who.subtitle">Built for people who think about infrastructure differently</p>
             </div>
             <div class="features-grid">
                 <div class="feature-card">
-                    <h3>Home Lab Operators</h3>
-                    <p>You run your own hardware and want something cleaner than Proxmox without the complexity of OpenStack. You value simplicity and control.</p>
+                    <h3 data-i18n="index.who.homelab_title">Home Lab Operators</h3>
+                    <p data-i18n="index.who.homelab_desc">You run your own hardware and want something cleaner than Proxmox without the complexity of OpenStack. You value simplicity and control.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Small Hosting &amp; Edge</h3>
-                    <p>You manage a handful of servers for clients or at edge locations. You need something lightweight, scriptable, and easy to reason about.</p>
+                    <h3 data-i18n="index.who.hosting_title">Small Hosting &amp; Edge</h3>
+                    <p data-i18n="index.who.hosting_desc">You manage a handful of servers for clients or at edge locations. You need something lightweight, scriptable, and easy to reason about.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Infrastructure Engineers</h3>
-                    <p>You want to manage VMs the same way you manage everything else — through APIs, version-controlled config, and automation pipelines.</p>
+                    <h3 data-i18n="index.who.engineers_title">Infrastructure Engineers</h3>
+                    <p data-i18n="index.who.engineers_desc">You want to manage VMs the same way you manage everything else — through APIs, version-controlled config, and automation pipelines.</p>
                 </div>
                 <div class="feature-card">
-                    <h3>Early Adopters</h3>
-                    <p>You're comfortable running alpha software. You want to shape the direction of a new virtualization platform and give feedback that matters.</p>
+                    <h3 data-i18n="index.who.early_title">Early Adopters</h3>
+                    <p data-i18n="index.who.early_desc">You're comfortable running alpha software. You want to shape the direction of a new virtualization platform and give feedback that matters.</p>
                 </div>
             </div>
         </div>
@@ -301,8 +302,8 @@ Network:     192.168.122.100</span>
     <!-- Code Example Section -->
     <section class="code-example">
         <div class="container">
-            <h2>Declarative by Default</h2>
-            <p class="section-lead">Define your infrastructure with clean, readable code</p>
+            <h2 data-i18n="index.code.title">Declarative by Default</h2>
+            <p class="section-lead" data-i18n="index.code.subtitle">Define your infrastructure with clean, readable code</p>
             <div class="code-tabs">
                 <button class="tab-button active" data-tab="terraform">Terraform</button>
                 <button class="tab-button" data-tab="yaml">YAML</button>
@@ -345,16 +346,16 @@ Network:     192.168.122.100</span>
     <section id="early-access" class="cta">
         <div class="container">
             <div class="cta-content">
-                <h2>Interested in Testing kcore?</h2>
-                <p>
+                <h2 data-i18n="index.cta.title">Interested in Testing kcore?</h2>
+                <p data-i18n="index.cta.desc">
                     kcore is alpha software. We're looking for early testers, design partners,
                     and operators who want to help shape a modern virtualization platform.
                 </p>
                 <div class="cta-buttons">
-                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Request Early Access</a>
-                    <a href="/docs/" class="btn btn-secondary btn-large">Read the Docs</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large" data-i18n="index.cta.btn_access">Request Early Access</a>
+                    <a href="/docs/" class="btn btn-secondary btn-large" data-i18n="index.cta.btn_docs">Read the Docs</a>
                 </div>
-                <p class="cta-note">
+                <p class="cta-note" data-i18n="index.cta.note">
                     Suitable for experimentation, home labs, and early design partners only.
                     Not for production use.
                 </p>
@@ -368,39 +369,40 @@ Network:     192.168.122.100</span>
             <div class="footer-content">
                 <div class="footer-section">
                     <h4>kcore Hypervisor</h4>
-                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                    <p data-i18n="shared.footer.description">A modern virtualization alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
-                    <h4>Product</h4>
+                    <h4 data-i18n="shared.footer.product">Product</h4>
                     <ul>
-                        <li><a href="features.html">Features</a></li>
-                        <li><a href="architecture.html">Architecture</a></li>
-                        <li><a href="roadmap.html">Roadmap</a></li>
+                        <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                        <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                        <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Resources</h4>
+                    <h4 data-i18n="shared.footer.resources">Resources</h4>
                     <ul>
-                        <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="faq.html">FAQ</a></li>
-                        <li><a href="blog.html">Blog</a></li>
+                        <li><a href="/docs/" data-i18n="shared.footer.documentation">Documentation</a></li>
+                        <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                        <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Project</h4>
+                    <h4 data-i18n="shared.footer.project">Project</h4>
                     <ul>
-                        <li><a href="#early-access">Early Access</a></li>
-                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                        <li><a href="#early-access" data-i18n="shared.nav.early_access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com" data-i18n="shared.footer.contact">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
-                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+                <p data-i18n="shared.footer.copyright">&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company" data-i18n-html="shared.footer.company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
 
     <script src="js/main.js"></script>
+    <script src="js/i18n.js"></script>
 </body>
 </html>

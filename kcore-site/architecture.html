@@ -11,7 +11,7 @@
     <!-- Alpha Banner -->
     <div class="alpha-banner">
         <span class="alpha-badge">ALPHA</span>
-        kcore is alpha software under active development. Not production ready.
+        <span data-i18n="shared.alpha_banner">kcore is alpha software under active development. Not production ready.</span>
     </div>
 
     <!-- Navigation -->
@@ -24,14 +24,15 @@
                 </a>
             </div>
             <ul class="nav-menu">
-                <li><a href="features.html">Features</a></li>
-                <li><a href="roadmap.html">Roadmap</a></li>
-                <li><a href="architecture.html">Architecture</a></li>
-                <li><a href="faq.html">FAQ</a></li>
-                <li><a href="blog.html">Blog</a></li>
-                <li><a href="/docs/">Docs</a></li>
+                <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
+                <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
+                <li><a href="/docs/" data-i18n="shared.nav.docs">Docs</a></li>
                 <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
-                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+                <li><button class="lang-toggle-btn" aria-label="Switch language">IT</button></li>
+                <li><a href="index.html#early-access" class="btn-primary" data-i18n="shared.nav.early_access">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -39,8 +40,8 @@
     <!-- Hero -->
     <section class="page-hero">
         <div class="container">
-            <h1>Technical Architecture</h1>
-            <p>How kcore is built. Go control plane, NixOS host, gRPC APIs, multi-node topology.</p>
+            <h1 data-i18n="architecture.hero_title">Technical Architecture</h1>
+            <p data-i18n="architecture.hero_subtitle">How kcore is built. Go control plane, NixOS host, gRPC APIs, multi-node topology.</p>
         </div>
     </section>
 
@@ -48,14 +49,14 @@
     <section class="page-section">
         <div class="container">
             <div class="prose">
-                <h2>Overview</h2>
-                <p>
+                <h2 data-i18n="architecture.overview_title">Overview</h2>
+                <p data-i18n="architecture.overview_p1">
                     kcore is a virtualization platform with a distributed architecture.
                     A central controller manages cluster state while node agents run on
                     each physical machine, managing VMs through libvirt. All communication
                     is via gRPC with mTLS.
                 </p>
-                <p>
+                <p data-i18n="architecture.overview_p2">
                     The host OS is NixOS — fully declarative and immutable at runtime.
                     The control plane is written in Go. There is no PHP, no Perl, no
                     legacy web framework. The API is the product.
@@ -67,7 +68,7 @@
     <!-- System Topology -->
     <section class="page-section alt-bg">
         <div class="container">
-            <h2 class="section-title">System Topology</h2>
+            <h2 class="section-title" data-i18n="architecture.topology_title">System Topology</h2>
             <div class="arch-diagram">
                 <div class="arch-tier">
                     <div class="arch-box arch-highlight">
@@ -114,8 +115,8 @@
         <div class="container">
             <div class="arch-detail-grid">
                 <div class="arch-detail-text">
-                    <h2>Control Plane</h2>
-                    <p>
+                    <h2 data-i18n="architecture.control_title">Control Plane</h2>
+                    <p data-i18n="architecture.control_desc">
                         The controller is a single Go binary that manages cluster state.
                         It exposes a gRPC API that the CLI, Terraform provider, MCP server,
                         and any other tooling consumes.
@@ -182,8 +183,8 @@
         <div class="container">
             <div class="arch-detail-grid reverse">
                 <div class="arch-detail-text">
-                    <h2>NixOS Host</h2>
-                    <p>
+                    <h2 data-i18n="architecture.nixos_title">NixOS Host</h2>
+                    <p data-i18n="architecture.nixos_desc">
                         Each compute node runs NixOS. The entire system configuration is
                         defined in Nix — packages, services, network, storage. The system
                         is immutable at runtime. Changes require a rebuild that produces
@@ -256,8 +257,8 @@
         <div class="container">
             <div class="arch-detail-grid">
                 <div class="arch-detail-text">
-                    <h2>gRPC API Design</h2>
-                    <p>
+                    <h2 data-i18n="architecture.grpc_title">gRPC API Design</h2>
+                    <p data-i18n="architecture.grpc_desc">
                         The API is the primary interface to kcore. Everything the CLI can do,
                         the API can do. Everything a Terraform provider needs, the API provides.
                         AI agents interact through the same API — no special endpoints, no
@@ -321,23 +322,23 @@
     <!-- Storage -->
     <section class="page-section alt-bg">
         <div class="container">
-            <h2 class="section-title">Storage Architecture</h2>
-            <p class="section-subtitle">Use the storage backend that fits your hardware and use case.</p>
+            <h2 class="section-title" data-i18n="architecture.storage_title">Storage Architecture</h2>
+            <p class="section-subtitle" data-i18n="architecture.storage_subtitle">Use the storage backend that fits your hardware and use case.</p>
             <div class="features-grid" style="margin-top: 2rem;">
                 <div class="feature-card">
-                    <h3>Local Directory</h3>
-                    <p>Store VM disk images as files on a local filesystem. Simple, fast, no dependencies. Good for single-node setups and home labs.</p>
-                    <span class="milestone-tag done">Available</span>
+                    <h3 data-i18n="architecture.storage_local">Local Directory</h3>
+                    <p data-i18n="architecture.storage_local_desc">Store VM disk images as files on a local filesystem. Simple, fast, no dependencies. Good for single-node setups and home labs.</p>
+                    <span class="milestone-tag done" data-i18n="architecture.available">Available</span>
                 </div>
                 <div class="feature-card">
-                    <h3>LVM</h3>
-                    <p>Logical Volume Manager for flexible disk allocation. Thin provisioning, snapshots. Recommended for multi-VM hosts.</p>
-                    <span class="milestone-tag done">Available</span>
+                    <h3 data-i18n="architecture.storage_lvm">LVM</h3>
+                    <p data-i18n="architecture.storage_lvm_desc">Logical Volume Manager for flexible disk allocation. Thin provisioning, snapshots. Recommended for multi-VM hosts.</p>
+                    <span class="milestone-tag done" data-i18n="architecture.available">Available</span>
                 </div>
                 <div class="feature-card">
-                    <h3>ZFS</h3>
-                    <p>Copy-on-write filesystem with built-in snapshots, compression, and checksumming. Ideal for data integrity and advanced storage needs.</p>
-                    <span class="milestone-tag planned">Planned</span>
+                    <h3 data-i18n="architecture.storage_zfs">ZFS</h3>
+                    <p data-i18n="architecture.storage_zfs_desc">Copy-on-write filesystem with built-in snapshots, compression, and checksumming. Ideal for data integrity and advanced storage needs.</p>
+                    <span class="milestone-tag planned" data-i18n="architecture.planned">Planned</span>
                 </div>
             </div>
         </div>
@@ -346,28 +347,28 @@
     <!-- API Consumers -->
     <section class="page-section">
         <div class="container">
-            <h2 class="section-title">API Consumers</h2>
-            <p class="section-subtitle">The same API serves every interface. No special cases.</p>
+            <h2 class="section-title" data-i18n="architecture.consumers_title">API Consumers</h2>
+            <p class="section-subtitle" data-i18n="architecture.consumers_subtitle">The same API serves every interface. No special cases.</p>
             <div class="features-grid" style="margin-top: 2rem;">
                 <div class="feature-card">
-                    <h3>kctl CLI</h3>
-                    <p>Primary operator tool. Create, manage, and inspect VMs and nodes. Thin wrapper around the gRPC API.</p>
-                    <span class="milestone-tag done">Available</span>
+                    <h3 data-i18n="architecture.consumer_kctl">kctl CLI</h3>
+                    <p data-i18n="architecture.consumer_kctl_desc">Primary operator tool. Create, manage, and inspect VMs and nodes. Thin wrapper around the gRPC API.</p>
+                    <span class="milestone-tag done" data-i18n="architecture.available">Available</span>
                 </div>
                 <div class="feature-card">
-                    <h3>Terraform Provider</h3>
-                    <p>Manage kcore resources as infrastructure as code. Integrates with existing Terraform workflows.</p>
-                    <span class="milestone-tag in-progress">In Progress</span>
+                    <h3 data-i18n="architecture.consumer_terraform">Terraform Provider</h3>
+                    <p data-i18n="architecture.consumer_terraform_desc">Manage kcore resources as infrastructure as code. Integrates with existing Terraform workflows.</p>
+                    <span class="milestone-tag in-progress" data-i18n="architecture.in_progress">In Progress</span>
                 </div>
                 <div class="feature-card">
-                    <h3>MCP Server</h3>
-                    <p>Model Context Protocol server for AI agent integration. Agents query and manage infrastructure through structured tools.</p>
-                    <span class="milestone-tag in-progress">In Progress</span>
+                    <h3 data-i18n="architecture.consumer_mcp">MCP Server</h3>
+                    <p data-i18n="architecture.consumer_mcp_desc">Model Context Protocol server for AI agent integration. Agents query and manage infrastructure through structured tools.</p>
+                    <span class="milestone-tag in-progress" data-i18n="architecture.in_progress">In Progress</span>
                 </div>
                 <div class="feature-card">
-                    <h3>Web Dashboard</h3>
-                    <p>Read-only cluster visibility. The dashboard consumes the API — it does not have special access.</p>
-                    <span class="milestone-tag planned">Planned</span>
+                    <h3 data-i18n="architecture.consumer_dashboard">Web Dashboard</h3>
+                    <p data-i18n="architecture.consumer_dashboard_desc">Read-only cluster visibility. The dashboard consumes the API — it does not have special access.</p>
+                    <span class="milestone-tag planned" data-i18n="architecture.planned">Planned</span>
                 </div>
             </div>
         </div>
@@ -377,14 +378,14 @@
     <section class="cta">
         <div class="container">
             <div class="cta-content">
-                <h2>Want to Dig Deeper?</h2>
-                <p>
+                <h2 data-i18n="architecture.cta_title">Want to Dig Deeper?</h2>
+                <p data-i18n="architecture.cta_desc">
                     Read the documentation for setup guides, API reference, and CLI usage.
                     Or reach out if you want to discuss the architecture.
                 </p>
                 <div class="cta-buttons">
-                    <a href="/docs/" class="btn btn-primary btn-large">Read the Docs</a>
-                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-secondary btn-large">Contact Us</a>
+                    <a href="/docs/" class="btn btn-primary btn-large" data-i18n="architecture.cta_btn_docs">Read the Docs</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-secondary btn-large" data-i18n="architecture.cta_btn_contact">Contact Us</a>
                 </div>
             </div>
         </div>
@@ -396,39 +397,40 @@
             <div class="footer-content">
                 <div class="footer-section">
                     <h4>kcore Hypervisor</h4>
-                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                    <p data-i18n="shared.footer.description">A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
-                    <h4>Product</h4>
+                    <h4 data-i18n="shared.footer.product">Product</h4>
                     <ul>
-                        <li><a href="features.html">Features</a></li>
-                        <li><a href="architecture.html">Architecture</a></li>
-                        <li><a href="roadmap.html">Roadmap</a></li>
+                        <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                        <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                        <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Resources</h4>
+                    <h4 data-i18n="shared.footer.resources">Resources</h4>
                     <ul>
-                        <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="faq.html">FAQ</a></li>
-                        <li><a href="blog.html">Blog</a></li>
+                        <li><a href="/docs/" data-i18n="shared.footer.documentation">Documentation</a></li>
+                        <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                        <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Project</h4>
+                    <h4 data-i18n="shared.footer.project">Project</h4>
                     <ul>
-                        <li><a href="index.html#early-access">Early Access</a></li>
-                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                        <li><a href="index.html#early-access" data-i18n="shared.nav.early_access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com" data-i18n="shared.footer.contact">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
-                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+                <p data-i18n="shared.footer.copyright">&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company" data-i18n-html="shared.footer.company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
 
     <script src="js/main.js"></script>
+    <script src="js/i18n.js"></script>
 </body>
 </html>

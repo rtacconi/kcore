@@ -11,7 +11,7 @@
     <!-- Alpha Banner -->
     <div class="alpha-banner">
         <span class="alpha-badge">ALPHA</span>
-        kcore is alpha software under active development. Not production ready.
+        <span data-i18n="shared.alpha_banner">kcore is alpha software under active development. Not production ready.</span>
     </div>
 
     <!-- Navigation -->
@@ -24,14 +24,15 @@
                 </a>
             </div>
             <ul class="nav-menu">
-                <li><a href="features.html">Features</a></li>
-                <li><a href="roadmap.html">Roadmap</a></li>
-                <li><a href="architecture.html">Architecture</a></li>
-                <li><a href="faq.html">FAQ</a></li>
-                <li><a href="blog.html">Blog</a></li>
-                <li><a href="/docs/">Docs</a></li>
+                <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
+                <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
+                <li><a href="/docs/" data-i18n="shared.nav.docs">Docs</a></li>
                 <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
-                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+                <li><button class="lang-toggle-btn" aria-label="Switch language">IT</button></li>
+                <li><a href="index.html#early-access" class="btn-primary" data-i18n="shared.nav.early_access">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -39,23 +40,23 @@
     <!-- Hero -->
     <section class="page-hero">
         <div class="container">
-            <h1>Frequently Asked Questions</h1>
-            <p>Honest answers about kcore — what it is, what it isn't, and where it's going.</p>
+            <h1 data-i18n="faq.hero_title">Frequently Asked Questions</h1>
+            <p data-i18n="faq.hero_subtitle">Honest answers about kcore — what it is, what it isn't, and where it's going.</p>
         </div>
     </section>
 
     <!-- General -->
     <section class="page-section">
         <div class="container">
-            <h2 class="faq-category">General</h2>
+            <h2 class="faq-category" data-i18n="faq.cat_general">General</h2>
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What is kcore?</span>
+                    <span data-i18n="faq.q_what">What is kcore?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_what">
                         kcore is a virtualization platform — a modern alternative to Proxmox.
                         It lets you manage VMs on bare metal servers using an API-first,
                         declarative approach. The host OS is NixOS (immutable), the control
@@ -66,11 +67,11 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Is kcore production ready?</span>
+                    <span data-i18n="faq.q_production">Is kcore production ready?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_production">
                         No. kcore is alpha software. It is under active development and APIs
                         may change without notice. It is suitable for experimentation, home
                         labs, and early design partners. Do not use it for production workloads
@@ -81,18 +82,18 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>How does kcore compare to Proxmox?</span>
+                    <span data-i18n="faq.q_compare">How does kcore compare to Proxmox?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_compare_p1">
                         Proxmox is a mature, battle-tested platform with a large community.
                         kcore is not trying to replicate Proxmox feature-for-feature. Instead,
                         it takes a different architectural approach: API-first (not UI-first),
                         declarative configuration, immutable host OS, and first-class support
                         for automation agents.
                     </p>
-                    <p>
+                    <p data-i18n="faq.a_compare_p2">
                         Proxmox is the right choice if you need production stability today.
                         kcore is for operators who want a cleaner, more programmable foundation
                         and are willing to test alpha software.
@@ -102,11 +103,11 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Who is building kcore?</span>
+                    <span data-i18n="faq.q_who_builds">Who is building kcore?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n-html="faq.a_who_builds">
                         kcore is built by <a href="https://tacconiconsulting.com/">Tacconi Consulting Ltd</a>,
                         a platform engineering consultancy based in England. We build and
                         operate infrastructure for a living — kcore comes from real experience
@@ -120,15 +121,15 @@
     <!-- Maturity & Status -->
     <section class="page-section alt-bg">
         <div class="container">
-            <h2 class="faq-category">Maturity &amp; Status</h2>
+            <h2 class="faq-category" data-i18n="faq.cat_maturity">Maturity &amp; Status</h2>
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What does "alpha" mean in practice?</span>
+                    <span data-i18n="faq.q_alpha_means">What does "alpha" mean in practice?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_alpha_means">
                         Alpha means: core functionality works but is incomplete. APIs and
                         configuration formats may change between releases. There is no
                         stability guarantee. Things may break. We fix things quickly, but
@@ -139,7 +140,7 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What works today?</span>
+                    <span data-i18n="faq.q_works_today">What works today?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
@@ -156,11 +157,11 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>When will kcore reach beta?</span>
+                    <span data-i18n="faq.q_when_beta">When will kcore reach beta?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n-html="faq.a_when_beta">
                         We don't set arbitrary deadlines. Beta means: the Terraform provider
                         works, networking is solid, the API is stable enough to build on,
                         and there's a web dashboard for visibility. Check the
@@ -171,17 +172,17 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Can I use kcore in my home lab right now?</span>
+                    <span data-i18n="faq.q_homelab">Can I use kcore in my home lab right now?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_homelab_p1">
                         Yes, with caveats. If you are comfortable with alpha software, know
                         your way around NixOS, and don't mind things changing — kcore works
                         for home lab experimentation. Build the ISO, boot from USB, install
                         to disk, and start creating VMs.
                     </p>
-                    <p>
+                    <p data-i18n="faq.a_homelab_p2">
                         If you need something stable for important workloads, use Proxmox
                         for now and keep an eye on kcore.
                     </p>
@@ -193,15 +194,15 @@
     <!-- Migration -->
     <section class="page-section">
         <div class="container">
-            <h2 class="faq-category">Proxmox &amp; Migration</h2>
+            <h2 class="faq-category" data-i18n="faq.cat_migration">Proxmox &amp; Migration</h2>
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Can I migrate from Proxmox to kcore?</span>
+                    <span data-i18n="faq.q_migrate">Can I migrate from Proxmox to kcore?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_migrate">
                         Not yet. There is no automated migration path from Proxmox to kcore.
                         kcore is alpha software and not a drop-in replacement. When kcore
                         reaches a more mature state, we plan to document migration strategies
@@ -212,11 +213,11 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Can I run kcore alongside Proxmox?</span>
+                    <span data-i18n="faq.q_alongside">Can I run kcore alongside Proxmox?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_alongside">
                         Yes. kcore installs on separate hardware. You can run a kcore node
                         on a spare machine or dedicated test server while keeping your
                         Proxmox cluster running. They don't interact with each other.
@@ -226,11 +227,11 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What about VMware refugees?</span>
+                    <span data-i18n="faq.q_vmware">What about VMware refugees?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_vmware">
                         If you're looking for a VMware exit path today, Proxmox is the
                         pragmatic choice — it's mature and production-ready. kcore is a
                         longer-term option for operators who want a more modern, programmable
@@ -245,15 +246,15 @@
     <!-- Technical -->
     <section class="page-section alt-bg">
         <div class="container">
-            <h2 class="faq-category">Technical</h2>
+            <h2 class="faq-category" data-i18n="faq.cat_technical">Technical</h2>
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What hardware does kcore require?</span>
+                    <span data-i18n="faq.q_hardware">What hardware does kcore require?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_hardware">
                         Any x86_64 machine with hardware virtualization support (Intel VT-x
                         or AMD-V). At minimum: 4GB RAM, 1 NIC, 1 disk. For useful
                         VM workloads, 16GB+ RAM and SSD storage is recommended.
@@ -263,18 +264,18 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Why NixOS instead of Debian or Ubuntu?</span>
+                    <span data-i18n="faq.q_why_nixos">Why NixOS instead of Debian or Ubuntu?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_why_nixos_p1">
                         NixOS gives us properties that matter for a hypervisor host:
                         immutable system state, atomic updates, instant rollback, and
                         reproducible builds. Every node built from the same flake is
                         identical. There is no configuration drift. A bad update is a
                         reboot away from being undone.
                     </p>
-                    <p>
+                    <p data-i18n="faq.a_why_nixos_p2">
                         Debian and Ubuntu are mutable — packages update in place, config
                         files drift, and rollback is manual. Proxmox inherits these
                         properties from Debian. We chose differently.
@@ -284,17 +285,17 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Why gRPC instead of REST?</span>
+                    <span data-i18n="faq.q_why_grpc">Why gRPC instead of REST?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_why_grpc_p1">
                         gRPC with Protocol Buffers gives us typed schemas, code generation,
                         streaming, and efficient binary serialization. It's better for
                         machine-to-machine communication — which is what matters when your
                         API is the primary interface, not a web UI backend.
                     </p>
-                    <p>
+                    <p data-i18n="faq.a_why_grpc_p2">
                         Clients can be generated in Go, Python, Rust, TypeScript, and
                         other languages directly from the proto definitions. Agents get
                         structured data, not JSON blobs to parse.
@@ -304,18 +305,18 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What does "AI agents are first-class citizens" mean?</span>
+                    <span data-i18n="faq.q_ai_agents">What does "AI agents are first-class citizens" mean?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_ai_agents_p1">
                         It means the platform is designed so automation agents — including
                         AI agents — can interact with it through the same APIs humans use.
                         There is no GUI-only workflow. The API has structured, typed inputs
                         and outputs. The MCP server (in development) lets AI agents discover
                         and use kcore operations through a standard protocol.
                     </p>
-                    <p>
+                    <p data-i18n="faq.a_ai_agents_p2">
                         This is not "AI-powered infrastructure" marketing. It's a design
                         principle: if software can't control it programmatically, it's a
                         usability bug.
@@ -328,15 +329,15 @@
     <!-- Licensing -->
     <section class="page-section">
         <div class="container">
-            <h2 class="faq-category">Licensing</h2>
+            <h2 class="faq-category" data-i18n="faq.cat_licensing">Licensing</h2>
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>What license is kcore released under?</span>
+                    <span data-i18n="faq.q_license">What license is kcore released under?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n-html="faq.a_license">
                         Licensing details will be published as the project approaches beta.
                         The intent is to keep kcore usable for individuals, home labs, and
                         small operators without restrictive licensing. Contact us at
@@ -348,11 +349,11 @@
 
             <div class="faq-item">
                 <button class="faq-question" aria-expanded="false">
-                    <span>Will there be a paid version?</span>
+                    <span data-i18n="faq.q_paid">Will there be a paid version?</span>
                     <svg class="faq-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
                 </button>
                 <div class="faq-answer">
-                    <p>
+                    <p data-i18n="faq.a_paid">
                         The business model is not finalised. If there is a paid tier, it
                         will be for commercial support, enterprise features, or managed
                         services — not for gating core functionality. We'll be transparent
@@ -367,11 +368,11 @@
     <section class="cta">
         <div class="container">
             <div class="cta-content">
-                <h2>Have a Question We Didn't Cover?</h2>
-                <p>Reach out. We're happy to answer questions about kcore, its architecture, or where it's headed.</p>
+                <h2 data-i18n="faq.cta_title">Have a Question We Didn't Cover?</h2>
+                <p data-i18n="faq.cta_desc">Reach out. We're happy to answer questions about kcore, its architecture, or where it's headed.</p>
                 <div class="cta-buttons">
-                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Ask Us</a>
-                    <a href="/docs/" class="btn btn-secondary btn-large">Read the Docs</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large" data-i18n="faq.cta_btn_ask">Ask Us</a>
+                    <a href="/docs/" class="btn btn-secondary btn-large" data-i18n="faq.cta_btn_docs">Read the Docs</a>
                 </div>
             </div>
         </div>
@@ -382,41 +383,42 @@
         <div class="container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <h4>kcore Hypervisor</h4>
-                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                    <h4 data-i18n="shared.footer.title">kcore Hypervisor</h4>
+                    <p data-i18n="shared.footer.tagline">A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
-                    <h4>Product</h4>
+                    <h4 data-i18n="shared.footer.product">Product</h4>
                     <ul>
-                        <li><a href="features.html">Features</a></li>
-                        <li><a href="architecture.html">Architecture</a></li>
-                        <li><a href="roadmap.html">Roadmap</a></li>
+                        <li><a href="features.html" data-i18n="shared.footer.features">Features</a></li>
+                        <li><a href="architecture.html" data-i18n="shared.footer.architecture">Architecture</a></li>
+                        <li><a href="roadmap.html" data-i18n="shared.footer.roadmap">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Resources</h4>
+                    <h4 data-i18n="shared.footer.resources">Resources</h4>
                     <ul>
-                        <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="faq.html">FAQ</a></li>
-                        <li><a href="blog.html">Blog</a></li>
+                        <li><a href="/docs/" data-i18n="shared.footer.docs">Documentation</a></li>
+                        <li><a href="faq.html" data-i18n="shared.footer.faq">FAQ</a></li>
+                        <li><a href="blog.html" data-i18n="shared.footer.blog">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Project</h4>
+                    <h4 data-i18n="shared.footer.project">Project</h4>
                     <ul>
-                        <li><a href="index.html#early-access">Early Access</a></li>
-                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                        <li><a href="index.html#early-access" data-i18n="shared.footer.early_access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com" data-i18n="shared.footer.contact">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
-                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+                <p data-i18n="shared.footer.copyright">&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company" data-i18n-html="shared.footer.company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
 
     <script src="js/main.js"></script>
+    <script src="js/i18n.js"></script>
     <script>
     document.querySelectorAll('.faq-question').forEach(button => {
         button.addEventListener('click', () => {

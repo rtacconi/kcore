@@ -11,7 +11,7 @@
     <!-- Alpha Banner -->
     <div class="alpha-banner">
         <span class="alpha-badge">ALPHA</span>
-        kcore is alpha software under active development. Not production ready.
+        <span data-i18n="shared.alpha_banner">kcore is alpha software under active development. Not production ready.</span>
     </div>
 
     <!-- Navigation -->
@@ -24,14 +24,15 @@
                 </a>
             </div>
             <ul class="nav-menu">
-                <li><a href="features.html">Features</a></li>
-                <li><a href="roadmap.html">Roadmap</a></li>
-                <li><a href="architecture.html">Architecture</a></li>
-                <li><a href="faq.html">FAQ</a></li>
-                <li><a href="blog.html">Blog</a></li>
-                <li><a href="/docs/">Docs</a></li>
+                <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
+                <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
+                <li><a href="/docs/" data-i18n="shared.nav.docs">Docs</a></li>
                 <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
-                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+                <li><button class="lang-toggle-btn" aria-label="Switch language">IT</button></li>
+                <li><a href="index.html#early-access" class="btn-primary" data-i18n="shared.nav.early_access">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -39,8 +40,8 @@
     <!-- Hero -->
     <section class="page-hero">
         <div class="container">
-            <h1>Roadmap</h1>
-            <p>Where kcore is today and where it's headed. Updated as development progresses.</p>
+            <h1 data-i18n="roadmap.hero_title">Roadmap</h1>
+            <p data-i18n="roadmap.hero_subtitle">Where kcore is today and where it's headed. Updated as development progresses.</p>
         </div>
     </section>
 
@@ -48,12 +49,12 @@
     <section class="page-section">
         <div class="container">
             <div class="prose">
-                <p>
+                <p data-i18n="roadmap.intro_p1">
                     kcore is alpha software. The roadmap below reflects current development
                     priorities but is subject to change. We ship when things are ready, not
                     to hit artificial dates.
                 </p>
-                <p>
+                <p data-i18n="roadmap.intro_p2">
                     Milestones are grouped into phases. Each phase builds on the previous one.
                     We won't skip ahead — foundations matter.
                 </p>
@@ -66,9 +67,9 @@
         <div class="container">
             <div class="roadmap-phase">
                 <div class="phase-header">
-                    <span class="phase-badge phase-current">Current Phase</span>
-                    <h2>Alpha — Foundation</h2>
-                    <p>Core platform architecture, basic VM lifecycle, CLI tooling.</p>
+                    <span class="phase-badge phase-current" data-i18n="roadmap.phase1_badge">Current Phase</span>
+                    <h2 data-i18n="roadmap.phase1_title">Alpha — Foundation</h2>
+                    <p data-i18n="roadmap.phase1_desc">Core platform architecture, basic VM lifecycle, CLI tooling.</p>
                 </div>
                 <div class="milestone-list">
                     <div class="milestone done">
@@ -77,9 +78,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>NixOS-based immutable host OS</h4>
-                            <p>Declarative host configuration with atomic updates and generation-based rollback.</p>
-                            <span class="milestone-tag done">Done</span>
+                            <h4 data-i18n="roadmap.m_nixos">NixOS-based immutable host OS</h4>
+                            <p data-i18n="roadmap.m_nixos_desc">Declarative host configuration with atomic updates and generation-based rollback.</p>
+                            <span class="milestone-tag done" data-i18n="roadmap.tag_done">Done</span>
                         </div>
                     </div>
                     <div class="milestone done">
@@ -88,9 +89,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>VM lifecycle management (kctl)</h4>
-                            <p>Create, start, stop, delete VMs from the command line. Basic CRUD operations.</p>
-                            <span class="milestone-tag done">Done</span>
+                            <h4 data-i18n="roadmap.m_vm">VM lifecycle management (kctl)</h4>
+                            <p data-i18n="roadmap.m_vm_desc">Create, start, stop, delete VMs from the command line. Basic CRUD operations.</p>
+                            <span class="milestone-tag done" data-i18n="roadmap.tag_done">Done</span>
                         </div>
                     </div>
                     <div class="milestone done">
@@ -99,9 +100,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>gRPC API</h4>
-                            <p>Typed API for programmatic access. All CLI operations available via API.</p>
-                            <span class="milestone-tag done">Done</span>
+                            <h4 data-i18n="roadmap.m_grpc">gRPC API</h4>
+                            <p data-i18n="roadmap.m_grpc_desc">Typed API for programmatic access. All CLI operations available via API.</p>
+                            <span class="milestone-tag done" data-i18n="roadmap.tag_done">Done</span>
                         </div>
                     </div>
                     <div class="milestone done">
@@ -110,9 +111,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Multi-node architecture</h4>
-                            <p>Controller + node-agent topology. Nodes self-register with the controller on boot.</p>
-                            <span class="milestone-tag done">Done</span>
+                            <h4 data-i18n="roadmap.m_multinode">Multi-node architecture</h4>
+                            <p data-i18n="roadmap.m_multinode_desc">Controller + node-agent topology. Nodes self-register with the controller on boot.</p>
+                            <span class="milestone-tag done" data-i18n="roadmap.tag_done">Done</span>
                         </div>
                     </div>
                     <div class="milestone done">
@@ -121,9 +122,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Local and LVM storage</h4>
-                            <p>Store VM disks on local directories or LVM volumes.</p>
-                            <span class="milestone-tag done">Done</span>
+                            <h4 data-i18n="roadmap.m_storage">Local and LVM storage</h4>
+                            <p data-i18n="roadmap.m_storage_desc">Store VM disks on local directories or LVM volumes.</p>
+                            <span class="milestone-tag done" data-i18n="roadmap.tag_done">Done</span>
                         </div>
                     </div>
                     <div class="milestone in-progress">
@@ -132,9 +133,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Networking and bridge management</h4>
-                            <p>Automated bridge setup, VLAN support, network configuration for VMs.</p>
-                            <span class="milestone-tag in-progress">In Progress</span>
+                            <h4 data-i18n="roadmap.m_networking">Networking and bridge management</h4>
+                            <p data-i18n="roadmap.m_networking_desc">Automated bridge setup, VLAN support, network configuration for VMs.</p>
+                            <span class="milestone-tag in-progress" data-i18n="roadmap.tag_progress">In Progress</span>
                         </div>
                     </div>
                     <div class="milestone in-progress">
@@ -143,9 +144,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Image management</h4>
-                            <p>Download, cache, and manage OS images. Support for cloud-init enabled images.</p>
-                            <span class="milestone-tag in-progress">In Progress</span>
+                            <h4 data-i18n="roadmap.m_images">Image management</h4>
+                            <p data-i18n="roadmap.m_images_desc">Download, cache, and manage OS images. Support for cloud-init enabled images.</p>
+                            <span class="milestone-tag in-progress" data-i18n="roadmap.tag_progress">In Progress</span>
                         </div>
                     </div>
                     <div class="milestone in-progress">
@@ -154,9 +155,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>mTLS between controller and nodes</h4>
-                            <p>Encrypted, authenticated communication across the cluster.</p>
-                            <span class="milestone-tag in-progress">In Progress</span>
+                            <h4 data-i18n="roadmap.m_mtls">mTLS between controller and nodes</h4>
+                            <p data-i18n="roadmap.m_mtls_desc">Encrypted, authenticated communication across the cluster.</p>
+                            <span class="milestone-tag in-progress" data-i18n="roadmap.tag_progress">In Progress</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -165,9 +166,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>YAML-based VM specs (kctl apply)</h4>
-                            <p>Declarative VM definitions applied from files, similar to kubectl apply.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_yaml">YAML-based VM specs (kctl apply)</h4>
+                            <p data-i18n="roadmap.m_yaml_desc">Declarative VM definitions applied from files, similar to kubectl apply.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                 </div>
@@ -180,9 +181,9 @@
         <div class="container">
             <div class="roadmap-phase">
                 <div class="phase-header">
-                    <span class="phase-badge phase-next">Next</span>
-                    <h2>Late Alpha — Automation &amp; Integrations</h2>
-                    <p>Terraform provider, MCP server, and the tooling that makes kcore programmable.</p>
+                    <span class="phase-badge phase-next" data-i18n="roadmap.phase2_badge">Next</span>
+                    <h2 data-i18n="roadmap.phase2_title">Late Alpha — Automation &amp; Integrations</h2>
+                    <p data-i18n="roadmap.phase2_desc">Terraform provider, MCP server, and the tooling that makes kcore programmable.</p>
                 </div>
                 <div class="milestone-list">
                     <div class="milestone in-progress">
@@ -191,9 +192,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Terraform provider</h4>
-                            <p>Manage kcore VMs, networks, and storage through Terraform. Declarative infrastructure as code.</p>
-                            <span class="milestone-tag in-progress">In Progress</span>
+                            <h4 data-i18n="roadmap.m_terraform">Terraform provider</h4>
+                            <p data-i18n="roadmap.m_terraform_desc">Manage kcore VMs, networks, and storage through Terraform. Declarative infrastructure as code.</p>
+                            <span class="milestone-tag in-progress" data-i18n="roadmap.tag_progress">In Progress</span>
                         </div>
                     </div>
                     <div class="milestone in-progress">
@@ -202,9 +203,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>MCP server</h4>
-                            <p>Model Context Protocol server so AI agents can query and manage infrastructure through structured APIs.</p>
-                            <span class="milestone-tag in-progress">In Progress</span>
+                            <h4 data-i18n="roadmap.m_mcp">MCP server</h4>
+                            <p data-i18n="roadmap.m_mcp_desc">Model Context Protocol server so AI agents can query and manage infrastructure through structured APIs.</p>
+                            <span class="milestone-tag in-progress" data-i18n="roadmap.tag_progress">In Progress</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -213,9 +214,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>ZFS storage backend</h4>
-                            <p>Snapshots, clones, and compression for VM storage using ZFS.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_zfs">ZFS storage backend</h4>
+                            <p data-i18n="roadmap.m_zfs_desc">Snapshots, clones, and compression for VM storage using ZFS.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -224,9 +225,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>VM snapshots and cloning</h4>
-                            <p>Create point-in-time snapshots and clone VMs for testing and development.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_snapshots">VM snapshots and cloning</h4>
+                            <p data-i18n="roadmap.m_snapshots_desc">Create point-in-time snapshots and clone VMs for testing and development.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -235,9 +236,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Resource scheduling</h4>
-                            <p>Automatic placement of VMs across nodes based on available resources.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_scheduling">Resource scheduling</h4>
+                            <p data-i18n="roadmap.m_scheduling_desc">Automatic placement of VMs across nodes based on available resources.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                 </div>
@@ -250,9 +251,9 @@
         <div class="container">
             <div class="roadmap-phase">
                 <div class="phase-header">
-                    <span class="phase-badge phase-future">Future</span>
-                    <h2>Beta — Stability &amp; Operations</h2>
-                    <p>Web dashboard, HA, monitoring, and the features needed for serious use.</p>
+                    <span class="phase-badge phase-future" data-i18n="roadmap.phase3_badge">Future</span>
+                    <h2 data-i18n="roadmap.phase3_title">Beta — Stability &amp; Operations</h2>
+                    <p data-i18n="roadmap.phase3_desc">Web dashboard, HA, monitoring, and the features needed for serious use.</p>
                 </div>
                 <div class="milestone-list">
                     <div class="milestone planned">
@@ -261,9 +262,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Web dashboard</h4>
-                            <p>Read-only dashboard for cluster visibility. API consumer, not a primary interface.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_dashboard">Web dashboard</h4>
+                            <p data-i18n="roadmap.m_dashboard_desc">Read-only dashboard for cluster visibility. API consumer, not a primary interface.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -272,9 +273,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>High availability</h4>
-                            <p>Automatic VM restart on node failure. Controller redundancy.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_ha">High availability</h4>
+                            <p data-i18n="roadmap.m_ha_desc">Automatic VM restart on node failure. Controller redundancy.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -283,9 +284,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Live migration</h4>
-                            <p>Move running VMs between nodes without downtime.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_migration">Live migration</h4>
+                            <p data-i18n="roadmap.m_migration_desc">Move running VMs between nodes without downtime.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -294,9 +295,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Monitoring and alerting</h4>
-                            <p>Built-in metrics, health checks, and integration with Prometheus/Grafana.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_monitoring">Monitoring and alerting</h4>
+                            <p data-i18n="roadmap.m_monitoring_desc">Built-in metrics, health checks, and integration with Prometheus/Grafana.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                     <div class="milestone planned">
@@ -305,9 +306,9 @@
                             <span class="milestone-line"></span>
                         </div>
                         <div class="milestone-content">
-                            <h4>Backup and restore</h4>
-                            <p>Scheduled backups with configurable retention policies.</p>
-                            <span class="milestone-tag planned">Planned</span>
+                            <h4 data-i18n="roadmap.m_backup">Backup and restore</h4>
+                            <p data-i18n="roadmap.m_backup_desc">Scheduled backups with configurable retention policies.</p>
+                            <span class="milestone-tag planned" data-i18n="roadmap.tag_planned">Planned</span>
                         </div>
                     </div>
                 </div>
@@ -319,14 +320,14 @@
     <section class="cta">
         <div class="container">
             <div class="cta-content">
-                <h2>Want to Influence the Roadmap?</h2>
-                <p>
+                <h2 data-i18n="roadmap.cta_title">Want to Influence the Roadmap?</h2>
+                <p data-i18n="roadmap.cta_desc">
                     We're building kcore with input from early testers and design partners.
                     If you have use cases that should shape our priorities, we want to hear from you.
                 </p>
                 <div class="cta-buttons">
-                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Talk to Us</a>
-                    <a href="blog.html" class="btn btn-secondary btn-large">Follow Development</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large" data-i18n="roadmap.cta_btn_talk">Talk to Us</a>
+                    <a href="blog.html" class="btn btn-secondary btn-large" data-i18n="roadmap.cta_btn_follow">Follow Development</a>
                 </div>
             </div>
         </div>
@@ -338,39 +339,40 @@
             <div class="footer-content">
                 <div class="footer-section">
                     <h4>kcore Hypervisor</h4>
-                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                    <p data-i18n="shared.footer.description">A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
-                    <h4>Product</h4>
+                    <h4 data-i18n="shared.footer.product">Product</h4>
                     <ul>
-                        <li><a href="features.html">Features</a></li>
-                        <li><a href="architecture.html">Architecture</a></li>
-                        <li><a href="roadmap.html">Roadmap</a></li>
+                        <li><a href="features.html" data-i18n="shared.nav.features">Features</a></li>
+                        <li><a href="architecture.html" data-i18n="shared.nav.architecture">Architecture</a></li>
+                        <li><a href="roadmap.html" data-i18n="shared.nav.roadmap">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Resources</h4>
+                    <h4 data-i18n="shared.footer.resources">Resources</h4>
                     <ul>
-                        <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="faq.html">FAQ</a></li>
-                        <li><a href="blog.html">Blog</a></li>
+                        <li><a href="/docs/" data-i18n="shared.footer.documentation">Documentation</a></li>
+                        <li><a href="faq.html" data-i18n="shared.nav.faq">FAQ</a></li>
+                        <li><a href="blog.html" data-i18n="shared.nav.blog">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Project</h4>
+                    <h4 data-i18n="shared.footer.project">Project</h4>
                     <ul>
-                        <li><a href="index.html#early-access">Early Access</a></li>
-                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                        <li><a href="index.html#early-access" data-i18n="shared.nav.early_access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com" data-i18n="shared.footer.contact">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
-                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+                <p data-i18n="shared.footer.copyright">&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company" data-i18n-html="shared.footer.company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
 
     <script src="js/main.js"></script>
+    <script src="js/i18n.js"></script>
 </body>
 </html>
