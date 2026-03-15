@@ -132,6 +132,7 @@
             ];
 
             shellHook = ''
+              export BASH_COMPLETION_COMPAT_DIR="/dev/null"
               export PATH="$PATH:$(go env GOPATH)/bin"
               echo "kcore dev shell ready (go/protobuf/opentofu)."
             '';

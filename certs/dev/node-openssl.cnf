@@ -1,0 +1,15 @@
+[ req ]
+default_bits = 2048
+prompt = no
+default_md = sha256
+distinguished_name = dn
+req_extensions = req_ext
+[ dn ]
+CN = kvm-node
+[ req_ext ]
+subjectAltName = @alt_names
+extendedKeyUsage = clientAuth,serverAuth
+[ alt_names ]
+DNS.1 = kvm-node
+IP.1 = 192.168.40.107
+IP.2 = 127.0.0.1

@@ -1,0 +1,12 @@
+apiVersion: kcore.io/v1
+kind: VM
+metadata:
+  name: debian12-test2
+spec:
+  cpu: 1
+  memory: 2G
+  image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+  enableKcoreLogin: true
+  nics:
+    - network: default
+      model: virtio

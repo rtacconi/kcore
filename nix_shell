@@ -3,6 +3,9 @@ set -euo pipefail
 
 # Wrapper for the repo flake dev shell.
 #
+# Uses --norc to avoid sourcing ~/.bashrc (which may contain bash-completion
+# scripts incompatible with the Nix-provided bash).
+#
 # Examples:
 #   ./nix_shell
 #   ./nix_shell go test ./node
@@ -12,7 +15,7 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ "$#" -eq 0 ]; then
   exec nix --extra-experimental-features "nix-command flakes" \
-    develop "${REPO_ROOT}" -c bash
+    develop "${REPO_ROOT}" -c bash --norc --noprofile
 fi
 
 exec nix --extra-experimental-features "nix-command flakes" \

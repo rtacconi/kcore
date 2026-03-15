@@ -1,5 +1,5 @@
 .PHONY: all build controller kctl install-kctl-local install-kctl-system node-agent proto test clean deploy deploy-controller
-.PHONY: build-iso create-vm delete-vm test-node list-services deploy-node deploy-node-agent write-usb help
+.PHONY: build-iso create-vm delete-vm test-node test-node-agent list-services deploy-node deploy-node-agent write-usb help
 
 all: proto build
 
@@ -66,26 +66,35 @@ node-agent-podman:
 # Build both
 build: controller node-agent
 
-# Run tests
+# Run unit tests (no live services or CGO required)
 test:
-	@go test ./...
+	@echo "Running unit tests..."
+	@go test ./cmd/kctl/... ./node/... ./pkg/... ./test/... -count=1
+	@echo "All tests passed."
+
+# Run kctl tests only
+test-kctl:
+	@go test ./cmd/kctl/... -v -count=1
+
+# Run node-agent tests only
+test-node-agent:
+	@go test ./node/... -v -count=1
+
+# Run controller tests only
+test-controller:
+	@go test ./test/integration/controller/... -v -count=1
 
 # Run integration tests
 test-integration:
 	@./scripts/run-integration-tests.sh
 
-# Run specific integration test suites
-test-controller:
-	@go test ./test/integration/controller/... -v
-
+# Run end-to-end tests
 test-e2e:
 	@./test/integration/e2e/full_workflow_test.sh
 
+# Run multi-node tests
 test-multi-node:
 	@./test/integration/e2e/multi_node_test.sh
-
-test-kctl:
-	@./test/integration/kctl/kctl_test.sh
 
 # Run all tests (unit + integration)
 test-all: test test-integration
@@ -184,12 +193,12 @@ help:
 	@echo "  make build                - Build controller + node-agent"
 	@echo ""
 	@echo "🧪 Testing:"
-	@echo "  make test               - Run Go unit tests"
-	@echo "  make test-integration   - Run all integration tests"
+	@echo "  make test               - Run all unit tests"
+	@echo "  make test-kctl          - Run kctl tests (manifest, config, client)"
+	@echo "  make test-node-agent    - Run node-agent tests (cloud-init)"
 	@echo "  make test-controller    - Run controller integration tests"
+	@echo "  make test-integration   - Run all integration tests"
 	@echo "  make test-e2e           - Run end-to-end tests"
-	@echo "  make test-multi-node    - Run multi-node tests"
-	@echo "  make test-kctl          - Run kctl tests"
 	@echo "  make test-all           - Run all tests (unit + integration)"
 	@echo ""
 	@echo "☁️  Node Management (requires NODE_IP=<ip>):"
