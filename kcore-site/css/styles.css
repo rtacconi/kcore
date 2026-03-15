@@ -157,8 +157,11 @@ a:hover {
     background: transparent;
     border: 1px solid var(--border-primary);
     color: var(--text-secondary);
-    padding: 0.25rem 0.5rem;
+    padding: 0.25rem 0.6rem;
     border-radius: 0.25rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
     cursor: pointer;
     font-size: 0.75rem;
     font-weight: 600;
@@ -169,6 +172,126 @@ a:hover {
 .lang-toggle-btn:hover {
     color: var(--text-primary);
     border-color: var(--text-primary);
+}
+
+.lang-btn-flag {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.lang-modal-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease, visibility 0.2s ease;
+    backdrop-filter: blur(4px);
+}
+
+.lang-modal-overlay.visible {
+    opacity: 1;
+    visibility: visible;
+}
+
+.lang-modal {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: 0.75rem;
+    width: 90%;
+    max-width: 320px;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4);
+    transform: translateY(12px);
+    transition: transform 0.2s ease;
+}
+
+.lang-modal-overlay.visible .lang-modal {
+    transform: translateY(0);
+}
+
+.lang-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 1rem 1.25rem;
+    border-bottom: 1px solid var(--border-primary);
+}
+
+.lang-modal-title {
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lang-modal-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    transition: color 0.15s ease;
+}
+
+.lang-modal-close:hover {
+    color: var(--text-primary);
+}
+
+.lang-modal-list {
+    list-style: none;
+    padding: 0.5rem 0;
+    margin: 0;
+}
+
+.lang-modal-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 1.25rem;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    cursor: pointer;
+    transition: background 0.15s ease, color 0.15s ease;
+    text-align: left;
+}
+
+.lang-modal-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+
+.lang-modal-item.active {
+    color: var(--accent-primary);
+}
+
+.lang-modal-item.active .lang-code {
+    color: var(--accent-primary);
+}
+
+.lang-flag {
+    font-size: 1.25rem;
+    line-height: 1;
+}
+
+.lang-name {
+    flex: 1;
+}
+
+.lang-code {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
 }
 
 /* Buttons */
