@@ -3,20 +3,25 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="kcore cli reference">
-    <title>CLI Reference - kcore Docs</title>
+    <meta name="description" content="kctl CLI reference — commands for managing VMs, nodes, volumes, and networks in kcore.">
+    <title>CLI Reference — kcore Docs</title>
     <link rel="stylesheet" href="../css/styles.css">
     <style>
         .docs-page {
-            margin-top: 80px;
+            margin-top: 120px;
             padding: 2.5rem 0 4rem;
         }
-        .docs-page p {
+        .docs-page p, .docs-page li {
             color: var(--text-secondary);
         }
         .docs-page h2 {
-            margin-top: 2rem;
+            margin-top: 2.5rem;
             margin-bottom: 0.75rem;
+        }
+        .docs-page h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-size: 1rem;
         }
         pre {
             background: var(--bg-card);
@@ -34,23 +39,51 @@
             gap: 1rem;
             margin-bottom: 1rem;
         }
+        .cmd-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1rem 0;
+        }
+        .cmd-table th, .cmd-table td {
+            text-align: left;
+            padding: 0.5rem 0.75rem;
+            border-bottom: 1px solid var(--border-primary);
+        }
+        .cmd-table th {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+        .cmd-table td {
+            color: var(--text-secondary);
+        }
+        .cmd-table code {
+            color: var(--text-primary);
+        }
     </style>
 </head>
 <body>
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
                 <a href="../index.html" style="color: inherit; text-decoration: none;">
                     <span class="logo">kcore</span>
-                    <span class="logo-tag">.systems</span>
+                    <span class="logo-tag">hypervisor</span>
                 </a>
             </div>
             <ul class="nav-menu">
                 <li><a href="../features.html">Features</a></li>
-                <li><a href="../index.html#platform">Platform</a></li>
-                <li><a href="../index.html#ai">AI Integration</a></li>
+                <li><a href="../roadmap.html">Roadmap</a></li>
+                <li><a href="../architecture.html">Architecture</a></li>
+                <li><a href="../faq.html">FAQ</a></li>
+                <li><a href="../blog.html">Blog</a></li>
                 <li><a href="/docs/">Docs</a></li>
-                <li><a href="../index.html#get-started" class="btn-primary">Get Started</a></li>
+                <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
+                <li><a href="../index.html#early-access" class="btn-primary">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -63,33 +96,143 @@
                 <a href="architecture.html">Architecture</a>
             </div>
             <h1>CLI Reference</h1>
-            <p>Common `kctl` commands for day-to-day cluster and VM management.</p>
+            <p>kctl is the command-line interface for kcore. VMs are created declaratively via YAML manifests.</p>
 
-            <h2>Inspect</h2>
-            <pre><code>kctl get vms
-kctl describe vm my-vm
-kctl get nodes</code></pre>
+            <h2>Global Flags</h2>
+            <table class="cmd-table">
+                <tr>
+                    <th>Flag</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><code>-c, --config</code></td>
+                    <td>Path to kctl config file (default: <code>~/.kcore/config</code>)</td>
+                </tr>
+                <tr>
+                    <td><code>-s, --controller</code></td>
+                    <td>Controller address (overrides config)</td>
+                </tr>
+                <tr>
+                    <td><code>-k, --insecure</code></td>
+                    <td>Skip TLS certificate verification</td>
+                </tr>
+            </table>
 
-            <h2>Lifecycle</h2>
-            <pre><code>kctl start vm my-vm
-kctl stop vm my-vm
-kctl restart vm my-vm
-kctl delete vm my-vm</code></pre>
+            <h2>Apply (Declarative VM Creation)</h2>
+            <p>The primary way to create VMs. Apply a YAML manifest to the cluster.</p>
+            <pre><code># Create a VM from a manifest
+kctl apply -f vm.yaml
 
-            <h2>Create and Apply</h2>
-            <pre><code>kctl create vm app --memory 4096 --vcpu 4 --disk size=40GB
-kctl apply -f vm.yaml</code></pre>
+# Dry run — preview what would be applied
+kctl apply -f vm.yaml --dry-run</code></pre>
+            <p>Example manifest (<code>vm.yaml</code>):</p>
+            <pre><code>apiVersion: kcore.io/v1
+kind: VM
+metadata:
+  name: debian12-test
+spec:
+  cpu: 1
+  memory: 2G
+  image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+  enableKcoreLogin: true
+  nics:
+    - network: default
+      model: virtio</code></pre>
+
+            <h2>Get (List Resources)</h2>
+            <pre><code># List all VMs
+kctl get vms
+
+# Get a specific VM
+kctl get vm debian12-test
+
+# Wide output
+kctl get vms -o wide
+
+# JSON output
+kctl get vm debian12-test -o json
+
+# List all nodes
+kctl get nodes
+
+# List volumes
+kctl get volumes
+
+# List networks
+kctl get networks</code></pre>
+
+            <h2>Describe</h2>
+            <pre><code># Detailed VM information
+kctl describe vm debian12-test</code></pre>
+
+            <h2>Delete</h2>
+            <pre><code># Delete a VM
+kctl delete vm debian12-test
+
+# Force delete
+kctl delete vm debian12-test --force</code></pre>
+
+            <h2>Create (Volumes and Networks)</h2>
+            <p>The <code>create</code> command is used for volumes and networks, not VMs. Use <code>kctl apply -f</code> for VMs.</p>
+            <pre><code># Create a storage volume
+kctl create volume my-volume --size 50G --storage-class local
+
+# Create a network
+kctl create network my-net</code></pre>
+
+            <h2>Pull</h2>
+            <pre><code># Pull a cloud image
+kctl pull https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2</code></pre>
+
+            <h2>Other Commands</h2>
+            <table class="cmd-table">
+                <tr>
+                    <th>Command</th>
+                    <th>Description</th>
+                </tr>
+                <tr>
+                    <td><code>kctl version</code></td>
+                    <td>Print the kctl version</td>
+                </tr>
+                <tr>
+                    <td><code>kctl controlplane status</code></td>
+                    <td>Check control plane status</td>
+                </tr>
+            </table>
 
             <h2>Configuration</h2>
-            <pre><code>cat ~/.kcore/config.yaml
-kctl version</code></pre>
+            <p>kctl reads its config from <code>~/.kcore/config</code> by default. The config supports multiple contexts:</p>
+            <pre><code># ~/.kcore/config
+current-context: local
+
+contexts:
+  local:
+    controller: "localhost:9090"
+    insecure: true
+
+  production:
+    controller: "controller.example.com:9090"
+    insecure: false
+    cert: "certs/controller.crt"
+    key: "certs/controller.key"
+    ca: "certs/ca.crt"</code></pre>
+            <p>You can override the config with flags:</p>
+            <pre><code># Use a different controller
+kctl get vms --controller node2.example.com:9091
+
+# Force insecure even if config says otherwise
+kctl get vms --insecure</code></pre>
+            <p>Or with environment variables:</p>
+            <pre><code># Override config file location
+export KCORE_CONFIG=/path/to/config</code></pre>
         </div>
     </main>
 
     <footer class="footer">
         <div class="container">
             <div class="footer-bottom">
-                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>

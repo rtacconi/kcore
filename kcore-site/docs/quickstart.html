@@ -3,20 +3,24 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="kcore quick start documentation">
-    <title>Quick Start - kcore Docs</title>
+    <meta name="description" content="kcore Hypervisor quick start guide — build the ISO, boot a node, and create your first VM.">
+    <title>Quick Start — kcore Docs</title>
     <link rel="stylesheet" href="../css/styles.css">
     <style>
         .docs-page {
-            margin-top: 80px;
+            margin-top: 120px;
             padding: 2.5rem 0 4rem;
         }
         .docs-page p, .docs-page li {
             color: var(--text-secondary);
         }
         .docs-page h2 {
-            margin-top: 2rem;
+            margin-top: 2.5rem;
             margin-bottom: 0.75rem;
+        }
+        .docs-page h3 {
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
         }
         pre {
             background: var(--bg-card);
@@ -34,23 +38,41 @@
             gap: 1rem;
             margin-bottom: 1rem;
         }
+        .note {
+            background: rgba(99, 102, 241, 0.08);
+            border-left: 3px solid var(--accent-primary);
+            padding: 0.75rem 1rem;
+            border-radius: 0 0.5rem 0.5rem 0;
+            margin: 1rem 0;
+        }
+        .note p {
+            margin: 0;
+        }
     </style>
 </head>
 <body>
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
                 <a href="../index.html" style="color: inherit; text-decoration: none;">
                     <span class="logo">kcore</span>
-                    <span class="logo-tag">.systems</span>
+                    <span class="logo-tag">hypervisor</span>
                 </a>
             </div>
             <ul class="nav-menu">
                 <li><a href="../features.html">Features</a></li>
-                <li><a href="../index.html#platform">Platform</a></li>
-                <li><a href="../index.html#ai">AI Integration</a></li>
+                <li><a href="../roadmap.html">Roadmap</a></li>
+                <li><a href="../architecture.html">Architecture</a></li>
+                <li><a href="../faq.html">FAQ</a></li>
+                <li><a href="../blog.html">Blog</a></li>
                 <li><a href="/docs/">Docs</a></li>
-                <li><a href="../index.html#get-started" class="btn-primary">Get Started</a></li>
+                <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
+                <li><a href="../index.html#early-access" class="btn-primary">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -63,41 +85,148 @@
                 <a href="cli-reference.html">CLI Reference</a>
             </div>
             <h1>Quick Start</h1>
-            <p>Follow these steps to bring up a local kcore environment and launch your first virtual machine.</p>
+            <p>Build the kcore ISO, boot a node from USB, and create your first VM.</p>
 
-            <h2>1) Install Binaries</h2>
-            <pre><code>curl -sSL https://get.kcore.systems | sh
-kctl version</code></pre>
+            <div class="note">
+                <p>kcore is alpha software. This guide assumes you have a dedicated machine or lab environment for testing.</p>
+            </div>
 
-            <h2>2) Start the Controller</h2>
-            <pre><code>cat <<EOF > controller.yaml
-listen_address: "0.0.0.0:50051"
-database: "./kcore.db"
-EOF
+            <h2>Prerequisites</h2>
+            <ul>
+                <li><strong>Nix</strong> with flakes enabled (for building the ISO)</li>
+                <li><strong>Go 1.22+</strong></li>
+                <li><strong>Make</strong></li>
+                <li>A USB drive (for booting the node)</li>
+                <li>A dedicated x86_64 machine or server for the kcore node</li>
+            </ul>
 
-kcore-controller --config controller.yaml</code></pre>
+            <h2>1) Clone and Build</h2>
+            <pre><code>git clone https://github.com/rtacconi/kcore.git
+cd kcore
 
-            <h2>3) Configure the CLI</h2>
-            <pre><code>mkdir -p ~/.kcore
-cat <<EOF > ~/.kcore/config.yaml
-controller_address: "localhost:50051"
-insecure: true
-EOF</code></pre>
+# Build the ISO
+make build-iso
 
-            <h2>4) Create a VM</h2>
-            <pre><code>kctl create vm web-server \
-  --memory 2048 \
-  --vcpu 2 \
-  --disk size=20GB
+# Write to USB
+USB_DEVICE=/dev/sdX make write-usb</code></pre>
 
-kctl get vms</code></pre>
+            <h2>2) Boot and Install</h2>
+            <p>Boot the target machine from the USB drive, then log in with the default credentials (<code>root</code> / <code>kcore</code>).</p>
+            <pre><code># Run the installer — it writes to disk and configures everything
+install-to-disk
+
+# After reboot, all services start automatically
+# The node agent self-registers with the controller</code></pre>
+
+            <h2>3) Configure the Controller</h2>
+            <p>The controller runs on your workstation and manages the cluster. Create a config file:</p>
+            <pre><code># controller.yaml
+databasePath: ./kcore.db
+listenAddr: ":9090"
+
+tls:
+  caFile: ./certs/ca.crt
+  certFile: ./certs/controller.crt
+  keyFile: ./certs/controller.key
+
+nodeNetworks:
+  default: br0</code></pre>
+            <p>Start the controller:</p>
+            <pre><code>make controller
+./kcore-controller --config controller.yaml</code></pre>
+
+            <h2>4) Configure kctl</h2>
+            <p>kctl is the CLI for interacting with your kcore cluster. Create a config file at <code>~/.kcore/config</code>:</p>
+            <pre><code># ~/.kcore/config
+current-context: local
+
+contexts:
+  local:
+    controller: "localhost:9090"
+    insecure: true</code></pre>
+            <p>For TLS-secured connections:</p>
+            <pre><code>contexts:
+  production:
+    controller: "controller.example.com:9090"
+    insecure: false
+    cert: "certs/controller.crt"
+    key: "certs/controller.key"
+    ca: "certs/ca.crt"</code></pre>
+
+            <h2>5) Create a VM</h2>
+            <p>VMs are created declaratively via YAML manifests. Create a file called <code>vm.yaml</code>:</p>
+            <pre><code>apiVersion: kcore.io/v1
+kind: VM
+metadata:
+  name: debian12-test
+spec:
+  cpu: 1
+  memory: 2G
+  image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+  enableKcoreLogin: true
+  nics:
+    - network: default
+      model: virtio</code></pre>
+            <p>Apply it:</p>
+            <pre><code># Apply the manifest
+kctl apply -f vm.yaml
+
+# Check VM status
+kctl get vms
+
+# Get details for a specific VM
+kctl get vm debian12-test</code></pre>
+
+            <h2>6) Manage VMs</h2>
+            <pre><code># Describe a VM (detailed info)
+kctl describe vm debian12-test
+
+# Delete a VM
+kctl delete vm debian12-test</code></pre>
+
+            <h2>Using Terraform</h2>
+            <p>You can also manage VMs with the kcore Terraform provider:</p>
+            <pre><code>terraform {
+  required_providers {
+    kcore = {
+      source = "kcore/kcore"
+    }
+  }
+}
+
+provider "kcore" {
+  controller_address = "localhost:9090"
+  insecure           = true
+}
+
+resource "kcore_vm" "example" {
+  name         = "debian12-test"
+  cpu          = 1
+  memory_bytes = 2147483648  # 2GB
+
+  image_uri          = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+  enable_kcore_login = true
+
+  nic {
+    network = "default"
+    model   = "virtio"
+  }
+}</code></pre>
+
+            <h2>Next Steps</h2>
+            <ul>
+                <li><a href="architecture.html">Architecture</a> — understand the controller, node agent, and gRPC API</li>
+                <li><a href="cli-reference.html">CLI Reference</a> — full list of kctl commands</li>
+                <li><a href="../roadmap.html">Roadmap</a> — see what's planned</li>
+            </ul>
         </div>
     </main>
 
     <footer class="footer">
         <div class="container">
             <div class="footer-bottom">
-                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>

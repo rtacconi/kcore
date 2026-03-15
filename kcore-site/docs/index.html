@@ -3,12 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="kcore documentation home">
-    <title>Docs - kcore.systems</title>
+    <meta name="description" content="kcore Hypervisor documentation — quick start, architecture, and CLI reference.">
+    <title>Docs — kcore Hypervisor</title>
     <link rel="stylesheet" href="../css/styles.css">
     <style>
         .docs-page {
-            margin-top: 80px;
+            margin-top: 120px;
             padding: 2.5rem 0 4rem;
         }
         .docs-header {
@@ -52,20 +52,28 @@
     </style>
 </head>
 <body>
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
                 <a href="../index.html" style="color: inherit; text-decoration: none;">
                     <span class="logo">kcore</span>
-                    <span class="logo-tag">.systems</span>
+                    <span class="logo-tag">hypervisor</span>
                 </a>
             </div>
             <ul class="nav-menu">
                 <li><a href="../features.html">Features</a></li>
-                <li><a href="../index.html#platform">Platform</a></li>
-                <li><a href="../index.html#ai">AI Integration</a></li>
+                <li><a href="../roadmap.html">Roadmap</a></li>
+                <li><a href="../architecture.html">Architecture</a></li>
+                <li><a href="../faq.html">FAQ</a></li>
+                <li><a href="../blog.html">Blog</a></li>
                 <li><a href="/docs/">Docs</a></li>
-                <li><a href="../index.html#get-started" class="btn-primary">Get Started</a></li>
+                <li><a href="https://github.com/rtacconi/kcore" target="_blank" rel="noopener" class="nav-github" aria-label="GitHub"><svg viewBox="0 0 16 16" fill="currentColor" width="20" height="20"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg></a></li>
+                <li><a href="../index.html#early-access" class="btn-primary">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -75,27 +83,34 @@
             <div class="docs-header">
                 <h1>Documentation</h1>
                 <p>
-                    Everything you need to install, run, and operate kcore. Start with the quick start, then move into architecture and command reference.
+                    Everything you need to build, install, and operate kcore. Start with the quick start guide,
+                    then explore the architecture and CLI reference.
                 </p>
             </div>
 
             <div class="docs-grid">
                 <a class="docs-card" href="quickstart.html">
                     <h3>Quick Start</h3>
-                    <p>Install the platform, configure `kctl`, and launch your first VM.</p>
-                    <span>Open guide -></span>
+                    <p>Build the ISO, boot a node, configure kctl, and create your first VM with a YAML manifest.</p>
+                    <span>Open guide →</span>
                 </a>
 
                 <a class="docs-card" href="architecture.html">
                     <h3>Architecture</h3>
-                    <p>Understand how the controller, node agent, and CLI work together.</p>
-                    <span>Read architecture -></span>
+                    <p>Understand how the Go controller, NixOS node agents, and gRPC API work together.</p>
+                    <span>Read architecture →</span>
                 </a>
 
                 <a class="docs-card" href="cli-reference.html">
                     <h3>CLI Reference</h3>
-                    <p>Common `kctl` commands for VM lifecycle, inspection, and updates.</p>
-                    <span>Browse commands -></span>
+                    <p>kctl commands for applying manifests, listing VMs, managing nodes, and inspecting resources.</p>
+                    <span>Browse commands →</span>
+                </a>
+
+                <a class="docs-card" href="https://github.com/rtacconi/kcore/tree/main/docs" target="_blank" rel="noopener">
+                    <h3>Development Docs</h3>
+                    <p>Build scripts, project structure, commit standards, and contribution guidelines on GitHub.</p>
+                    <span>View on GitHub →</span>
                 </a>
             </div>
         </div>
@@ -103,38 +118,9 @@
 
     <footer class="footer">
         <div class="container">
-            <div class="footer-content">
-                <div class="footer-section">
-                    <h4>kcore</h4>
-                    <p>Next-generation virtualization platform powered by AI</p>
-                </div>
-                <div class="footer-section">
-                    <h4>Product</h4>
-                    <ul>
-                        <li><a href="../features.html">Features</a></li>
-                        <li><a href="../index.html#platform">Platform</a></li>
-                        <li><a href="../index.html#ai">AI Integration</a></li>
-                    </ul>
-                </div>
-                <div class="footer-section">
-                    <h4>Resources</h4>
-                    <ul>
-                        <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="cli-reference.html">CLI Reference</a></li>
-                        <li><a href="quickstart.html">Quick Start</a></li>
-                    </ul>
-                </div>
-                <div class="footer-section">
-                    <h4>Company</h4>
-                    <ul>
-                        <li><a href="#">About</a></li>
-                        <li><a href="#">Blog</a></li>
-                        <li><a href="#">Contact</a></li>
-                    </ul>
-                </div>
-            </div>
             <div class="footer-bottom">
-                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
