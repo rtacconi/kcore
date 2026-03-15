@@ -1,5 +1,6 @@
 (function () {
-  const SUPPORTED = ['en', 'it'];
+  const SUPPORTED = ['en', 'it', 'de', 'zh'];
+  const LABELS = { en: 'EN', it: 'IT', de: 'DE', zh: '中文' };
   const DEFAULT = 'en';
   const STORAGE_KEY = 'kcore-lang';
 
@@ -12,6 +13,11 @@
 
     const browser = (navigator.language || '').slice(0, 2).toLowerCase();
     return SUPPORTED.includes(browser) ? browser : DEFAULT;
+  }
+
+  function nextLang() {
+    const idx = SUPPORTED.indexOf(currentLang);
+    return SUPPORTED[(idx + 1) % SUPPORTED.length];
   }
 
   function resolveKey(obj, key) {
@@ -39,10 +45,10 @@
 
     document.documentElement.lang = currentLang;
 
+    const next = nextLang();
     document.querySelectorAll('.lang-toggle-btn').forEach(btn => {
-      btn.textContent = currentLang === 'en' ? 'IT' : 'EN';
-      btn.setAttribute('aria-label',
-        currentLang === 'en' ? 'Passa all\'italiano' : 'Switch to English');
+      btn.textContent = LABELS[next];
+      btn.setAttribute('aria-label', next.toUpperCase());
     });
   }
 
@@ -54,7 +60,7 @@
   }
 
   function toggleLang() {
-    switchLang(currentLang === 'en' ? 'it' : 'en');
+    switchLang(nextLang());
   }
 
   async function loadTranslations() {
@@ -65,11 +71,12 @@
       prefix = src.replace('js/i18n.js', '');
     }
 
-    const [en, it] = await Promise.all([
-      fetch(prefix + 'locales/en.json').then(r => r.json()),
-      fetch(prefix + 'locales/it.json').then(r => r.json())
-    ]);
-    translations = { en, it };
+    const results = await Promise.all(
+      SUPPORTED.map(lang =>
+        fetch(prefix + 'locales/' + lang + '.json').then(r => r.json())
+      )
+    );
+    SUPPORTED.forEach((lang, i) => { translations[lang] = results[i]; });
   }
 
   async function init() {
