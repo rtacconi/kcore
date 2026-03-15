@@ -1,13 +1,15 @@
 (function () {
-  var SUPPORTED = ['en', 'it', 'de', 'zh'];
+  var SUPPORTED = ['en', 'es', 'it', 'de', 'zh'];
   var LANG_NAMES = {
     en: 'English',
+    es: 'Español',
     it: 'Italiano',
     de: 'Deutsch',
     zh: '中文'
   };
   var LANG_FLAGS = {
     en: '🇬🇧',
+    es: '🇪🇸',
     it: '🇮🇹',
     de: '🇩🇪',
     zh: '🇨🇳'
