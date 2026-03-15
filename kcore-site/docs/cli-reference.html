@@ -98,41 +98,41 @@
     <main class="docs-page">
         <div class="container">
             <div class="top-links">
-                <a href="/docs/">Docs Home</a>
-                <a href="quickstart.html">Quick Start</a>
-                <a href="architecture.html">Architecture</a>
+                <a href="/docs/" data-i18n="docs.cli.link_home">Docs Home</a>
+                <a href="quickstart.html" data-i18n="docs.cli.link_qs">Quick Start</a>
+                <a href="architecture.html" data-i18n="docs.cli.link_arch">Architecture</a>
             </div>
-            <h1>CLI Reference</h1>
-            <p>kctl is the command-line interface for kcore. VMs are created declaratively via YAML manifests.</p>
+            <h1 data-i18n="docs.cli.title">CLI Reference</h1>
+            <p data-i18n="docs.cli.intro">kctl is the command-line interface for kcore. VMs are created declaratively via YAML manifests.</p>
 
-            <h2>Global Flags</h2>
+            <h2 data-i18n="docs.cli.h2_global_flags">Global Flags</h2>
             <table class="cmd-table">
                 <tr>
-                    <th>Flag</th>
-                    <th>Description</th>
+                    <th data-i18n="docs.cli.th_flag">Flag</th>
+                    <th data-i18n="docs.cli.th_description">Description</th>
                 </tr>
                 <tr>
                     <td><code>-c, --config</code></td>
-                    <td>Path to kctl config file (default: <code>~/.kcore/config</code>)</td>
+                    <td data-i18n-html="docs.cli.global_desc1">Path to kctl config file (default: <code>~/.kcore/config</code>)</td>
                 </tr>
                 <tr>
                     <td><code>-s, --controller</code></td>
-                    <td>Controller address (overrides config)</td>
+                    <td data-i18n="docs.cli.global_desc2">Controller address (overrides config)</td>
                 </tr>
                 <tr>
                     <td><code>-k, --insecure</code></td>
-                    <td>Skip TLS certificate verification</td>
+                    <td data-i18n="docs.cli.global_desc3">Skip TLS certificate verification</td>
                 </tr>
             </table>
 
-            <h2>Apply (Declarative VM Creation)</h2>
-            <p>The primary way to create VMs. Apply a YAML manifest to the cluster.</p>
+            <h2 data-i18n="docs.cli.h2_apply">Apply (Declarative VM Creation)</h2>
+            <p data-i18n="docs.cli.apply_desc">The primary way to create VMs. Apply a YAML manifest to the cluster.</p>
             <pre><code># Create a VM from a manifest
 kctl apply -f vm.yaml
 
 # Dry run — preview what would be applied
 kctl apply -f vm.yaml --dry-run</code></pre>
-            <p>Example manifest (<code>vm.yaml</code>):</p>
+            <p data-i18n-html="docs.cli.apply_example">Example manifest (<code>vm.yaml</code>):</p>
             <pre><code>apiVersion: kcore.io/v1
 kind: VM
 metadata:
@@ -146,7 +146,7 @@ spec:
     - network: default
       model: virtio</code></pre>
 
-            <h2>Get (List Resources)</h2>
+            <h2 data-i18n="docs.cli.h2_get">Get (List Resources)</h2>
             <pre><code># List all VMs
 kctl get vms
 
@@ -168,47 +168,47 @@ kctl get volumes
 # List networks
 kctl get networks</code></pre>
 
-            <h2>Describe</h2>
+            <h2 data-i18n="docs.cli.h2_describe">Describe</h2>
             <pre><code># Detailed VM information
 kctl describe vm debian12-test</code></pre>
 
-            <h2>Delete</h2>
+            <h2 data-i18n="docs.cli.h2_delete">Delete</h2>
             <pre><code># Delete a VM
 kctl delete vm debian12-test
 
 # Force delete
 kctl delete vm debian12-test --force</code></pre>
 
-            <h2>Create (Volumes and Networks)</h2>
-            <p>The <code>create</code> command is used for volumes and networks, not VMs. Use <code>kctl apply -f</code> for VMs.</p>
+            <h2 data-i18n="docs.cli.h2_create">Create (Volumes and Networks)</h2>
+            <p data-i18n-html="docs.cli.create_desc">The <code>create</code> command is used for volumes and networks, not VMs. Use <code>kctl apply -f</code> for VMs.</p>
             <pre><code># Create a storage volume
 kctl create volume my-volume --size 50G --storage-class local
 
 # Create a network
 kctl create network my-net</code></pre>
 
-            <h2>Pull</h2>
+            <h2 data-i18n="docs.cli.h2_pull">Pull</h2>
             <pre><code># Pull a cloud image
 kctl pull https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2</code></pre>
 
-            <h2>Other Commands</h2>
+            <h2 data-i18n="docs.cli.h2_other">Other Commands</h2>
             <table class="cmd-table">
                 <tr>
-                    <th>Command</th>
-                    <th>Description</th>
+                    <th data-i18n="docs.cli.th_command">Command</th>
+                    <th data-i18n="docs.cli.th_description2">Description</th>
                 </tr>
                 <tr>
                     <td><code>kctl version</code></td>
-                    <td>Print the kctl version</td>
+                    <td data-i18n="docs.cli.other_desc1">Print the kctl version</td>
                 </tr>
                 <tr>
                     <td><code>kctl controlplane status</code></td>
-                    <td>Check control plane status</td>
+                    <td data-i18n="docs.cli.other_desc2">Check control plane status</td>
                 </tr>
             </table>
 
-            <h2>Configuration</h2>
-            <p>kctl reads its config from <code>~/.kcore/config</code> by default. The config supports multiple contexts:</p>
+            <h2 data-i18n="docs.cli.h2_config">Configuration</h2>
+            <p data-i18n-html="docs.cli.config_desc">kctl reads its config from <code>~/.kcore/config</code> by default. The config supports multiple contexts:</p>
             <pre><code># ~/.kcore/config
 current-context: local
 
@@ -223,13 +223,13 @@ contexts:
     cert: "certs/controller.crt"
     key: "certs/controller.key"
     ca: "certs/ca.crt"</code></pre>
-            <p>You can override the config with flags:</p>
+            <p data-i18n="docs.cli.config_override">You can override the config with flags:</p>
             <pre><code># Use a different controller
 kctl get vms --controller node2.example.com:9091
 
 # Force insecure even if config says otherwise
 kctl get vms --insecure</code></pre>
-            <p>Or with environment variables:</p>
+            <p data-i18n="docs.cli.config_env">Or with environment variables:</p>
             <pre><code># Override config file location
 export KCORE_CONFIG=/path/to/config</code></pre>
         </div>

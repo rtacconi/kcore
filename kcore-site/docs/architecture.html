@@ -86,14 +86,14 @@
     <main class="docs-page">
         <div class="container">
             <div class="top-links">
-                <a href="/docs/">Docs Home</a>
-                <a href="quickstart.html">Quick Start</a>
-                <a href="cli-reference.html">CLI Reference</a>
+                <a href="/docs/" data-i18n="docs.arch.link_home">Docs Home</a>
+                <a href="quickstart.html" data-i18n="docs.arch.link_qs">Quick Start</a>
+                <a href="cli-reference.html" data-i18n="docs.arch.link_cli">CLI Reference</a>
             </div>
-            <h1>Architecture</h1>
-            <p>kcore is a clustered KVM virtualization platform built with Go, gRPC, and NixOS.</p>
+            <h1 data-i18n="docs.arch.title">Architecture</h1>
+            <p data-i18n="docs.arch.intro">kcore is a clustered KVM virtualization platform built with Go, gRPC, and NixOS.</p>
 
-            <h2>System Topology</h2>
+            <h2 data-i18n="docs.arch.h2_topology">System Topology</h2>
             <div class="diagram">┌─────────────────────────┐
 │    Your Workstation     │
 │   kcore-controller      │  ← Manages cluster state
@@ -114,23 +114,23 @@
 │  VMs...    │ │  VMs...    │ │  VMs...    │
 └────────────┘ └────────────┘ └────────────┘</div>
 
-            <h2>Core Components</h2>
+            <h2 data-i18n="docs.arch.h2_components">Core Components</h2>
             <ul>
-                <li><strong>Controller</strong> — Written in Go. Stores desired state in SQLite, serves a gRPC API on port 9090, and coordinates VM operations across nodes.</li>
-                <li><strong>Node Agent</strong> — Runs on each NixOS compute node. Self-registers with the controller on startup and manages local VMs through libvirtd.</li>
-                <li><strong>kctl</strong> — CLI client that sends gRPC requests to the controller. Supports declarative manifests (<code>kctl apply -f vm.yaml</code>) and imperative queries (<code>kctl get vms</code>).</li>
-                <li><strong>Terraform Provider</strong> — Manages VMs as Terraform resources via the same gRPC API.</li>
+                <li data-i18n-html="docs.arch.comp_controller"><strong>Controller</strong> — Written in Go. Stores desired state in SQLite, serves a gRPC API on port 9090, and coordinates VM operations across nodes.</li>
+                <li data-i18n-html="docs.arch.comp_node_agent"><strong>Node Agent</strong> — Runs on each NixOS compute node. Self-registers with the controller on startup and manages local VMs through libvirtd.</li>
+                <li data-i18n-html="docs.arch.comp_kctl"><strong>kctl</strong> — CLI client that sends gRPC requests to the controller. Supports declarative manifests (<code>kctl apply -f vm.yaml</code>) and imperative queries (<code>kctl get vms</code>).</li>
+                <li data-i18n-html="docs.arch.comp_terraform"><strong>Terraform Provider</strong> — Manages VMs as Terraform resources via the same gRPC API.</li>
             </ul>
 
-            <h2>Communication</h2>
-            <p>All communication between components uses gRPC with Protocol Buffers. In production, connections are secured with mutual TLS (mTLS) using x509 certificates.</p>
+            <h2 data-i18n="docs.arch.h2_communication">Communication</h2>
+            <p data-i18n="docs.arch.comm_desc">All communication between components uses gRPC with Protocol Buffers. In production, connections are secured with mutual TLS (mTLS) using x509 certificates.</p>
             <ul>
-                <li>Clients (kctl, Terraform) → Controller: port 9090</li>
-                <li>Controller → Node Agents: port 9091</li>
-                <li>Node agents self-register with the controller and report status periodically</li>
+                <li data-i18n="docs.arch.comm1">Clients (kctl, Terraform) → Controller: port 9090</li>
+                <li data-i18n="docs.arch.comm2">Controller → Node Agents: port 9091</li>
+                <li data-i18n="docs.arch.comm3">Node agents self-register with the controller and report status periodically</li>
             </ul>
 
-            <h2>API Consumers</h2>
+            <h2 data-i18n="docs.arch.h2_api_consumers">API Consumers</h2>
             <div class="diagram">┌──────────────┐  ┌───────────────┐  ┌──────────────┐
 │    kctl      │  │   Terraform   │  │  MCP Server  │
 │  (CLI)       │  │   Provider    │  │  (AI Agents) │
@@ -144,23 +144,23 @@
               │    Controller       │
               └─────────────────────┘</div>
 
-            <h2>Host OS</h2>
-            <p>Each compute node runs NixOS, providing:</p>
+            <h2 data-i18n="docs.arch.h2_host_os">Host OS</h2>
+            <p data-i18n="docs.arch.host_os_desc">Each compute node runs NixOS, providing:</p>
             <ul>
-                <li><strong>Immutable system configuration</strong> — the entire OS is declaratively defined and reproducible</li>
-                <li><strong>Atomic updates</strong> — system updates are all-or-nothing with instant rollback</li>
-                <li><strong>Minimal attack surface</strong> — only the packages needed for virtualization are included in the ISO</li>
+                <li data-i18n-html="docs.arch.host_os1"><strong>Immutable system configuration</strong> — the entire OS is declaratively defined and reproducible</li>
+                <li data-i18n-html="docs.arch.host_os2"><strong>Atomic updates</strong> — system updates are all-or-nothing with instant rollback</li>
+                <li data-i18n-html="docs.arch.host_os3"><strong>Minimal attack surface</strong> — only the packages needed for virtualization are included in the ISO</li>
             </ul>
 
-            <h2>Storage</h2>
-            <p>Currently supports local storage and LVM. Cloud images are downloaded automatically when specified via <code>image</code> (YAML) or <code>image_uri</code> (Terraform). Storage backends are pluggable — ZFS and networked storage are on the roadmap.</p>
+            <h2 data-i18n="docs.arch.h2_storage">Storage</h2>
+            <p data-i18n-html="docs.arch.storage_desc">Currently supports local storage and LVM. Cloud images are downloaded automatically when specified via <code>image</code> (YAML) or <code>image_uri</code> (Terraform). Storage backends are pluggable — ZFS and networked storage are on the roadmap.</p>
 
-            <h2>Reliability</h2>
+            <h2 data-i18n="docs.arch.h2_reliability">Reliability</h2>
             <ul>
-                <li>Desired state is persisted in the controller's SQLite database</li>
-                <li>Node agents report runtime status back to the controller</li>
-                <li>Failed operations can be retried without configuration drift</li>
-                <li>All services are managed by systemd with automatic restarts</li>
+                <li data-i18n="docs.arch.rel1">Desired state is persisted in the controller's SQLite database</li>
+                <li data-i18n="docs.arch.rel2">Node agents report runtime status back to the controller</li>
+                <li data-i18n="docs.arch.rel3">Failed operations can be retried without configuration drift</li>
+                <li data-i18n="docs.arch.rel4">All services are managed by systemd with automatic restarts</li>
             </ul>
         </div>
     </main>
