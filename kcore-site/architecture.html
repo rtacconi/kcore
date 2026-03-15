@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore Hypervisor technical architecture — Go control plane, NixOS immutable host, gRPC API design, multi-node topology.">
+    <title>Architecture — kcore Hypervisor</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Alpha Banner -->
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">hypervisor</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="roadmap.html">Roadmap</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="blog.html">Blog</a></li>
+                <li><a href="/docs/">Docs</a></li>
+                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="page-hero">
+        <div class="container">
+            <h1>Technical Architecture</h1>
+            <p>How kcore is built. Go control plane, NixOS host, gRPC APIs, multi-node topology.</p>
+        </div>
+    </section>
+
+    <!-- Overview -->
+    <section class="page-section">
+        <div class="container">
+            <div class="prose">
+                <h2>Overview</h2>
+                <p>
+                    kcore is a virtualization platform with a distributed architecture.
+                    A central controller manages cluster state while node agents run on
+                    each physical machine, managing VMs through libvirt. All communication
+                    is via gRPC with mTLS.
+                </p>
+                <p>
+                    The host OS is NixOS — fully declarative and immutable at runtime.
+                    The control plane is written in Go. There is no PHP, no Perl, no
+                    legacy web framework. The API is the product.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- System Topology -->
+    <section class="page-section alt-bg">
+        <div class="container">
+            <h2 class="section-title">System Topology</h2>
+            <div class="arch-diagram">
+                <div class="arch-tier">
+                    <div class="arch-box arch-highlight">
+                        <div class="arch-box-label">Controller</div>
+                        <div class="arch-box-detail">Go binary</div>
+                        <div class="arch-box-detail">SQLite state store</div>
+                        <div class="arch-box-detail">gRPC server (port 9090)</div>
+                        <div class="arch-box-detail">Scheduling, API, cluster state</div>
+                    </div>
+                </div>
+                <div class="arch-connector">
+                    <div class="arch-connector-line"></div>
+                    <div class="arch-connector-label">gRPC + mTLS</div>
+                </div>
+                <div class="arch-tier arch-tier-multi">
+                    <div class="arch-box">
+                        <div class="arch-box-label">Node Agent</div>
+                        <div class="arch-box-detail">Go binary</div>
+                        <div class="arch-box-detail">libvirtd</div>
+                        <div class="arch-box-detail">gRPC server (port 9091)</div>
+                        <div class="arch-box-detail">VM lifecycle, storage</div>
+                    </div>
+                    <div class="arch-box">
+                        <div class="arch-box-label">Node Agent</div>
+                        <div class="arch-box-detail">Go binary</div>
+                        <div class="arch-box-detail">libvirtd</div>
+                        <div class="arch-box-detail">gRPC server (port 9091)</div>
+                        <div class="arch-box-detail">VM lifecycle, storage</div>
+                    </div>
+                    <div class="arch-box">
+                        <div class="arch-box-label">Node Agent</div>
+                        <div class="arch-box-detail">Go binary</div>
+                        <div class="arch-box-detail">libvirtd</div>
+                        <div class="arch-box-detail">gRPC server (port 9091)</div>
+                        <div class="arch-box-detail">VM lifecycle, storage</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Control Plane -->
+    <section class="page-section">
+        <div class="container">
+            <div class="arch-detail-grid">
+                <div class="arch-detail-text">
+                    <h2>Control Plane</h2>
+                    <p>
+                        The controller is a single Go binary that manages cluster state.
+                        It exposes a gRPC API that the CLI, Terraform provider, MCP server,
+                        and any other tooling consumes.
+                    </p>
+                    <dl class="spec-list">
+                        <div class="spec-item">
+                            <dt>Language</dt>
+                            <dd>Go</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>State store</dt>
+                            <dd>SQLite (embedded, no external database dependency)</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>API protocol</dt>
+                            <dd>gRPC with Protocol Buffers</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Authentication</dt>
+                            <dd>mTLS (mutual TLS) with auto-generated certificates</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Deployment</dt>
+                            <dd>Runs on your workstation or a dedicated management node</dd>
+                        </div>
+                    </dl>
+                </div>
+                <div class="arch-detail-visual">
+                    <div class="terminal-window">
+                        <div class="terminal-header">
+                            <span class="terminal-button"></span>
+                            <span class="terminal-button"></span>
+                            <span class="terminal-button"></span>
+                            <span class="terminal-title">controller</span>
+                        </div>
+                        <div class="terminal-body">
+<pre><code><span class="code-comment">// API surface (simplified)</span>
+
+<span class="code-keyword">service</span> <span class="code-string">KcoreService</span> {
+  <span class="code-keyword">rpc</span> <span class="code-property">ListVMs</span>(ListVMsRequest)
+      <span class="code-keyword">returns</span> (ListVMsResponse);
+
+  <span class="code-keyword">rpc</span> <span class="code-property">CreateVM</span>(CreateVMRequest)
+      <span class="code-keyword">returns</span> (VM);
+
+  <span class="code-keyword">rpc</span> <span class="code-property">DeleteVM</span>(DeleteVMRequest)
+      <span class="code-keyword">returns</span> (Empty);
+
+  <span class="code-keyword">rpc</span> <span class="code-property">ListNodes</span>(Empty)
+      <span class="code-keyword">returns</span> (ListNodesResponse);
+
+  <span class="code-keyword">rpc</span> <span class="code-property">GetNodeStatus</span>(NodeRequest)
+      <span class="code-keyword">returns</span> (NodeStatus);
+}</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Host OS -->
+    <section class="page-section alt-bg">
+        <div class="container">
+            <div class="arch-detail-grid reverse">
+                <div class="arch-detail-text">
+                    <h2>NixOS Host</h2>
+                    <p>
+                        Each compute node runs NixOS. The entire system configuration is
+                        defined in Nix — packages, services, network, storage. The system
+                        is immutable at runtime. Changes require a rebuild that produces
+                        a new bootable generation.
+                    </p>
+                    <dl class="spec-list">
+                        <div class="spec-item">
+                            <dt>Base OS</dt>
+                            <dd>NixOS (declarative Linux distribution)</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Updates</dt>
+                            <dd>Atomic. New generation on every change. Instant rollback via boot menu.</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Virtualization</dt>
+                            <dd>libvirtd + QEMU/KVM, managed by systemd</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Installation</dt>
+                            <dd>Boot from USB ISO, run <code>install-to-disk</code>, reboot</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Reproducibility</dt>
+                            <dd>Same Nix flake produces identical systems across all nodes</dd>
+                        </div>
+                    </dl>
+                </div>
+                <div class="arch-detail-visual">
+                    <div class="terminal-window">
+                        <div class="terminal-header">
+                            <span class="terminal-button"></span>
+                            <span class="terminal-button"></span>
+                            <span class="terminal-button"></span>
+                            <span class="terminal-title">nix</span>
+                        </div>
+                        <div class="terminal-body">
+<pre><code><span class="code-comment"># Node configuration (simplified)</span>
+{
+  <span class="code-property">services.kcore-agent</span> = {
+    <span class="code-property">enable</span> = <span class="code-keyword">true</span>;
+    <span class="code-property">controllerAddr</span> = <span class="code-string">"10.0.0.1:9090"</span>;
+  };
+
+  <span class="code-property">virtualisation.libvirtd</span> = {
+    <span class="code-property">enable</span> = <span class="code-keyword">true</span>;
+    <span class="code-property">qemu.runAsRoot</span> = <span class="code-keyword">true</span>;
+  };
+
+  <span class="code-property">networking</span> = {
+    <span class="code-property">bridges.br0.interfaces</span> =
+      [ <span class="code-string">"enp3s0"</span> ];
+    <span class="code-property">useDHCP</span> = <span class="code-keyword">true</span>;
+  };
+
+  <span class="code-property">fileSystems."/var/lib/kcore"</span> = {
+    <span class="code-property">device</span> = <span class="code-string">"/dev/vg0/kcore"</span>;
+    <span class="code-property">fsType</span> = <span class="code-string">"ext4"</span>;
+  };
+}</code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- gRPC API -->
+    <section class="page-section">
+        <div class="container">
+            <div class="arch-detail-grid">
+                <div class="arch-detail-text">
+                    <h2>gRPC API Design</h2>
+                    <p>
+                        The API is the primary interface to kcore. Everything the CLI can do,
+                        the API can do. Everything a Terraform provider needs, the API provides.
+                        AI agents interact through the same API — no special endpoints, no
+                        separate "agent mode."
+                    </p>
+                    <dl class="spec-list">
+                        <div class="spec-item">
+                            <dt>Protocol</dt>
+                            <dd>gRPC over HTTP/2</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Schema</dt>
+                            <dd>Protocol Buffers v3 — typed, versioned, backwards-compatible</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Streaming</dt>
+                            <dd>Server-side streaming for logs, events, long-running operations</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Client generation</dt>
+                            <dd>Generate clients in Go, Python, Rust, TypeScript from the proto definitions</dd>
+                        </div>
+                        <div class="spec-item">
+                            <dt>Agent-friendly</dt>
+                            <dd>Structured requests and responses. No HTML to parse, no CLI output to regex.</dd>
+                        </div>
+                    </dl>
+                </div>
+                <div class="arch-detail-visual">
+                    <div class="terminal-window">
+                        <div class="terminal-header">
+                            <span class="terminal-button"></span>
+                            <span class="terminal-button"></span>
+                            <span class="terminal-button"></span>
+                            <span class="terminal-title">grpcurl</span>
+                        </div>
+                        <div class="terminal-body">
+<pre><code><span class="prompt">$</span> grpcurl -d '{}' \
+    localhost:9090 \
+    kcore.v1.KcoreService/ListVMs
+
+<span class="output">{
+  "vms": [
+    {
+      "name": "web-01",
+      "status": "RUNNING",
+      "node": "node-01",
+      "memory_mb": 4096,
+      "vcpu": 4,
+      "storage_gb": 50
+    }
+  ]
+}</span></code></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Storage -->
+    <section class="page-section alt-bg">
+        <div class="container">
+            <h2 class="section-title">Storage Architecture</h2>
+            <p class="section-subtitle">Use the storage backend that fits your hardware and use case.</p>
+            <div class="features-grid" style="margin-top: 2rem;">
+                <div class="feature-card">
+                    <h3>Local Directory</h3>
+                    <p>Store VM disk images as files on a local filesystem. Simple, fast, no dependencies. Good for single-node setups and home labs.</p>
+                    <span class="milestone-tag done">Available</span>
+                </div>
+                <div class="feature-card">
+                    <h3>LVM</h3>
+                    <p>Logical Volume Manager for flexible disk allocation. Thin provisioning, snapshots. Recommended for multi-VM hosts.</p>
+                    <span class="milestone-tag done">Available</span>
+                </div>
+                <div class="feature-card">
+                    <h3>ZFS</h3>
+                    <p>Copy-on-write filesystem with built-in snapshots, compression, and checksumming. Ideal for data integrity and advanced storage needs.</p>
+                    <span class="milestone-tag planned">Planned</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- API Consumers -->
+    <section class="page-section">
+        <div class="container">
+            <h2 class="section-title">API Consumers</h2>
+            <p class="section-subtitle">The same API serves every interface. No special cases.</p>
+            <div class="features-grid" style="margin-top: 2rem;">
+                <div class="feature-card">
+                    <h3>kctl CLI</h3>
+                    <p>Primary operator tool. Create, manage, and inspect VMs and nodes. Thin wrapper around the gRPC API.</p>
+                    <span class="milestone-tag done">Available</span>
+                </div>
+                <div class="feature-card">
+                    <h3>Terraform Provider</h3>
+                    <p>Manage kcore resources as infrastructure as code. Integrates with existing Terraform workflows.</p>
+                    <span class="milestone-tag in-progress">In Progress</span>
+                </div>
+                <div class="feature-card">
+                    <h3>MCP Server</h3>
+                    <p>Model Context Protocol server for AI agent integration. Agents query and manage infrastructure through structured tools.</p>
+                    <span class="milestone-tag in-progress">In Progress</span>
+                </div>
+                <div class="feature-card">
+                    <h3>Web Dashboard</h3>
+                    <p>Read-only cluster visibility. The dashboard consumes the API — it does not have special access.</p>
+                    <span class="milestone-tag planned">Planned</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta">
+        <div class="container">
+            <div class="cta-content">
+                <h2>Want to Dig Deeper?</h2>
+                <p>
+                    Read the documentation for setup guides, API reference, and CLI usage.
+                    Or reach out if you want to discuss the architecture.
+                </p>
+                <div class="cta-buttons">
+                    <a href="/docs/" class="btn btn-primary btn-large">Read the Docs</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-secondary btn-large">Contact Us</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>kcore Hypervisor</h4>
+                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Product</h4>
+                    <ul>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="architecture.html">Architecture</a></li>
+                        <li><a href="roadmap.html">Roadmap</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="/docs/">Documentation</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                        <li><a href="blog.html">Blog</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Project</h4>
+                    <ul>
+                        <li><a href="index.html#early-access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

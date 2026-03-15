@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore Hypervisor development roadmap — planned milestones from alpha through beta and beyond.">
+    <title>Roadmap — kcore Hypervisor</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Alpha Banner -->
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">hypervisor</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="roadmap.html">Roadmap</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="blog.html">Blog</a></li>
+                <li><a href="/docs/">Docs</a></li>
+                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="page-hero">
+        <div class="container">
+            <h1>Roadmap</h1>
+            <p>Where kcore is today and where it's headed. Updated as development progresses.</p>
+        </div>
+    </section>
+
+    <!-- Roadmap Intro -->
+    <section class="page-section">
+        <div class="container">
+            <div class="prose">
+                <p>
+                    kcore is alpha software. The roadmap below reflects current development
+                    priorities but is subject to change. We ship when things are ready, not
+                    to hit artificial dates.
+                </p>
+                <p>
+                    Milestones are grouped into phases. Each phase builds on the previous one.
+                    We won't skip ahead — foundations matter.
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Phase 1: Alpha (Current) -->
+    <section class="page-section alt-bg">
+        <div class="container">
+            <div class="roadmap-phase">
+                <div class="phase-header">
+                    <span class="phase-badge phase-current">Current Phase</span>
+                    <h2>Alpha — Foundation</h2>
+                    <p>Core platform architecture, basic VM lifecycle, CLI tooling.</p>
+                </div>
+                <div class="milestone-list">
+                    <div class="milestone done">
+                        <div class="milestone-status">
+                            <span class="milestone-dot done"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>NixOS-based immutable host OS</h4>
+                            <p>Declarative host configuration with atomic updates and generation-based rollback.</p>
+                            <span class="milestone-tag done">Done</span>
+                        </div>
+                    </div>
+                    <div class="milestone done">
+                        <div class="milestone-status">
+                            <span class="milestone-dot done"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>VM lifecycle management (kctl)</h4>
+                            <p>Create, start, stop, delete VMs from the command line. Basic CRUD operations.</p>
+                            <span class="milestone-tag done">Done</span>
+                        </div>
+                    </div>
+                    <div class="milestone done">
+                        <div class="milestone-status">
+                            <span class="milestone-dot done"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>gRPC API</h4>
+                            <p>Typed API for programmatic access. All CLI operations available via API.</p>
+                            <span class="milestone-tag done">Done</span>
+                        </div>
+                    </div>
+                    <div class="milestone done">
+                        <div class="milestone-status">
+                            <span class="milestone-dot done"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Multi-node architecture</h4>
+                            <p>Controller + node-agent topology. Nodes self-register with the controller on boot.</p>
+                            <span class="milestone-tag done">Done</span>
+                        </div>
+                    </div>
+                    <div class="milestone done">
+                        <div class="milestone-status">
+                            <span class="milestone-dot done"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Local and LVM storage</h4>
+                            <p>Store VM disks on local directories or LVM volumes.</p>
+                            <span class="milestone-tag done">Done</span>
+                        </div>
+                    </div>
+                    <div class="milestone in-progress">
+                        <div class="milestone-status">
+                            <span class="milestone-dot in-progress"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Networking and bridge management</h4>
+                            <p>Automated bridge setup, VLAN support, network configuration for VMs.</p>
+                            <span class="milestone-tag in-progress">In Progress</span>
+                        </div>
+                    </div>
+                    <div class="milestone in-progress">
+                        <div class="milestone-status">
+                            <span class="milestone-dot in-progress"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Image management</h4>
+                            <p>Download, cache, and manage OS images. Support for cloud-init enabled images.</p>
+                            <span class="milestone-tag in-progress">In Progress</span>
+                        </div>
+                    </div>
+                    <div class="milestone in-progress">
+                        <div class="milestone-status">
+                            <span class="milestone-dot in-progress"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>mTLS between controller and nodes</h4>
+                            <p>Encrypted, authenticated communication across the cluster.</p>
+                            <span class="milestone-tag in-progress">In Progress</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>YAML-based VM specs (kctl apply)</h4>
+                            <p>Declarative VM definitions applied from files, similar to kubectl apply.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Phase 2: Late Alpha -->
+    <section class="page-section">
+        <div class="container">
+            <div class="roadmap-phase">
+                <div class="phase-header">
+                    <span class="phase-badge phase-next">Next</span>
+                    <h2>Late Alpha — Automation &amp; Integrations</h2>
+                    <p>Terraform provider, MCP server, and the tooling that makes kcore programmable.</p>
+                </div>
+                <div class="milestone-list">
+                    <div class="milestone in-progress">
+                        <div class="milestone-status">
+                            <span class="milestone-dot in-progress"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Terraform provider</h4>
+                            <p>Manage kcore VMs, networks, and storage through Terraform. Declarative infrastructure as code.</p>
+                            <span class="milestone-tag in-progress">In Progress</span>
+                        </div>
+                    </div>
+                    <div class="milestone in-progress">
+                        <div class="milestone-status">
+                            <span class="milestone-dot in-progress"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>MCP server</h4>
+                            <p>Model Context Protocol server so AI agents can query and manage infrastructure through structured APIs.</p>
+                            <span class="milestone-tag in-progress">In Progress</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>ZFS storage backend</h4>
+                            <p>Snapshots, clones, and compression for VM storage using ZFS.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>VM snapshots and cloning</h4>
+                            <p>Create point-in-time snapshots and clone VMs for testing and development.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Resource scheduling</h4>
+                            <p>Automatic placement of VMs across nodes based on available resources.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Phase 3: Beta -->
+    <section class="page-section alt-bg">
+        <div class="container">
+            <div class="roadmap-phase">
+                <div class="phase-header">
+                    <span class="phase-badge phase-future">Future</span>
+                    <h2>Beta — Stability &amp; Operations</h2>
+                    <p>Web dashboard, HA, monitoring, and the features needed for serious use.</p>
+                </div>
+                <div class="milestone-list">
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Web dashboard</h4>
+                            <p>Read-only dashboard for cluster visibility. API consumer, not a primary interface.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>High availability</h4>
+                            <p>Automatic VM restart on node failure. Controller redundancy.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Live migration</h4>
+                            <p>Move running VMs between nodes without downtime.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Monitoring and alerting</h4>
+                            <p>Built-in metrics, health checks, and integration with Prometheus/Grafana.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                    <div class="milestone planned">
+                        <div class="milestone-status">
+                            <span class="milestone-dot planned"></span>
+                            <span class="milestone-line"></span>
+                        </div>
+                        <div class="milestone-content">
+                            <h4>Backup and restore</h4>
+                            <p>Scheduled backups with configurable retention policies.</p>
+                            <span class="milestone-tag planned">Planned</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta">
+        <div class="container">
+            <div class="cta-content">
+                <h2>Want to Influence the Roadmap?</h2>
+                <p>
+                    We're building kcore with input from early testers and design partners.
+                    If you have use cases that should shape our priorities, we want to hear from you.
+                </p>
+                <div class="cta-buttons">
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Talk to Us</a>
+                    <a href="blog.html" class="btn btn-secondary btn-large">Follow Development</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>kcore Hypervisor</h4>
+                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Product</h4>
+                    <ul>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="architecture.html">Architecture</a></li>
+                        <li><a href="roadmap.html">Roadmap</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="/docs/">Documentation</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                        <li><a href="blog.html">Blog</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Project</h4>
+                    <ul>
+                        <li><a href="index.html#early-access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

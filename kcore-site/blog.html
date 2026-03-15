@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="kcore Hypervisor development blog — progress updates, technical decisions, and changelog.">
+    <title>Blog — kcore Hypervisor</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <!-- Alpha Banner -->
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="index.html" style="color: inherit; text-decoration: none;">
+                    <span class="logo">kcore</span>
+                    <span class="logo-tag">hypervisor</span>
+                </a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="features.html">Features</a></li>
+                <li><a href="roadmap.html">Roadmap</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="blog.html">Blog</a></li>
+                <li><a href="/docs/">Docs</a></li>
+                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero -->
+    <section class="page-hero">
+        <div class="container">
+            <h1>Blog</h1>
+            <p>Development updates, technical decisions, and progress reports.</p>
+        </div>
+    </section>
+
+    <!-- Blog Posts -->
+    <section class="page-section">
+        <div class="container">
+            <div class="blog-list">
+
+                <!-- Post 3 -->
+                <article class="blog-post" id="website-relaunch">
+                    <div class="blog-meta">
+                        <time datetime="2026-03-15">15 March 2026</time>
+                    </div>
+                    <h2>Website Relaunch: Honest Positioning</h2>
+                    <div class="blog-body">
+                        <p>
+                            We've relaunched the kcore website with clearer, more honest positioning.
+                            The previous version leaned too heavily on AI marketing language and
+                            implied a maturity level we haven't reached. That's been corrected.
+                        </p>
+                        <p>
+                            kcore is now positioned as what it is: a modern Proxmox alternative
+                            in alpha. The messaging is straightforward — API-first, declarative,
+                            built for automation, not production ready. AI agents are first-class
+                            citizens in the platform design, but kcore is not an "AI platform."
+                        </p>
+                        <p>
+                            New pages include this blog, a <a href="roadmap.html">detailed roadmap</a>,
+                            a <a href="architecture.html">technical architecture overview</a>,
+                            and a <a href="faq.html">FAQ</a> that addresses maturity, Proxmox
+                            migration, and licensing honestly.
+                        </p>
+                    </div>
+                </article>
+
+                <!-- Post 2 -->
+                <article class="blog-post" id="multi-node-architecture">
+                    <div class="blog-meta">
+                        <time datetime="2026-02-20">20 February 2026</time>
+                    </div>
+                    <h2>Multi-Node Architecture Working</h2>
+                    <div class="blog-body">
+                        <p>
+                            The controller + node-agent architecture is functional. Nodes
+                            self-register with the controller on boot and report their
+                            capabilities (CPU, memory, storage). The controller tracks
+                            cluster state in SQLite and routes VM operations to the
+                            appropriate node agent via gRPC.
+                        </p>
+                        <p>
+                            Current topology: one controller (runs on your workstation or a
+                            management node) and N compute nodes. Each compute node runs
+                            NixOS with libvirtd and the kcore node-agent service.
+                        </p>
+                        <h3>What's next</h3>
+                        <ul>
+                            <li>mTLS between controller and agents (currently using insecure gRPC for development)</li>
+                            <li>Automatic certificate provisioning on node registration</li>
+                            <li>Node health checks and heartbeat monitoring</li>
+                        </ul>
+                    </div>
+                </article>
+
+                <!-- Post 1 -->
+                <article class="blog-post" id="why-we-started">
+                    <div class="blog-meta">
+                        <time datetime="2026-01-15">15 January 2026</time>
+                    </div>
+                    <h2>Why We Started Building kcore</h2>
+                    <div class="blog-body">
+                        <p>
+                            We've been running Proxmox in production for years. It works. But
+                            every time we needed to automate something — provision a VM from
+                            CI, template a cluster, reproduce an environment — we hit the
+                            same friction. The API is an afterthought to the web UI. The
+                            configuration model is imperative. The host OS is mutable Debian
+                            with all the drift that implies.
+                        </p>
+                        <p>
+                            We wanted a virtualization platform that:
+                        </p>
+                        <ul>
+                            <li>Has an API as its primary interface, not a web UI</li>
+                            <li>Uses declarative configuration — describe what you want, not the steps to get there</li>
+                            <li>Runs on an immutable host OS with atomic updates and instant rollback</li>
+                            <li>Is built for automation from day one — scripts, Terraform, AI agents, whatever tools you use</li>
+                        </ul>
+                        <p>
+                            Nothing like this existed, so we started building it. kcore is the
+                            result. It's very early — alpha, not production ready — but the
+                            foundation is solid: Go control plane, NixOS hosts, gRPC APIs,
+                            and a clean codebase with no legacy baggage.
+                        </p>
+                        <p>
+                            If you're an operator who thinks about infrastructure this way,
+                            <a href="mailto:team@tacconiconsulting.com">we'd like to hear from you</a>.
+                        </p>
+                    </div>
+                </article>
+
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA -->
+    <section class="cta">
+        <div class="container">
+            <div class="cta-content">
+                <h2>Stay Updated</h2>
+                <p>
+                    We post development updates here as we ship. For questions or early
+                    access, reach out directly.
+                </p>
+                <div class="cta-buttons">
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Contact Us</a>
+                    <a href="roadmap.html" class="btn btn-secondary btn-large">View Roadmap</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <h4>kcore Hypervisor</h4>
+                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
+                </div>
+                <div class="footer-section">
+                    <h4>Product</h4>
+                    <ul>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="architecture.html">Architecture</a></li>
+                        <li><a href="roadmap.html">Roadmap</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="/docs/">Documentation</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                        <li><a href="blog.html">Blog</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Project</h4>
+                    <ul>
+                        <li><a href="index.html#early-access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

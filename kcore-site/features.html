@@ -3,28 +3,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Explore kcore's powerful features - atomic updates, AI automation, and declarative infrastructure">
-    <title>Features - kcore.systems</title>
+    <meta name="description" content="kcore Hypervisor features — API-first design, declarative infrastructure, agent-friendly automation, immutable host OS.">
+    <title>Features — kcore Hypervisor</title>
     <link rel="stylesheet" href="css/styles.css">
     <style>
-        .features-hero {
-            padding: 8rem 0 4rem;
-            margin-top: 60px;
-            text-align: center;
-            background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
-        }
-
-        .features-hero h1 {
-            margin-bottom: 1rem;
-        }
-
-        .features-hero p {
-            font-size: 1.25rem;
-            color: var(--text-secondary);
-            max-width: 700px;
-            margin: 0 auto;
-        }
-
         .feature-section {
             padding: 4rem 0;
         }
@@ -124,36 +106,6 @@
             margin: 0.5rem 0;
         }
 
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 2rem;
-            margin: 3rem 0;
-        }
-
-        .stat-card {
-            text-align: center;
-            padding: 2rem;
-            background: var(--bg-card);
-            border: 1px solid var(--border-primary);
-            border-radius: 0.75rem;
-        }
-
-        .stat-number {
-            font-size: 3rem;
-            font-weight: 700;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 0.5rem;
-        }
-
-        .stat-label {
-            color: var(--text-secondary);
-            font-size: 1.1rem;
-        }
-
         .comparison-table {
             width: 100%;
             border-collapse: collapse;
@@ -190,6 +142,37 @@
             font-size: 1.2rem;
         }
 
+        .alpha-note {
+            font-size: 0.85rem;
+            color: var(--text-tertiary);
+            margin-top: 1rem;
+        }
+
+        .principles-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+            margin-top: 2rem;
+        }
+
+        .principle-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-primary);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+        }
+
+        .principle-card h4 {
+            color: var(--accent-primary);
+            margin-bottom: 0.75rem;
+        }
+
+        .principle-card p {
+            color: var(--text-secondary);
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
         @media (max-width: 968px) {
             .feature-detail {
                 grid-template-columns: 1fr;
@@ -198,59 +181,76 @@
             .feature-detail:nth-child(even) .feature-detail-text {
                 order: 1;
             }
-
-            .stats-grid {
-                grid-template-columns: 1fr;
-            }
         }
     </style>
 </head>
 <body>
+    <!-- Alpha Banner -->
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
     <!-- Navigation -->
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
                 <a href="index.html" style="color: inherit; text-decoration: none;">
                     <span class="logo">kcore</span>
-                    <span class="logo-tag">.systems</span>
+                    <span class="logo-tag">hypervisor</span>
                 </a>
             </div>
             <ul class="nav-menu">
                 <li><a href="features.html">Features</a></li>
-                <li><a href="index.html#platform">Platform</a></li>
-                <li><a href="index.html#ai">AI Integration</a></li>
+                <li><a href="roadmap.html">Roadmap</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="blog.html">Blog</a></li>
                 <li><a href="/docs/">Docs</a></li>
-                <li><a href="index.html#get-started" class="btn-primary">Get Started</a></li>
+                <li><a href="index.html#early-access" class="btn-primary">Early Access</a></li>
             </ul>
         </div>
     </nav>
 
     <!-- Hero -->
-    <section class="features-hero">
+    <section class="page-hero">
         <div class="container">
-            <h1>Powerful Features for Modern Infrastructure</h1>
-            <p>
-                Built from the ground up for reliability, automation, and developer experience. 
-                Everything you need to run production workloads at scale.
-            </p>
+            <h1>Technical Overview</h1>
+            <p>How kcore approaches virtualization differently. API-first, declarative, automation-friendly.</p>
         </div>
     </section>
 
-    <!-- Stats Section -->
+    <!-- Design Principles -->
     <section class="feature-section">
         <div class="container">
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="stat-number">&lt;5s</div>
-                    <div class="stat-label">VM Provisioning Time</div>
+            <div class="section-header">
+                <h2>Design Principles</h2>
+                <p>The decisions that shape kcore</p>
+            </div>
+            <div class="principles-grid">
+                <div class="principle-card">
+                    <h4>API Is the Product</h4>
+                    <p>The gRPC API is the primary interface. Every operation — creating VMs, managing storage, configuring networks — goes through the API. The CLI, web UI, and any agent tooling are all API consumers.</p>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-number">100%</div>
-                    <div class="stat-label">Rollback Success Rate</div>
+                <div class="principle-card">
+                    <h4>Declarative Over Imperative</h4>
+                    <p>You describe the desired state. kcore converges to it. No step-by-step scripts that break when something changes. State reconciliation is built into the core loop.</p>
                 </div>
-                <div class="stat-card">
-                    <div class="stat-number">0</div>
-                    <div class="stat-label">Downtime Updates</div>
+                <div class="principle-card">
+                    <h4>Immutable Host</h4>
+                    <p>The base system does not change at runtime. Updates are applied as new system generations. If an update fails, you boot the previous generation. No partial states.</p>
+                </div>
+                <div class="principle-card">
+                    <h4>Agents Are First-Class Citizens</h4>
+                    <p>AI agents and automation tools interact with kcore through the same APIs that humans use. The platform is machine-friendly by design — structured inputs, predictable outputs, no GUI-only workflows.</p>
+                </div>
+                <div class="principle-card">
+                    <h4>Simple Over Clever</h4>
+                    <p>kcore favors straightforward solutions. A small, correct system is better than a large, feature-complete one that's hard to reason about. Complexity is the enemy.</p>
+                </div>
+                <div class="principle-card">
+                    <h4>Operator Control</h4>
+                    <p>You own your hardware, your data, and your configuration. kcore does not phone home, require a cloud account, or impose licensing restrictions on how you use it.</p>
                 </div>
             </div>
         </div>
@@ -261,64 +261,43 @@
         <div class="container">
             <div class="feature-detail">
                 <div class="feature-detail-text">
-                    <h2>Atomic Updates & Instant Rollback</h2>
-                    <p>
-                        Never worry about broken deployments again. kcore's atomic update system ensures 
-                        that every change is either fully applied or completely reverted - no half-broken states.
-                    </p>
+                    <h2>Atomic Updates &amp; Rollback</h2>
+                    <p>The host OS is built on NixOS. System updates produce a new generation. If something goes wrong, you boot the previous generation. There is no "partially applied update" state.</p>
                     <ul class="feature-list-items">
                         <li>
                             <span class="icon">✓</span>
                             <div>
                                 <strong>Immutable Base System</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    The core OS never changes. All updates are versioned and isolated.
-                                </span>
+                                <span style="color: var(--text-tertiary);">The core OS is defined declaratively. Runtime changes don't persist.</span>
                             </div>
                         </li>
                         <li>
                             <span class="icon">✓</span>
                             <div>
-                                <strong>One-Click Rollback</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    Instantly revert to any previous state with zero downtime.
-                                </span>
+                                <strong>Generation-Based Rollback</strong><br>
+                                <span style="color: var(--text-tertiary);">Every update creates a new bootable generation. Rollback is a reboot, not a repair.</span>
                             </div>
                         </li>
                         <li>
                             <span class="icon">✓</span>
                             <div>
-                                <strong>State Verification</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    Automatic health checks ensure updates are successful before committing.
-                                </span>
+                                <strong>Reproducible Builds</strong><br>
+                                <span style="color: var(--text-tertiary);">Same inputs produce the same system image. No configuration drift across nodes.</span>
                             </div>
                         </li>
                     </ul>
                 </div>
                 <div class="feature-visual">
                     <div class="feature-diagram">
-                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">
-                            Version 1 (Current)
-                        </div>
+                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">Generation 1 (Current)</div>
                         <div class="diagram-arrow">↓</div>
-                        <div class="diagram-box" style="background: rgba(139, 92, 246, 0.1);">
-                            Apply Update → Version 2
-                        </div>
+                        <div class="diagram-box" style="background: rgba(139, 92, 246, 0.1);">Apply Update → Generation 2</div>
                         <div class="diagram-arrow">↓</div>
-                        <div class="diagram-box" style="background: rgba(16, 185, 129, 0.1);">
-                            ✓ Health Check Passed
-                        </div>
-                        <div style="margin: 2rem 0; text-align: center; color: var(--text-tertiary);">
-                            or
-                        </div>
-                        <div class="diagram-box" style="background: rgba(239, 68, 68, 0.1);">
-                            ✗ Health Check Failed
-                        </div>
+                        <div class="diagram-box" style="background: rgba(16, 185, 129, 0.1);">✓ Boot successful</div>
+                        <div style="margin: 2rem 0; text-align: center; color: var(--text-tertiary);">or</div>
+                        <div class="diagram-box" style="background: rgba(239, 68, 68, 0.1);">✗ Boot failed</div>
                         <div class="diagram-arrow">↓</div>
-                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">
-                            Auto Rollback → Version 1
-                        </div>
+                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">Reboot → Generation 1</div>
                     </div>
                 </div>
             </div>
@@ -330,67 +309,47 @@
         <div class="container">
             <div class="feature-detail">
                 <div class="feature-detail-text">
-                    <h2>Declarative Infrastructure as Code</h2>
-                    <p>
-                        Define your entire infrastructure in code. Version control everything from VMs to networks 
-                        to storage. No more clicking through UIs or running manual commands.
-                    </p>
+                    <h2>Declarative Infrastructure</h2>
+                    <p>Define what you want. kcore makes it happen. Version control your entire infrastructure. Reproduce it on another set of hardware with the same config files.</p>
                     <ul class="feature-list-items">
                         <li>
-                            <span class="icon">📝</span>
+                            <span class="icon">✓</span>
                             <div>
-                                <strong>Native Terraform Provider</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    First-class integration with your existing Terraform workflows.
-                                </span>
+                                <strong>Terraform Provider</strong><br>
+                                <span style="color: var(--text-tertiary);">Manage kcore resources alongside your existing Terraform workflows. (In development.)</span>
                             </div>
                         </li>
                         <li>
-                            <span class="icon">🔄</span>
+                            <span class="icon">✓</span>
                             <div>
-                                <strong>GitOps Ready</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    Commit infrastructure changes and watch them automatically deploy.
-                                </span>
+                                <strong>YAML Specs</strong><br>
+                                <span style="color: var(--text-tertiary);">Define VMs, networks, and storage in plain YAML. Apply with kctl.</span>
                             </div>
                         </li>
                         <li>
-                            <span class="icon">📊</span>
+                            <span class="icon">✓</span>
                             <div>
-                                <strong>State Management</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    Automatic drift detection and reconciliation keeps reality in sync.
-                                </span>
+                                <strong>Version Control Friendly</strong><br>
+                                <span style="color: var(--text-tertiary);">All configuration is text. Commit it to git. Review changes in PRs. Deploy from CI.</span>
                             </div>
                         </li>
                     </ul>
                 </div>
                 <div class="feature-visual">
-                    <pre style="margin: 0; font-family: var(--font-mono); font-size: 0.875rem; line-height: 1.6;"><code><span class="code-comment"># Infrastructure as Code</span>
+                    <pre style="margin: 0; font-family: var(--font-mono); font-size: 0.875rem; line-height: 1.6;"><code><span class="code-comment"># infrastructure/vms.tf</span>
 <span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"web"</span> {
   <span class="code-property">count</span>  = <span class="code-number">3</span>
   <span class="code-property">name</span>   = <span class="code-string">"web-${count.index}"</span>
   <span class="code-property">memory</span> = <span class="code-number">4096</span>
   <span class="code-property">vcpu</span>   = <span class="code-number">2</span>
-  
+
   <span class="code-keyword">disk</span> {
     <span class="code-property">size</span>         = <span class="code-string">"50GB"</span>
-    <span class="code-property">storage_class</span> = <span class="code-string">"ssd"</span>
+    <span class="code-property">storage_class</span> = <span class="code-string">"local-lvm"</span>
   }
-  
-  <span class="code-keyword">network</span> {
-    <span class="code-property">name</span> = <span class="code-string">"production"</span>
-  }
-}
 
-<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"db"</span> {
-  <span class="code-property">name</span>   = <span class="code-string">"postgres"</span>
-  <span class="code-property">memory</span> = <span class="code-number">8192</span>
-  <span class="code-property">vcpu</span>   = <span class="code-number">4</span>
-  
-  <span class="code-keyword">disk</span> {
-    <span class="code-property">size</span>         = <span class="code-string">"200GB"</span>
-    <span class="code-property">storage_class</span> = <span class="code-string">"nvme"</span>
+  <span class="code-keyword">network</span> {
+    <span class="code-property">name</span> = <span class="code-string">"internal"</span>
   }
 }</code></pre>
                 </div>
@@ -398,64 +357,45 @@
         </div>
     </section>
 
-    <!-- AI Integration -->
+    <!-- Agent-Friendly Architecture -->
     <section class="feature-section">
         <div class="container">
             <div class="feature-detail">
                 <div class="feature-detail-text">
-                    <h2>AI-Powered Automation</h2>
-                    <p>
-                        The first virtualization platform with native AI integration. Describe what you want 
-                        in natural language and watch the AI generate, validate, and deploy production-ready infrastructure.
-                    </p>
+                    <h2>Agent-Friendly Architecture</h2>
+                    <p>kcore is designed so that automation agents — including AI agents — can interact with the platform through the same interfaces humans use. No special "AI mode." The platform is machine-friendly by default.</p>
                     <ul class="feature-list-items">
                         <li>
-                            <span class="icon">🤖</span>
+                            <span class="icon">✓</span>
                             <div>
-                                <strong>MCP Server Built-in</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    Model Context Protocol lets any AI agent interact with your infrastructure.
-                                </span>
+                                <strong>MCP Server</strong><br>
+                                <span style="color: var(--text-tertiary);">Built-in Model Context Protocol server lets AI agents query and manage infrastructure. (In development.)</span>
                             </div>
                         </li>
                         <li>
-                            <span class="icon">💡</span>
+                            <span class="icon">✓</span>
                             <div>
-                                <strong>Intelligent Code Generation</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    Converts natural language to optimized Terraform configurations.
-                                </span>
+                                <strong>Structured APIs</strong><br>
+                                <span style="color: var(--text-tertiary);">gRPC with typed schemas. Agents get predictable inputs and outputs, not scraped HTML or CLI parsing.</span>
                             </div>
                         </li>
                         <li>
-                            <span class="icon">📈</span>
+                            <span class="icon">✓</span>
                             <div>
-                                <strong>Auto-Optimization</strong><br>
-                                <span style="color: var(--text-tertiary);">
-                                    ML models analyze workloads and suggest resource optimizations.
-                                </span>
+                                <strong>Declarative Workflows</strong><br>
+                                <span style="color: var(--text-tertiary);">Agents describe desired state. The platform handles convergence. No multi-step imperative sequences to get wrong.</span>
                             </div>
                         </li>
                     </ul>
                 </div>
                 <div class="feature-visual">
-                    <div style="background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem;">
-                        <div style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.5rem;">User:</div>
-                        <div>"Create a web cluster with 3 servers, load balanced, with a PostgreSQL database"</div>
-                    </div>
-                    <div style="text-align: center; color: var(--accent-primary); margin: 1rem 0;">
-                        ⚡ AI Processing
-                    </div>
-                    <div style="background: var(--bg-tertiary); border: 1px solid var(--border-primary); border-radius: 0.5rem; padding: 1rem;">
-                        <div style="color: var(--text-secondary); font-size: 0.875rem; margin-bottom: 0.5rem;">AI Agent:</div>
-                        <div style="margin-bottom: 1rem;">"I'll create that infrastructure for you:"</div>
-                        <pre style="margin: 0; font-size: 0.75rem; line-height: 1.4;"><code>✓ 3x web servers (4GB RAM each)
-✓ 1x PostgreSQL (8GB RAM)
-✓ Load balancer configured
-✓ Network policies applied</code></pre>
-                        <div style="margin-top: 1rem; padding: 0.5rem; background: rgba(16, 185, 129, 0.1); border-radius: 0.25rem; font-size: 0.875rem;">
-                            ✓ All resources deployed successfully
-                        </div>
+                    <div class="feature-diagram">
+                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">Human / CLI / Script</div>
+                        <div class="diagram-arrow">↓</div>
+                        <div class="diagram-box" style="background: rgba(139, 92, 246, 0.1);">gRPC API</div>
+                        <div class="diagram-arrow">↑</div>
+                        <div class="diagram-box" style="background: rgba(99, 102, 241, 0.1);">AI Agent / MCP Client / Terraform</div>
+                        <div style="margin: 2rem 0; text-align: center; color: var(--text-tertiary); font-size: 0.9rem;">Same API. Same access. No special treatment.</div>
                     </div>
                 </div>
             </div>
@@ -465,67 +405,60 @@
     <!-- Comparison Table -->
     <section class="feature-section">
         <div class="container">
-            <h2 style="text-align: center; margin-bottom: 3rem;">How kcore Compares</h2>
+            <h2 style="text-align: center; margin-bottom: 1rem;">How kcore Compares</h2>
+            <p style="text-align: center; color: var(--text-secondary); margin-bottom: 3rem;">An honest look at the current state. kcore is alpha software.</p>
             <table class="comparison-table">
                 <thead>
                     <tr>
-                        <th>Feature</th>
-                        <th>kcore</th>
-                        <th>Traditional VMs</th>
-                        <th>Container Orchestration</th>
+                        <th>Capability</th>
+                        <th>kcore (alpha)</th>
+                        <th>Proxmox</th>
                     </tr>
                 </thead>
                 <tbody>
                     <tr>
-                        <td>Atomic Updates</td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span class="cross-mark">✗</span></td>
-                        <td><span class="check-mark">✓</span></td>
+                        <td>API-first design</td>
+                        <td><span class="check-mark">✓</span> gRPC</td>
+                        <td><span style="color: var(--warning);">REST (secondary to UI)</span></td>
                     </tr>
                     <tr>
-                        <td>Instant Rollback</td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span class="cross-mark">✗</span></td>
-                        <td><span class="check-mark">✓</span></td>
+                        <td>Declarative config</td>
+                        <td><span class="check-mark">✓</span> Native</td>
+                        <td><span class="cross-mark">✗</span> Imperative</td>
                     </tr>
                     <tr>
-                        <td>Infrastructure as Code</td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span style="color: var(--warning);">Partial</span></td>
-                        <td><span class="check-mark">✓</span></td>
+                        <td>Immutable host OS</td>
+                        <td><span class="check-mark">✓</span> NixOS</td>
+                        <td><span class="cross-mark">✗</span> Debian (mutable)</td>
                     </tr>
                     <tr>
-                        <td>AI Integration</td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span class="cross-mark">✗</span></td>
-                        <td><span class="cross-mark">✗</span></td>
+                        <td>Agent-friendly interfaces</td>
+                        <td><span class="check-mark">✓</span> By design</td>
+                        <td><span class="cross-mark">✗</span> Not a design goal</td>
                     </tr>
                     <tr>
-                        <td>Full OS Isolation</td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span class="cross-mark">✗</span></td>
+                        <td>Production maturity</td>
+                        <td><span style="color: var(--warning);">Alpha</span></td>
+                        <td><span class="check-mark">✓</span> Battle-tested</td>
                     </tr>
                     <tr>
-                        <td>Legacy App Support</td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span class="check-mark">✓</span></td>
-                        <td><span style="color: var(--warning);">Limited</span></td>
+                        <td>Community &amp; ecosystem</td>
+                        <td><span style="color: var(--warning);">Early</span></td>
+                        <td><span class="check-mark">✓</span> Large</td>
                     </tr>
                     <tr>
-                        <td>Resource Efficiency</td>
-                        <td><span style="color: var(--success);">High</span></td>
-                        <td><span style="color: var(--warning);">Medium</span></td>
-                        <td><span style="color: var(--success);">Very High</span></td>
+                        <td>HA &amp; clustering</td>
+                        <td><span style="color: var(--warning);">In progress</span></td>
+                        <td><span class="check-mark">✓</span> Mature</td>
                     </tr>
                     <tr>
-                        <td>Learning Curve</td>
-                        <td><span style="color: var(--success);">Low</span></td>
-                        <td><span style="color: var(--success);">Low</span></td>
-                        <td><span style="color: var(--warning);">High</span></td>
+                        <td>Web UI</td>
+                        <td><span style="color: var(--warning);">Planned</span></td>
+                        <td><span class="check-mark">✓</span> Full-featured</td>
                     </tr>
                 </tbody>
             </table>
+            <p class="alpha-note">kcore is alpha software and does not yet match Proxmox in feature completeness or stability. This table reflects architectural direction, not current parity.</p>
         </div>
     </section>
 
@@ -533,12 +466,13 @@
     <section class="cta" style="margin-top: 0;">
         <div class="container">
             <div class="cta-content">
-                <h2>Experience the Future of Virtualization</h2>
-                <p>Get started with kcore today and transform how you manage infrastructure.</p>
+                <h2>Want to Try kcore?</h2>
+                <p>We're looking for early testers and design partners who want to help build a modern alternative to Proxmox.</p>
                 <div class="cta-buttons">
-                    <a href="/docs/" class="btn btn-primary btn-large">Read the Docs</a>
-                    <a href="index.html#get-started" class="btn btn-secondary btn-large">Get Started</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Request Early Access</a>
+                    <a href="/docs/" class="btn btn-secondary btn-large">Read the Docs</a>
                 </div>
+                <p class="cta-note">Alpha software. For labs, experimentation, and early design partners only.</p>
             </div>
         </div>
     </section>
@@ -548,36 +482,36 @@
         <div class="container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <h4>kcore</h4>
-                    <p>Next-generation virtualization platform powered by AI</p>
+                    <h4>kcore Hypervisor</h4>
+                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
                     <h4>Product</h4>
                     <ul>
                         <li><a href="features.html">Features</a></li>
-                        <li><a href="index.html#platform">Platform</a></li>
-                        <li><a href="index.html#ai">AI Integration</a></li>
+                        <li><a href="architecture.html">Architecture</a></li>
+                        <li><a href="roadmap.html">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
                     <h4>Resources</h4>
                     <ul>
                         <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="#">API Reference</a></li>
-                        <li><a href="/docs/quickstart.html">Quick Start</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                        <li><a href="blog.html">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Company</h4>
+                    <h4>Project</h4>
                     <ul>
-                        <li><a href="#">About</a></li>
-                        <li><a href="#">Blog</a></li>
-                        <li><a href="#">Contact</a></li>
+                        <li><a href="index.html#early-access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
@@ -585,5 +519,3 @@
     <script src="js/main.js"></script>
 </body>
 </html>
-
-

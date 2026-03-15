@@ -3,25 +3,32 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="kcore - Next-generation virtualization platform with atomic updates, AI-driven automation, and declarative infrastructure">
-    <title>kcore.systems - AI-Powered Virtualization Platform</title>
-    <link rel="sitemap" type="application/xml" title="Sitemap" href="/sitemap.xml">
+    <meta name="description" content="kcore Hypervisor — a modern, API-first Proxmox alternative for operators who want a cleaner, more programmable virtualization platform. Alpha software.">
+    <title>kcore Hypervisor — Modern Proxmox Alternative</title>
     <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+    <!-- Alpha Banner -->
+    <div class="alpha-banner">
+        <span class="alpha-badge">ALPHA</span>
+        kcore is alpha software under active development. Not production ready.
+    </div>
+
     <!-- Navigation -->
     <nav class="navbar">
         <div class="container">
             <div class="nav-brand">
                 <span class="logo">kcore</span>
-                <span class="logo-tag">.systems</span>
+                <span class="logo-tag">hypervisor</span>
             </div>
             <ul class="nav-menu">
-                <li><a href="#features">Features</a></li>
-                <li><a href="#platform">Platform</a></li>
-                <li><a href="#ai">AI Integration</a></li>
+                <li><a href="features.html">Features</a></li>
+                <li><a href="roadmap.html">Roadmap</a></li>
+                <li><a href="architecture.html">Architecture</a></li>
+                <li><a href="faq.html">FAQ</a></li>
+                <li><a href="blog.html">Blog</a></li>
                 <li><a href="/docs/">Docs</a></li>
-                <li><a href="#get-started" class="btn-primary">Get Started</a></li>
+                <li><a href="#early-access" class="btn-primary">Early Access</a></li>
             </ul>
         </div>
     </nav>
@@ -31,22 +38,25 @@
         <div class="container">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    Next-Gen Declarative Virtualization<br>
-                    <span class="gradient-text">Powered by AI</span>
+                    A Modern<br>
+                    <span class="gradient-text">Proxmox Alternative</span>
                 </h1>
                 <p class="hero-subtitle">
-                    Deploy, manage, and scale virtual infrastructure with atomic updates, 
-                    built-in automation, and AI-driven intelligence. Infrastructure as code, 
-                    evolved.
+                    kcore is an API-first virtualization platform built for operators who want
+                    a cleaner, more programmable way to manage VMs. Declarative configuration,
+                    automation-friendly design, and a modern control plane.
                 </p>
+                <div class="hero-alpha-warning">
+                    Alpha software. Not production ready. For early testers, labs, and design partners.
+                </div>
                 <div class="hero-buttons">
-                    <a href="#get-started" class="btn btn-primary">Get Started</a>
-                    <a href="/docs/" class="btn btn-secondary">Read Docs</a>
+                    <a href="#early-access" class="btn btn-primary">Request Early Access</a>
+                    <a href="/docs/" class="btn btn-secondary">Read the Docs</a>
                 </div>
                 <div class="hero-code">
-                    <pre><code><span class="code-comment"># Deploy a VM with kcore</span>
-<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"app"</span> {
-  <span class="code-property">name</span>     = <span class="code-string">"production-app"</span>
+                    <pre><code><span class="code-comment"># Define a VM declaratively</span>
+<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"web"</span> {
+  <span class="code-property">name</span>     = <span class="code-string">"web-server"</span>
   <span class="code-property">memory</span>   = <span class="code-number">4096</span>
   <span class="code-property">vcpu</span>     = <span class="code-number">4</span>
   <span class="code-property">storage</span>  = <span class="code-string">"50GB"</span>
@@ -59,24 +69,23 @@
         </div>
     </section>
 
-    <!-- Features Grid -->
-    <section id="features" class="features">
+    <!-- Why kcore -->
+    <section id="why" class="features">
         <div class="container">
             <div class="section-header">
-                <h2>Built for Modern Infrastructure</h2>
-                <p>Everything you need to manage virtualized workloads at scale</p>
+                <h2>Why kcore</h2>
+                <p>Virtualization platforms haven't kept up with how operators actually work</p>
             </div>
             <div class="features-grid">
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
-                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
-                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
+                            <polyline points="16 18 22 12 16 6"></polyline>
+                            <polyline points="8 6 2 12 8 18"></polyline>
                         </svg>
                     </div>
-                    <h3>Atomic Updates & Rollback</h3>
-                    <p>Deploy with confidence. Every system update is atomic with instant rollback capabilities. No more broken deployments.</p>
+                    <h3>API-First Design</h3>
+                    <p>Every operation is available through a gRPC API. No more clicking through web UIs to do what a script should handle.</p>
                 </div>
 
                 <div class="feature-card">
@@ -87,32 +96,20 @@
                             <line x1="12" y1="17" x2="12" y2="21"></line>
                         </svg>
                     </div>
-                    <h3>Declarative Infrastructure</h3>
-                    <p>Define your entire infrastructure as code. Version control your VMs, networks, and storage with Terraform integration.</p>
+                    <h3>Declarative Configuration</h3>
+                    <p>Define your infrastructure as code. Version control your VMs, networks, and storage. Reproduce environments reliably.</p>
                 </div>
 
                 <div class="feature-card">
                     <div class="feature-icon">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                            <circle cx="9" cy="10" r="1"></circle>
-                            <circle cx="15" cy="10" r="1"></circle>
-                            <path d="M9 15c1.5 1 3.5 1 5 0"></path>
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline>
+                            <line x1="12" y1="22.08" x2="12" y2="12"></line>
                         </svg>
                     </div>
-                    <h3>AI-Powered Agent</h3>
-                    <p>Natural language to infrastructure. Our MCP server lets AI agents talk directly to the management API to generate and deploy code.</p>
-                </div>
-
-                <div class="feature-card">
-                    <div class="feature-icon">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <polyline points="16 18 22 12 16 6"></polyline>
-                            <polyline points="8 6 2 12 8 18"></polyline>
-                        </svg>
-                    </div>
-                    <h3>Built-in Automation</h3>
-                    <p>Automate everything from provisioning to scaling. Intelligent orchestration that learns from your workload patterns.</p>
+                    <h3>Built for Automation</h3>
+                    <p>Designed from the ground up so tools, scripts, and agents can manage infrastructure without human intervention.</p>
                 </div>
 
                 <div class="feature-card">
@@ -123,8 +120,8 @@
                             <polyline points="2 12 12 17 22 12"></polyline>
                         </svg>
                     </div>
-                    <h3>Terraform Native</h3>
-                    <p>First-class Terraform provider. Manage kcore resources alongside your existing infrastructure with familiar tooling.</p>
+                    <h3>Immutable Base System</h3>
+                    <p>The host OS is immutable. Updates are atomic with instant rollback. No more broken nodes after a bad upgrade.</p>
                 </div>
 
                 <div class="feature-card">
@@ -134,92 +131,66 @@
                             <polyline points="12 6 12 12 16 14"></polyline>
                         </svg>
                     </div>
-                    <h3>Instant Provisioning</h3>
-                    <p>Deploy VMs in seconds, not minutes. Optimized image management and intelligent resource allocation for maximum speed.</p>
+                    <h3>Modern Architecture</h3>
+                    <p>Go control plane, gRPC APIs, NixOS-based host. No legacy PHP, no Perl scripts, no decades of accumulated cruft.</p>
+                </div>
+
+                <div class="feature-card">
+                    <div class="feature-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                    </div>
+                    <h3>Agent-Friendly</h3>
+                    <p>AI agents are first-class citizens. The platform is designed so automation agents can interact with it naturally through APIs and declarative workflows.</p>
                 </div>
             </div>
         </div>
     </section>
 
-    <!-- Platform Section -->
-    <section id="platform" class="platform">
+    <!-- Architecture / What Makes kcore Different -->
+    <section id="architecture" class="platform">
         <div class="container">
             <div class="platform-content">
                 <div class="platform-text">
-                    <h2>A Platform Built for Reliability</h2>
+                    <h2>What Makes kcore Different</h2>
                     <p class="section-lead">
-                        kcore combines the best of modern virtualization with battle-tested 
-                        infrastructure principles.
+                        Proxmox works. But it was designed in a different era. kcore starts fresh
+                        with the assumption that infrastructure should be programmable, reproducible,
+                        and managed by software — not just by humans clicking through a web UI.
                     </p>
                     <ul class="feature-list">
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>Immutable OS</strong>
-                                <p>Base system never changes. Updates are atomic, rollbacks are instant.</p>
+                                <strong>API-First, Not UI-First</strong>
+                                <p>The API is the primary interface. The UI is a consumer of the API, not the other way around.</p>
                             </div>
                         </li>
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>API-First Design</strong>
-                                <p>Everything is accessible via gRPC APIs. Build custom integrations with ease.</p>
+                                <strong>Declarative Workflows</strong>
+                                <p>Describe what you want. kcore converges to that state. No imperative step-by-step provisioning.</p>
                             </div>
                         </li>
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>Multi-Node Orchestration</strong>
-                                <p>Deploy across multiple nodes with automatic load balancing and failover.</p>
+                                <strong>Agents as First-Class Citizens</strong>
+                                <p>The platform is designed so AI agents and automation tools can control it through the same APIs humans use. Machine-friendly by default.</p>
                             </div>
                         </li>
                         <li>
                             <span class="check-icon">✓</span>
                             <div>
-                                <strong>Storage Flexibility</strong>
-                                <p>Local directories, LVM, ZFS - use the storage backend that fits your needs.</p>
+                                <strong>Clean Codebase</strong>
+                                <p>Written in Go. No legacy dependencies. No accumulated technical debt from two decades of patches.</p>
                             </div>
                         </li>
                     </ul>
                 </div>
                 <div class="platform-visual">
-                    <!-- AI Chat Window -->
-                    <div class="chat-window" style="margin-bottom: 1.5rem;">
-                        <div class="chat-header">
-                            <span class="status-dot"></span>
-                            <span>AI Infrastructure Assistant</span>
-                        </div>
-                        <div class="chat-body" style="max-height: 300px; padding: 1rem;">
-                            <div class="message user">
-                                <p>Show me the current state of our infrastructure. Any issues?</p>
-                            </div>
-                            <div class="message assistant">
-                                <p><strong>Infrastructure Overview:</strong></p>
-                                <p style="margin: 0.5rem 0; font-size: 0.9rem;">
-                                    ✓ <strong>3 VMs running</strong> across 2 nodes<br>
-                                    ✓ <strong>Total resources:</strong> 14 vCPUs, 14GB RAM<br>
-                                    ⚠️ <strong>Node-02:</strong> CPU usage at 78%<br>
-                                    ✓ <strong>Storage:</strong> 128GB used / 500GB available
-                                </p>
-                                <p style="margin-top: 0.75rem; font-size: 0.85rem; color: var(--text-tertiary);">
-                                    💡 Recommendation: Consider scaling node-02 or redistributing workload.
-                                </p>
-                            </div>
-                            <div class="message user">
-                                <p>What's running on node-01?</p>
-                            </div>
-                            <div class="message assistant">
-                                <p style="font-size: 0.9rem;">
-                                    <strong>Node-01 workloads:</strong><br>
-                                    • production-app (4GB, 4 vCPU) - running<br>
-                                    • dev-web (2GB, 2 vCPU) - stopped<br><br>
-                                    Current load: 32% CPU, 6GB/16GB RAM
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Terminal Window -->
                     <div class="terminal-window">
                         <div class="terminal-header">
                             <span class="terminal-button"></span>
@@ -230,19 +201,18 @@
                         <div class="terminal-body">
 <pre><code><span class="prompt">$</span> kctl get vms
 <span class="output">NAME            STATUS    NODE       MEMORY  VCPU
-production-app  running   node-01    4096MB  4
+web-server      running   node-01    4096MB  4
 staging-db      running   node-02    8192MB  8
-dev-web         stopped   node-01    2048MB  2</span>
+dev-env         stopped   node-01    2048MB  2</span>
 
-<span class="prompt">$</span> kctl describe vm production-app
-<span class="output">Name:        production-app
+<span class="prompt">$</span> kctl describe vm web-server
+<span class="output">Name:        web-server
 Status:      running
 Node:        node-01
 Memory:      4096 MB
 vCPU:        4 cores
 Storage:     50 GB (local-lvm)
-Network:     192.168.122.100
-Created:     2024-11-10 14:23:45</span>
+Network:     192.168.122.100</span>
 
 <span class="prompt">$</span> <span class="cursor">█</span></code></pre>
                         </div>
@@ -252,75 +222,76 @@ Created:     2024-11-10 14:23:45</span>
         </div>
     </section>
 
-    <!-- AI Integration Section -->
-    <section id="ai" class="ai-section">
+    <!-- Current Status -->
+    <section id="status" class="status-section">
         <div class="container">
-            <div class="ai-content">
-                <div class="ai-visual">
-                    <div class="chat-window">
-                        <div class="chat-header">
-                            <span class="status-dot"></span>
-                            <span>AI Agent Connected</span>
-                        </div>
-                        <div class="chat-body">
-                            <div class="message user">
-                                <p>Create a VM cluster with 3 nodes, 4GB RAM each, for my web application</p>
-                            </div>
-                            <div class="message assistant">
-                                <p>I'll create a VM cluster for you. Here's the infrastructure code:</p>
-                                <div class="code-block">
-<pre><code>resource "kcore_vm" "web_cluster" {
-  count    = 3
-  name     = "web-${count.index + 1}"
-  memory   = 4096
-  vcpu     = 2
-  storage  = "20GB"
-  
-  network {
-    type = "bridge"
-  }
-}</code></pre>
-                                </div>
-                                <p>Would you like me to deploy this?</p>
-                            </div>
-                            <div class="message user">
-                                <p>Yes, deploy it</p>
-                            </div>
-                            <div class="message assistant">
-                                <p>✓ Deploying 3 VMs...<br>✓ All VMs are now running</p>
-                            </div>
-                        </div>
+            <div class="section-header">
+                <h2>Current Status</h2>
+                <p>Honest about where we are</p>
+            </div>
+            <div class="status-content">
+                <div class="status-card status-alpha">
+                    <div class="status-label">Project Maturity</div>
+                    <div class="status-value">Alpha</div>
+                    <p>kcore is under active development. Core functionality is being built and tested. APIs and interfaces may change without notice.</p>
+                </div>
+                <div class="status-details">
+                    <div class="status-item">
+                        <h4>What works today</h4>
+                        <ul>
+                            <li>NixOS-based immutable host OS</li>
+                            <li>VM lifecycle management via CLI</li>
+                            <li>gRPC API for programmatic access</li>
+                            <li>Multi-node architecture with controller + agents</li>
+                            <li>Local and LVM storage backends</li>
+                        </ul>
+                    </div>
+                    <div class="status-item">
+                        <h4>What's in progress</h4>
+                        <ul>
+                            <li>Terraform provider</li>
+                            <li>Networking and bridge management</li>
+                            <li>MCP server for agent integration</li>
+                            <li>Web dashboard</li>
+                            <li>Image management and distribution</li>
+                        </ul>
+                    </div>
+                    <div class="status-item">
+                        <h4>Not recommended for</h4>
+                        <ul>
+                            <li>Production workloads</li>
+                            <li>Business-critical infrastructure</li>
+                            <li>Environments that require stability guarantees</li>
+                        </ul>
                     </div>
                 </div>
-                <div class="ai-text">
-                    <h2>Infrastructure Meets Intelligence</h2>
-                    <p class="section-lead">
-                        The first virtualization platform with native AI integration. 
-                        Talk to your infrastructure in natural language.
-                    </p>
-                    <div class="ai-features">
-                        <div class="ai-feature">
-                            <h4>MCP Server Integration</h4>
-                            <p>
-                                Built-in Model Context Protocol server lets AI agents understand 
-                                and interact with your infrastructure directly.
-                            </p>
-                        </div>
-                        <div class="ai-feature">
-                            <h4>Code Generation</h4>
-                            <p>
-                                Describe what you need in plain English. The AI generates 
-                                production-ready Terraform code and deploys it.
-                            </p>
-                        </div>
-                        <div class="ai-feature">
-                            <h4>Intelligent Optimization</h4>
-                            <p>
-                                Machine learning analyzes your workloads and suggests 
-                                optimizations for resource allocation and cost savings.
-                            </p>
-                        </div>
-                    </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Who It's For -->
+    <section class="who-section">
+        <div class="container">
+            <div class="section-header">
+                <h2>Who kcore Is For</h2>
+                <p>Built for people who think about infrastructure differently</p>
+            </div>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <h3>Home Lab Operators</h3>
+                    <p>You run your own hardware and want something cleaner than Proxmox without the complexity of OpenStack. You value simplicity and control.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Small Hosting &amp; Edge</h3>
+                    <p>You manage a handful of servers for clients or at edge locations. You need something lightweight, scriptable, and easy to reason about.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Infrastructure Engineers</h3>
+                    <p>You want to manage VMs the same way you manage everything else — through APIs, version-controlled config, and automation pipelines.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>Early Adopters</h3>
+                    <p>You're comfortable running alpha software. You want to shape the direction of a new virtualization platform and give feedback that matters.</p>
                 </div>
             </div>
         </div>
@@ -329,7 +300,7 @@ Created:     2024-11-10 14:23:45</span>
     <!-- Code Example Section -->
     <section class="code-example">
         <div class="container">
-            <h2>Declarative by Design</h2>
+            <h2>Declarative by Default</h2>
             <p class="section-lead">Define your infrastructure with clean, readable code</p>
             <div class="code-tabs">
                 <button class="tab-button active" data-tab="terraform">Terraform</button>
@@ -338,37 +309,36 @@ Created:     2024-11-10 14:23:45</span>
             </div>
             <div class="code-panels">
                 <div class="code-panel active" id="terraform">
-<pre><code><span class="code-comment"># Define a complete VM with storage and networking</span>
-<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"production"</span> {
-  <span class="code-property">name</span>   = <span class="code-string">"prod-app-01"</span>
+<pre><code><span class="code-comment"># Define a VM with storage and networking</span>
+<span class="code-keyword">resource</span> <span class="code-string">"kcore_vm"</span> <span class="code-string">"web"</span> {
+  <span class="code-property">name</span>   = <span class="code-string">"web-01"</span>
   <span class="code-property">memory</span> = <span class="code-number">8192</span>
   <span class="code-property">vcpu</span>   = <span class="code-number">4</span>
-  
+
   <span class="code-keyword">disk</span> {
     <span class="code-property">size</span>         = <span class="code-string">"100GB"</span>
     <span class="code-property">storage_class</span> = <span class="code-string">"local-lvm"</span>
   }
-  
+
   <span class="code-keyword">network</span> {
     <span class="code-property">type</span> = <span class="code-string">"bridge"</span>
     <span class="code-property">name</span> = <span class="code-string">"br0"</span>
   }
-  
+
   <span class="code-property">tags</span> = {
-    <span class="code-property">environment</span> = <span class="code-string">"production"</span>
-    <span class="code-property">team</span>        = <span class="code-string">"platform"</span>
+    <span class="code-property">environment</span> = <span class="code-string">"staging"</span>
+    <span class="code-property">managed_by</span>  = <span class="code-string">"terraform"</span>
   }
 }</code></pre>
                 </div>
                 <div class="code-panel" id="yaml">
-<pre><code><span class="code-comment"># vm.yaml - VM specification</span>
+<pre><code><span class="code-comment"># vm.yaml</span>
 <span class="code-property">apiVersion</span>: <span class="code-string">v1</span>
 <span class="code-property">kind</span>: <span class="code-string">VirtualMachine</span>
 <span class="code-property">metadata</span>:
-  <span class="code-property">name</span>: <span class="code-string">prod-app-01</span>
+  <span class="code-property">name</span>: <span class="code-string">web-01</span>
   <span class="code-property">labels</span>:
-    <span class="code-property">environment</span>: <span class="code-string">production</span>
-    <span class="code-property">team</span>: <span class="code-string">platform</span>
+    <span class="code-property">environment</span>: <span class="code-string">staging</span>
 <span class="code-property">spec</span>:
   <span class="code-property">memory</span>: <span class="code-number">8192</span>
   <span class="code-property">vcpu</span>: <span class="code-number">4</span>
@@ -380,22 +350,21 @@ Created:     2024-11-10 14:23:45</span>
     <span class="code-property">name</span>: <span class="code-string">br0</span></code></pre>
                 </div>
                 <div class="code-panel" id="cli">
-<pre><code><span class="code-comment"># Create VM using kctl</span>
-<span class="prompt">$</span> kctl create vm prod-app-01 \
+<pre><code><span class="code-comment"># Create a VM from the command line</span>
+<span class="prompt">$</span> kctl create vm web-01 \
   --memory 8192 \
   --vcpu 4 \
   --disk size=100GB,storage-class=local-lvm \
   --network type=bridge,name=br0 \
-  --label environment=production \
-  --label team=platform
+  --label environment=staging
 
-<span class="output">✓ VM prod-app-01 created successfully
+<span class="output">✓ VM web-01 created
 ✓ Starting VM...</span>
 
-<span class="code-comment"># Apply from file</span>
+<span class="code-comment"># Or apply from a file</span>
 <span class="prompt">$</span> kctl apply -f vm.yaml
 
-<span class="output">✓ VM prod-app-01 configured
+<span class="output">✓ VM web-01 configured
 ✓ Status: running</span></code></pre>
                 </div>
             </div>
@@ -403,19 +372,22 @@ Created:     2024-11-10 14:23:45</span>
     </section>
 
     <!-- CTA Section -->
-    <section id="get-started" class="cta">
+    <section id="early-access" class="cta">
         <div class="container">
             <div class="cta-content">
-                <h2>Ready to Transform Your Infrastructure?</h2>
-                <p>Get started with kcore in minutes. Open source and ready for production.</p>
+                <h2>Interested in Testing kcore?</h2>
+                <p>
+                    kcore is alpha software. We're looking for early testers, design partners,
+                    and operators who want to help shape a modern virtualization platform.
+                </p>
                 <div class="cta-buttons">
-                    <a href="#" class="btn btn-primary btn-large">Download kcore</a>
-                    <a href="/docs/" class="btn btn-secondary btn-large">Browse Documentation</a>
+                    <a href="mailto:team@tacconiconsulting.com" class="btn btn-primary btn-large">Request Early Access</a>
+                    <a href="/docs/" class="btn btn-secondary btn-large">Read the Docs</a>
                 </div>
-                <div class="install-command">
-                    <code>curl -sSL https://get.kcore.systems | sh</code>
-                    <button class="copy-btn" onclick="copyToClipboard('curl -sSL https://get.kcore.systems | sh')">Copy</button>
-                </div>
+                <p class="cta-note">
+                    Suitable for experimentation, home labs, and early design partners only.
+                    Not for production use.
+                </p>
             </div>
         </div>
     </section>
@@ -425,39 +397,36 @@ Created:     2024-11-10 14:23:45</span>
         <div class="container">
             <div class="footer-content">
                 <div class="footer-section">
-                    <h4>kcore</h4>
-                    <p>Next-generation virtualization platform powered by AI</p>
+                    <h4>kcore Hypervisor</h4>
+                    <p>A modern Proxmox alternative. API-first, declarative, built for operators and automation.</p>
                 </div>
                 <div class="footer-section">
                     <h4>Product</h4>
                     <ul>
-                        <li><a href="#features">Features</a></li>
-                        <li><a href="#platform">Platform</a></li>
-                        <li><a href="#ai">AI Integration</a></li>
-                        <li><a href="#">Pricing</a></li>
+                        <li><a href="features.html">Features</a></li>
+                        <li><a href="architecture.html">Architecture</a></li>
+                        <li><a href="roadmap.html">Roadmap</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
                     <h4>Resources</h4>
                     <ul>
                         <li><a href="/docs/">Documentation</a></li>
-                        <li><a href="#">API Reference</a></li>
-                        <li><a href="#">Guides</a></li>
-                        <li><a href="#">Community</a></li>
+                        <li><a href="faq.html">FAQ</a></li>
+                        <li><a href="blog.html">Blog</a></li>
                     </ul>
                 </div>
                 <div class="footer-section">
-                    <h4>Company</h4>
+                    <h4>Project</h4>
                     <ul>
-                        <li><a href="#">About</a></li>
-                        <li><a href="#">Blog</a></li>
-                        <li><a href="/docs/quickstart.html">Quick Start</a></li>
-                        <li><a href="#">Contact</a></li>
+                        <li><a href="#early-access">Early Access</a></li>
+                        <li><a href="mailto:team@tacconiconsulting.com">Contact</a></li>
                     </ul>
                 </div>
             </div>
             <div class="footer-bottom">
-                <p>&copy; 2024 kcore.systems. All rights reserved.</p>
+                <p>&copy; 2025 kcore Hypervisor. Alpha software — not production ready.</p>
+                <p class="footer-company">&copy; 2025 <a href="https://tacconiconsulting.com/">TACCONI CONSULTING LTD</a>. Registered in England and Wales, company no. 16750820.</p>
             </div>
         </div>
     </footer>
@@ -465,4 +434,3 @@ Created:     2024-11-10 14:23:45</span>
     <script src="js/main.js"></script>
 </body>
 </html>
-
