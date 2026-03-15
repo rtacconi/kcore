@@ -1,301 +1,106 @@
-# Controller Testing Status
+# Testing Status
 
-## ✅ Successfully Tested
+## Test Suite Overview
 
-### 1. Controller Service Running
+All tests pass as of March 2026. VMs are created declaratively via `kctl apply -f` or Terraform only.
+
+---
+
+## Unit Tests
+
+### kctl CLI (`cmd/kctl/`)
+
+| Test File | Tests | Description |
+|---|---|---|
+| `manifest_test.go` | 6 tests | VM YAML manifest parsing, validation, kind detection |
+| `config_test.go` | 5 tests | Config loading/saving, address normalization, insecure mode |
+| `client_test.go` | 2 tests | Memory size parsing, byte formatting |
+
 ```bash
-$ ps aux | grep kcore-controller
-riccardotacconi  34848  ./bin/kcore-controller -listen :8080
+go test ./cmd/kctl/... -count=1
 ```
-- ✅ Controller starts successfully
-- ✅ Listens on port 8080
-- ✅ Ready to accept connections
 
-### 2. Node Registration
+### Node Agent (`node/`)
+
+| Test File | Tests | Description |
+|---|---|---|
+| `server_cloudinit_test.go` | 2 tests | Cloud-init user-data generation, image flavor detection |
+
 ```bash
-$ grpcurl -plaintext -d '{...}' localhost:8080 kcore.controller.Controller/RegisterNode
-{
-  "success": true,
-  "message": "Node registered successfully"
-}
+go test ./node/... -count=1
 ```
-- ✅ Controller accepts node registration
-- ✅ Stores node in registry
-- ✅ Validates node information
 
-### 3. List Registered Nodes
+### Control Plane (`pkg/controlplane/`)
+
+| Test File | Tests | Description |
+|---|---|---|
+| `service_test.go` | 1 test | Enrollment token create/list/revoke lifecycle |
+
 ```bash
-$ grpcurl -plaintext localhost:8080 kcore.controller.Controller/ListNodes
-{
-  "nodes": [
-    {
-      "nodeId": "node-192.168.40.146",
-      "hostname": "kvm-node-01",
-      "address": "192.168.40.146:9091",
-      "capacity": {
-        "cpuCores": 64,
-        "memoryBytes": "137438953472"
-      },
-      "status": "ready",
-      "lastHeartbeat": "2025-11-12T22:04:05.261254Z"
-    }
-  ]
-}
+go test ./pkg/controlplane/... -count=1
 ```
-- ✅ Controller tracks registered nodes
-- ✅ Returns node status correctly
-- ✅ Timestamps work properly
 
-### 4. Controller VM Operation Routing
+### Terraform Provider (`terraform-provider-kcore/`)
+
+| Test File | Tests | Description |
+|---|---|---|
+| `provider_test.go` | 2 tests | Provider schema validation |
+| `resource_vm_test.go` | 1 test | Acceptance test for `kcore_vm` resource (requires live controller) |
+
 ```bash
-$ grpcurl -plaintext -d '{...}' localhost:8080 kcore.controller.Controller/CreateVm
-ERROR: Code: Internal
-Message: failed to create VM on node: connection error
+cd terraform-provider-kcore && go test ./internal/provider/... -run TestProvider -count=1
 ```
-- ✅ Controller accepts CreateVm request
-- ✅ Controller looks up target node (192.168.40.146:9091)
-- ✅ Controller attempts to forward request to node
-- ⚠️  Connection fails because **node agent not running**
 
 ---
 
-## ⚠️  Pending: Node Agent Deployment
+## Integration Tests
 
-### Current State
-- **Node**: 192.168.40.146 (kvm-node-01)
-- **Status**: No node-agent process running
-- **Code**: Synced to /root/kcore/ on node
-- **Services**: No systemd services configured
+### Controller (`test/integration/controller/`)
 
-### What's Needed
-The node needs the updated `kcore-node-agent` binary with:
-- ✅ ListVms endpoint (implemented)
-- ✅ All VM operations (CreateVm, DeleteVm, etc.)
-- ✅ gRPC server on port 9091
-- ✅ libvirt integration
+| Test | Description |
+|---|---|
+| `TestControllerBasicOperations` | gRPC ListNodes (skips if controller not reachable) |
+| `TestNodeRegistration` | Node registration via in-process server |
+| `TestNodeListing` | Empty node listing |
+| `TestVmToNodeTracking` | VM lookup for nonexistent VM |
+| `TestControllerScheduling` | CreateVm with no nodes available |
+| `TestControllerHeartbeat` | Heartbeat from unknown node |
 
-### Options to Deploy
-
-#### Option 1: Build on Mac, Deploy to Node
 ```bash
-# On Mac (cross-compile for Linux)
-cd /Users/riccardotacconi/kcore
-GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
-  CC=x86_64-linux-gnu-gcc \
-  go build -o bin/kcore-node-agent-linux ./cmd/node-agent
-
-# Deploy to node
-scp -i ~/.ssh/id_ed25519_gmail \
-  bin/kcore-node-agent-linux \
-  root@192.168.40.146:/usr/local/bin/kcore-node-agent
-
-# Start on node
-ssh root@192.168.40.146 \
-  'nohup /usr/local/bin/kcore-node-agent > /var/log/kcore-node-agent.log 2>&1 &'
+go test ./test/integration/controller/... -count=1
 ```
 
-#### Option 2: Rebuild ISO with Node Agent
-This would include the node-agent in the system image, but you requested not to do this for testing.
+### Terraform E2E (`examples/terraform-isolated/`)
 
-#### Option 3: Docker/Podman Container (Future)
-Package node-agent as a container for easier deployment.
+Requires `KCORE_TF_E2E=1` and a live controller at `KCORE_CONTROLLER_ADDRESS`.
 
----
-
-## 🧪 Test Plan
-
-### Phase 1: Controller Tests ✅ COMPLETE
-- [x] Start controller
-- [x] Register node manually
-- [x] List nodes
-- [x] Verify node status
-
-### Phase 2: Node Agent Tests 🔄 PENDING
-- [ ] Deploy node-agent to node
-- [ ] Start node-agent on port 9091
-- [ ] Verify agent responds to gRPC calls
-- [ ] Test direct node operations (CreateVm, ListVms)
-
-### Phase 3: End-to-End Tests 🔄 PENDING
-- [ ] Create VM via controller → node
-- [ ] List VMs via controller (from node)
-- [ ] Get VM details via controller
-- [ ] Delete VM via controller
-- [ ] Test with explicit --node parameter
-- [ ] Test auto-scheduling (no --node)
-
-### Phase 4: kctl Integration 🔄 PENDING
-- [ ] Update kctl to use controller API
-- [ ] Add --node flag to all commands
-- [ ] Test complete workflow:
-  ```bash
-  kctl create vm test --cpu 2 --memory 4G --node 192.168.40.146:9091
-  kctl get vms
-  kctl describe vm test
-  kctl delete vm test
-  ```
-
----
-
-## 📊 Architecture Verification
-
-### What We've Proven
-
-```
-✅ kctl (CLI)
-      │
-      ├─ Commands: create, get, delete, describe
-      ├─ Flags: --node for explicit targeting
-      └─ Config: ~/.kcore/config
-
-✅ Controller (localhost:8080)
-      │
-      ├─ Node Registry: Working ✅
-      ├─ RegisterNode: Working ✅
-      ├─ ListNodes: Working ✅
-      ├─ CreateVm: Routing logic working ✅
-      ├─ VM-to-Node tracking: Ready ✅
-      └─ gRPC forwarding: Ready ✅
-
-⚠️  Node Agent (192.168.40.146:9091)
-      │
-      ├─ Code: Synced ✅
-      ├─ Binary: Not deployed ⚠️
-      ├─ Service: Not running ⚠️
-      └─ Port 9091: Not listening ⚠️
-
-✅ VM Operations (libvirt)
-      │
-      ├─ CreateVm: Implemented ✅
-      ├─ ListVms: Implemented ✅
-      ├─ DeleteVm: Implemented ✅
-      └─ Other ops: Implemented ✅
-```
-
----
-
-## 🎯 Next Steps
-
-### Immediate (to complete Option B testing)
-1. **Deploy node-agent** to the running node ⏳ IN PROGRESS
-   - Being built by other agent
-   - Ready to deploy once compilation completes
-   
-2. **Start node-agent** on port 9091
-   ```bash
-   ssh root@192.168.40.146
-   /path/to/kcore-node-agent &
-   ```
-
-3. **Run Integration Tests** ✅ READY
-   ```bash
-   make test-e2e
-   ```
-
-4. **Verify End-to-End Flow** ✅ READY
-   ```bash
-   make test-integration
-   ```
-
-### After Node Agent Working
-5. Test all controller → node operations ✅ Tests ready
-6. Verify VM-to-node tracking ✅ Tests ready
-7. Test multi-node scenarios ✅ Tests ready
-8. Move to kctl integration ✅ Tests ready
-
----
-
-## 💡 Key Findings
-
-### Controller Implementation: Excellent ✅
-- Clean API design
-- Proper error handling
-- Node registry working
-- Request forwarding logic correct
-- Ready for production use
-
-### Architecture: Validated ✅
-- Controller as single entry point works
-- Node registry concept works
-- target_node parameter design is sound
-- VM-to-node tracking will work once nodes connect
-
-### Missing Piece: Node Deployment 🔧
-- Need consistent node-agent deployment method
-- Options: systemd service, container, or manual process
-- This is the final blocker for end-to-end testing
-
----
-
-## 🧪 Integration Test Framework
-
-**Status**: ✅ COMPLETE
-
-A comprehensive integration test framework has been created:
-
-### Test Structure
-```
-test/integration/
-├── README.md                    # Test documentation
-├── QUICKSTART.md               # 5-minute quick start
-├── controller/                 # Controller Go tests
-│   └── controller_test.go     # ✅ Complete
-├── e2e/                       # End-to-end tests
-│   ├── test_helpers.sh        # ✅ Complete - Common utilities
-│   ├── full_workflow_test.sh  # ✅ Complete - VM lifecycle
-│   └── multi_node_test.sh     # ✅ Complete - Multi-node tests
-├── kctl/                      # kctl CLI tests
-│   └── kctl_test.sh          # ✅ Complete
-└── fixtures/                  # Test data
-    └── vm-specs/             # ✅ Sample VM specs
-```
-
-### Make Targets
 ```bash
-make test                  # Unit tests
-make test-integration      # All integration tests
-make test-controller       # Controller tests only
-make test-e2e             # E2E workflow tests
-make test-multi-node      # Multi-node tests
-make test-kctl            # kctl tests
-make test-all             # Everything
+KCORE_TF_E2E=1 KCORE_CONTROLLER_ADDRESS=192.168.40.10:9090 \
+  go test ./examples/terraform-isolated/... -count=1
 ```
-
-### Test Runner
-- ✅ Automated test runner: `scripts/run-integration-tests.sh`
-- ✅ CI/CD support with fail-fast mode
-- ✅ Selective test suite execution
-- ✅ Comprehensive test utilities and helpers
-- ✅ Test result reporting and summaries
-
-### Documentation
-- ✅ Integration testing guide: `docs/INTEGRATION_TESTING.md`
-- ✅ Quick start guide: `test/integration/QUICKSTART.md`
-- ✅ Test helpers with examples
-- ✅ Updated Makefile help
 
 ---
 
-## 🚀 Conclusion
+## Running All Tests
 
-**Controller testing (Option B): 95% Complete**
+```bash
+# Unit + integration (no live services required)
+cd /path/to/kcore
+go test ./cmd/kctl/... ./node/... ./pkg/... ./test/... -count=1
 
-What works:
-- ✅ Controller service
-- ✅ Node registration
-- ✅ All controller APIs
-- ✅ Request routing logic
-- ✅ **Integration test framework complete**
-- ✅ **E2E test scripts ready**
-- ✅ **Automated test runner ready**
+# Terraform provider unit tests
+cd terraform-provider-kcore && go test ./internal/provider/... -run TestProvider -count=1
+```
 
-What's needed:
-- 🔧 Deploy node-agent to actual node (IN PROGRESS with other agent)
-- 🔧 Start node-agent service
-- 🔧 Run integration tests: `make test-integration`
+---
 
-**Once node-agent is running, execute `make test-integration` to validate the entire stack!**
+## What Was Removed
 
-The integration test framework is complete and ready to use. All test scripts are written, 
-documented, and waiting for the node-agent deployment to complete end-to-end validation.
+- `kctl create vm` CLI command and all related tests (replaced by `kctl apply -f`)
+- CLI-option VM creation tests
 
+---
+
+## Cursor Rules
+
+A cursor rule at `.cursor/rules/go-tests.mdc` ensures tests are run after any `.go` file change in the `kcore/` tree. See that file for per-package test commands.

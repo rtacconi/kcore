@@ -86,10 +86,10 @@ message VmStatus {
 message CreateVmRequest {
   VmSpec spec = 1;
   
-  // Optional: Boot image (cloud-init images, ISOs, etc.)
-  string image_uri = 2;    // HTTP/HTTPS URI to download image (e.g., "https://cloud.debian.org/images/...")
-  string image_path = 3;   // Path to local image file (e.g., "/var/lib/images/debian-12.qcow2")
+  string image_uri = 2;    // HTTP/HTTPS URI to download image
+  string image_path = 3;   // Path to local image file
   string image_format = 4; // Image format: qcow2, raw, iso (auto-detected if empty)
+  string cloud_init_user_data = 5; // Custom cloud-init #cloud-config YAML (overrides default)
 }
 
 message CreateVmResponse {

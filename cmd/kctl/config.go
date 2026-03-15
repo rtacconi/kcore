@@ -139,9 +139,11 @@ func GetConfigPath() string {
 // GetConnectionInfo extracts connection info from flags and config
 // Priority: flag > config > error
 func GetConnectionInfo(configPath, controllerFlag string, insecureFlag bool) (controller string, insecure bool, certFile, keyFile, caFile string, err error) {
-	// If controller flag is provided, use it
 	if controllerFlag != "" {
-		return NormalizeAddress(controllerFlag), insecureFlag, "certs/controller.crt", "certs/controller.key", "certs/ca.crt", nil
+		if insecureFlag {
+			return NormalizeAddress(controllerFlag), true, "", "", "", nil
+		}
+		return NormalizeAddress(controllerFlag), false, "certs/controller.crt", "certs/controller.key", "certs/ca.crt", nil
 	}
 
 	// Try to load from config

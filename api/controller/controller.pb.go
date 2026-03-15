@@ -502,11 +502,13 @@ func (x *NodeUsage) GetMemoryBytesUsed() int64 {
 }
 
 type CreateVmRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	TargetNode    string                 `protobuf:"bytes,1,opt,name=target_node,json=targetNode,proto3" json:"target_node,omitempty"` // Node address (e.g., "192.168.1.10:9091") - optional, controller picks if empty
-	Spec          *VmSpec                `protobuf:"bytes,2,opt,name=spec,proto3" json:"spec,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	TargetNode        string                 `protobuf:"bytes,1,opt,name=target_node,json=targetNode,proto3" json:"target_node,omitempty"` // Node address (e.g., "192.168.1.10:9091") - optional, controller picks if empty
+	Spec              *VmSpec                `protobuf:"bytes,2,opt,name=spec,proto3" json:"spec,omitempty"`
+	ImageUri          string                 `protobuf:"bytes,3,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`                                // HTTP/HTTPS URI to download image
+	CloudInitUserData string                 `protobuf:"bytes,4,opt,name=cloud_init_user_data,json=cloudInitUserData,proto3" json:"cloud_init_user_data,omitempty"` // Custom cloud-init #cloud-config YAML
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CreateVmRequest) Reset() {
@@ -551,6 +553,20 @@ func (x *CreateVmRequest) GetSpec() *VmSpec {
 		return x.Spec
 	}
 	return nil
+}
+
+func (x *CreateVmRequest) GetImageUri() string {
+	if x != nil {
+		return x.ImageUri
+	}
+	return ""
+}
+
+func (x *CreateVmRequest) GetCloudInitUserData() string {
+	if x != nil {
+		return x.CloudInitUserData
+	}
+	return ""
 }
 
 type CreateVmResponse struct {
@@ -1462,15 +1478,16 @@ func (x *GetNodeResponse) GetNode() *NodeInfo {
 }
 
 type VmSpec struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
-	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
-	Cpu           int32                  `protobuf:"varint,3,opt,name=cpu,proto3" json:"cpu,omitempty"`
-	MemoryBytes   int64                  `protobuf:"varint,4,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
-	Disks         []*Disk                `protobuf:"bytes,5,rep,name=disks,proto3" json:"disks,omitempty"`
-	Nics          []*Nic                 `protobuf:"bytes,6,rep,name=nics,proto3" json:"nics,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Id               string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	Name             string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Cpu              int32                  `protobuf:"varint,3,opt,name=cpu,proto3" json:"cpu,omitempty"`
+	MemoryBytes      int64                  `protobuf:"varint,4,opt,name=memory_bytes,json=memoryBytes,proto3" json:"memory_bytes,omitempty"`
+	Disks            []*Disk                `protobuf:"bytes,5,rep,name=disks,proto3" json:"disks,omitempty"`
+	Nics             []*Nic                 `protobuf:"bytes,6,rep,name=nics,proto3" json:"nics,omitempty"`
+	EnableKcoreLogin bool                   `protobuf:"varint,7,opt,name=enable_kcore_login,json=enableKcoreLogin,proto3" json:"enable_kcore_login,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
 }
 
 func (x *VmSpec) Reset() {
@@ -1543,6 +1560,13 @@ func (x *VmSpec) GetNics() []*Nic {
 		return x.Nics
 	}
 	return nil
+}
+
+func (x *VmSpec) GetEnableKcoreLogin() bool {
+	if x != nil {
+		return x.EnableKcoreLogin
+	}
+	return false
 }
 
 type Disk struct {
@@ -1877,11 +1901,13 @@ const file_proto_controller_proto_rawDesc = "" +
 	"\fmemory_bytes\x18\x02 \x01(\x03R\vmemoryBytes\"]\n" +
 	"\tNodeUsage\x12$\n" +
 	"\x0ecpu_cores_used\x18\x01 \x01(\x05R\fcpuCoresUsed\x12*\n" +
-	"\x11memory_bytes_used\x18\x02 \x01(\x03R\x0fmemoryBytesUsed\"`\n" +
+	"\x11memory_bytes_used\x18\x02 \x01(\x03R\x0fmemoryBytesUsed\"\xae\x01\n" +
 	"\x0fCreateVmRequest\x12\x1f\n" +
 	"\vtarget_node\x18\x01 \x01(\tR\n" +
 	"targetNode\x12,\n" +
-	"\x04spec\x18\x02 \x01(\v2\x18.kcore.controller.VmSpecR\x04spec\"q\n" +
+	"\x04spec\x18\x02 \x01(\v2\x18.kcore.controller.VmSpecR\x04spec\x12\x1b\n" +
+	"\timage_uri\x18\x03 \x01(\tR\bimageUri\x12/\n" +
+	"\x14cloud_init_user_data\x18\x04 \x01(\tR\x11cloudInitUserData\"q\n" +
 	"\x10CreateVmResponse\x12\x13\n" +
 	"\x05vm_id\x18\x01 \x01(\tR\x04vmId\x12\x17\n" +
 	"\anode_id\x18\x02 \x01(\tR\x06nodeId\x12/\n" +
@@ -1941,14 +1967,15 @@ const file_proto_controller_proto_rawDesc = "" +
 	"\x0eGetNodeRequest\x12\x17\n" +
 	"\anode_id\x18\x01 \x01(\tR\x06nodeId\"A\n" +
 	"\x0fGetNodeResponse\x12.\n" +
-	"\x04node\x18\x01 \x01(\v2\x1a.kcore.controller.NodeInfoR\x04node\"\xba\x01\n" +
+	"\x04node\x18\x01 \x01(\v2\x1a.kcore.controller.NodeInfoR\x04node\"\xe8\x01\n" +
 	"\x06VmSpec\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x10\n" +
 	"\x03cpu\x18\x03 \x01(\x05R\x03cpu\x12!\n" +
 	"\fmemory_bytes\x18\x04 \x01(\x03R\vmemoryBytes\x12,\n" +
 	"\x05disks\x18\x05 \x03(\v2\x16.kcore.controller.DiskR\x05disks\x12)\n" +
-	"\x04nics\x18\x06 \x03(\v2\x15.kcore.controller.NicR\x04nics\"k\n" +
+	"\x04nics\x18\x06 \x03(\v2\x15.kcore.controller.NicR\x04nics\x12,\n" +
+	"\x12enable_kcore_login\x18\a \x01(\bR\x10enableKcoreLogin\"k\n" +
 	"\x04Disk\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12%\n" +
 	"\x0ebackend_handle\x18\x02 \x01(\tR\rbackendHandle\x12\x10\n" +

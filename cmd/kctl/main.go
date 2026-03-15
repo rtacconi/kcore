@@ -15,12 +15,15 @@ func main() {
 		Short: "kctl - kcore cluster management CLI",
 		Long: `kctl is the command-line interface for kcore.
 
-It provides commands to create, manage, and delete VMs across your
-kcore cluster. Think of it as kubectl for your virtualization infrastructure.
+It provides commands to manage VMs and resources across your kcore cluster.
+VMs are created declaratively via YAML manifests.
 
 Examples:
-  # Create a VM
-  kctl create vm my-vm --cpu 4 --memory 8G --disk 100G
+  # Create a VM from a YAML manifest
+  kctl apply -f vm.yaml
+
+  # Dry-run to preview a manifest
+  kctl apply -f vm.yaml --dry-run
 
   # List all VMs
   kctl get vms

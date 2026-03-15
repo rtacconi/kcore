@@ -369,14 +369,14 @@ func (x *VmStatus) GetUpdatedAt() *timestamppb.Timestamp {
 
 // CreateVm
 type CreateVmRequest struct {
-	state protoimpl.MessageState `protogen:"open.v1"`
-	Spec  *VmSpec                `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
-	// Optional: Boot image (cloud-init images, ISOs, etc.)
-	ImageUri      string `protobuf:"bytes,2,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`          // HTTP/HTTPS URI to download image (e.g., "https://cloud.debian.org/images/...")
-	ImagePath     string `protobuf:"bytes,3,opt,name=image_path,json=imagePath,proto3" json:"image_path,omitempty"`       // Path to local image file (e.g., "/var/lib/images/debian-12.qcow2")
-	ImageFormat   string `protobuf:"bytes,4,opt,name=image_format,json=imageFormat,proto3" json:"image_format,omitempty"` // Image format: qcow2, raw, iso (auto-detected if empty)
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	Spec              *VmSpec                `protobuf:"bytes,1,opt,name=spec,proto3" json:"spec,omitempty"`
+	ImageUri          string                 `protobuf:"bytes,2,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`                                // HTTP/HTTPS URI to download image
+	ImagePath         string                 `protobuf:"bytes,3,opt,name=image_path,json=imagePath,proto3" json:"image_path,omitempty"`                             // Path to local image file
+	ImageFormat       string                 `protobuf:"bytes,4,opt,name=image_format,json=imageFormat,proto3" json:"image_format,omitempty"`                       // Image format: qcow2, raw, iso (auto-detected if empty)
+	CloudInitUserData string                 `protobuf:"bytes,5,opt,name=cloud_init_user_data,json=cloudInitUserData,proto3" json:"cloud_init_user_data,omitempty"` // Custom cloud-init #cloud-config YAML (overrides default)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *CreateVmRequest) Reset() {
@@ -433,6 +433,13 @@ func (x *CreateVmRequest) GetImagePath() string {
 func (x *CreateVmRequest) GetImageFormat() string {
 	if x != nil {
 		return x.ImageFormat
+	}
+	return ""
+}
+
+func (x *CreateVmRequest) GetCloudInitUserData() string {
+	if x != nil {
+		return x.CloudInitUserData
 	}
 	return ""
 }
@@ -2370,13 +2377,14 @@ const file_proto_node_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
 	"\n" +
-	"updated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\x98\x01\n" +
+	"updated_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\"\xc9\x01\n" +
 	"\x0fCreateVmRequest\x12&\n" +
 	"\x04spec\x18\x01 \x01(\v2\x12.kcore.node.VmSpecR\x04spec\x12\x1b\n" +
 	"\timage_uri\x18\x02 \x01(\tR\bimageUri\x12\x1d\n" +
 	"\n" +
 	"image_path\x18\x03 \x01(\tR\timagePath\x12!\n" +
-	"\fimage_format\x18\x04 \x01(\tR\vimageFormat\"@\n" +
+	"\fimage_format\x18\x04 \x01(\tR\vimageFormat\x12/\n" +
+	"\x14cloud_init_user_data\x18\x05 \x01(\tR\x11cloudInitUserData\"@\n" +
 	"\x10CreateVmResponse\x12,\n" +
 	"\x06status\x18\x01 \x01(\v2\x14.kcore.node.VmStatusR\x06status\"9\n" +
 	"\x0fUpdateVmRequest\x12&\n" +

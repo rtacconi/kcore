@@ -6,6 +6,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/google/uuid"
+	pb "github.com/kcore/kcore/api/node"
 	"github.com/spf13/cobra"
 )
 
@@ -17,72 +19,38 @@ func newApplyCmd() *cobra.Command {
 
 	cmd := &cobra.Command{
 		Use:   "apply -f FILENAME",
-		Short: "Apply a configuration from a file",
-		Long: `Apply a configuration to resources from a YAML or JSON file.
+		Short: "Apply a configuration from a YAML file",
+		Long: `Apply a resource definition from a YAML file.
 
-This command creates or updates resources based on the specifications
-in the provided file.
+Supported resource kinds:
+  VM / VirtualMachine   Create a virtual machine
 
 Examples:
-  # Apply configuration from a file
+  # Create a VM from a manifest
   kctl apply -f vm.yaml
 
-  # Apply multiple files
-  kctl apply -f vm1.yaml -f vm2.yaml
-
-  # Dry run (show what would be applied without applying)
+  # Dry run (show what would be applied)
   kctl apply -f vm.yaml --dry-run`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if filename == "" {
 				return fmt.Errorf("filename required: use -f or --filename")
 			}
 
-			// Read file
 			data, err := os.ReadFile(filename)
 			if err != nil {
 				return fmt.Errorf("failed to read file: %w", err)
 			}
 
-			if dryRun {
-				fmt.Printf("Applying configuration from %s (dry run):\n\n", filename)
-				fmt.Printf("%s\n\n", string(data))
-				fmt.Printf("✅ Dry run complete - no changes made\n")
-				return nil
-			}
-
-			fmt.Printf("Applying configuration from %s to controller...\n", filename)
-
-			// Use global flags provided on root command
-			root := cmd.Root()
-			configPath, _ := root.PersistentFlags().GetString("config")
-			controllerAddr, _ := root.PersistentFlags().GetString("controller")
-			insecureFlag, _ := root.PersistentFlags().GetBool("insecure")
-
-			ctrlAddr, insecureTLS, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerAddr, insecureFlag)
+			kind, err := parseManifestKind(data)
 			if err != nil {
 				return err
 			}
 
-			client, err := NewControllerAdminClient(ctrlAddr, insecureTLS, certFile, keyFile, caFile)
-			if err != nil {
-				return fmt.Errorf("failed to create controller admin client: %w", err)
-			}
-			defer client.Close()
-
-			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-			defer cancel()
-
-			// For now, always rebuild after applying
-			resp, err := client.ApplyNixConfig(ctx, string(data), true)
-			if err != nil {
-				return fmt.Errorf("ApplyNixConfig RPC failed: %w", err)
-			}
-			if !resp.GetSuccess() {
-				return fmt.Errorf("controller reported failure: %s", resp.GetMessage())
+			if isVMKind(kind) {
+				return applyVM(cmd, data, dryRun)
 			}
 
-			fmt.Printf("✅ Controller configuration applied: %s\n", resp.GetMessage())
-			return nil
+			return fmt.Errorf("unsupported resource kind: %q (supported: VM, VirtualMachine)", kind)
 		},
 	}
 
@@ -91,4 +59,111 @@ Examples:
 	cmd.MarkFlagRequired("filename")
 
 	return cmd
+}
+
+func applyVM(cmd *cobra.Command, data []byte, dryRun bool) error {
+	manifest, err := parseVMManifest(data)
+	if err != nil {
+		return err
+	}
+
+	memoryBytes, err := parseMemorySize(manifest.Spec.Memory)
+	if err != nil {
+		return fmt.Errorf("invalid spec.memory: %w", err)
+	}
+
+	enableLogin := true
+	if manifest.Spec.EnableKcoreLogin != nil {
+		enableLogin = *manifest.Spec.EnableKcoreLogin
+	}
+
+	vmID := uuid.New().String()
+
+	var nics []*pb.Nic
+	for _, n := range manifest.Spec.Nics {
+		model := n.Model
+		if model == "" {
+			model = "virtio"
+		}
+		nics = append(nics, &pb.Nic{
+			Network: n.Network,
+			Model:   model,
+		})
+	}
+
+	spec := &pb.VmSpec{
+		Id:               vmID,
+		Name:             manifest.Metadata.Name,
+		Cpu:              int32(manifest.Spec.CPU),
+		MemoryBytes:      memoryBytes,
+		Nics:             nics,
+		EnableKcoreLogin: enableLogin,
+	}
+
+	imageURI := manifest.Spec.Image
+	cloudInit := manifest.Spec.CloudInit
+
+	if dryRun {
+		fmt.Printf("Dry run: would create VM from manifest\n\n")
+		fmt.Printf("  Name:        %s\n", manifest.Metadata.Name)
+		fmt.Printf("  ID:          %s\n", vmID)
+		fmt.Printf("  CPU:         %d\n", manifest.Spec.CPU)
+		fmt.Printf("  Memory:      %s (%s)\n", manifest.Spec.Memory, formatBytes(memoryBytes))
+		if imageURI != "" {
+			fmt.Printf("  Image:       %s\n", imageURI)
+		}
+		fmt.Printf("  Kcore Login: %t\n", enableLogin)
+		if len(nics) > 0 {
+			for i, n := range nics {
+				fmt.Printf("  NIC %d:       %s (%s)\n", i, n.Network, n.Model)
+			}
+		} else {
+			fmt.Printf("  NIC:         default (virtio)\n")
+		}
+		if cloudInit != "" {
+			fmt.Printf("  Cloud-Init:  (custom, %d bytes)\n", len(cloudInit))
+		}
+		fmt.Printf("\nNo changes made.\n")
+		return nil
+	}
+
+	root := cmd.Root()
+	configPath, _ := root.PersistentFlags().GetString("config")
+	controllerAddr, _ := root.PersistentFlags().GetString("controller")
+	insecureFlag, _ := root.PersistentFlags().GetBool("insecure")
+
+	nodeAddr, insecure, certFile, keyFile, caFile, err := GetConnectionInfo(configPath, controllerAddr, insecureFlag)
+	if err != nil {
+		return err
+	}
+
+	fmt.Printf("Applying VM '%s' on %s...\n", manifest.Metadata.Name, nodeAddr)
+
+	client, err := NewNodeClient(nodeAddr, insecure, certFile, keyFile, caFile)
+	if err != nil {
+		return fmt.Errorf("failed to connect to node: %w", err)
+	}
+	defer client.Close()
+
+	timeout := 30 * time.Second
+	if imageURI != "" {
+		timeout = 10 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	status, err := client.CreateVM(ctx, spec, imageURI, "", cloudInit)
+	if err != nil {
+		return fmt.Errorf("failed to create VM: %w", err)
+	}
+
+	fmt.Printf("\nVM '%s' created successfully\n", manifest.Metadata.Name)
+	fmt.Printf("  ID:     %s\n", status.Id)
+	fmt.Printf("  State:  %s\n", status.State.String())
+	fmt.Printf("  CPU:    %d cores\n", manifest.Spec.CPU)
+	fmt.Printf("  Memory: %s\n", manifest.Spec.Memory)
+	if imageURI != "" {
+		fmt.Printf("  Image:  %s\n", imageURI)
+	}
+	return nil
 }

@@ -72,6 +72,8 @@ message NodeUsage {
 message CreateVmRequest {
   string target_node = 1;  // Node address (e.g., "192.168.1.10:9091") - optional, controller picks if empty
   VmSpec spec = 2;
+  string image_uri = 3;              // HTTP/HTTPS URI to download image
+  string cloud_init_user_data = 4;   // Custom cloud-init #cloud-config YAML
 }
 
 message CreateVmResponse {
@@ -172,6 +174,7 @@ message VmSpec {
   int64 memory_bytes = 4;
   repeated Disk disks = 5;
   repeated Nic nics = 6;
+  bool enable_kcore_login = 7;
 }
 
 message Disk {

@@ -89,12 +89,10 @@ func BuildDomainXML(spec *VMSpec) (*libvirtxml.Domain, error) {
 		driverType := "qcow2"
 		bus := disk.Bus
 		if isCloudInit {
-			// Attach cloud-init seed as a raw data disk.
-			// Some guests fail to consume NoCloud data from CD-ROM reliably.
+			devType = "cdrom"
 			driverType = "raw"
-			if bus == "" {
-				bus = "virtio"
-			}
+			bus = "sata"
+			disk.Device = "sda"
 		}
 
 		libvirtDisk := libvirtxml.DomainDisk{

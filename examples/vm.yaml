@@ -1,23 +1,12 @@
 apiVersion: kcore.io/v1
 kind: VM
 metadata:
-  name: example-vm
-  namespace: default
+  name: debian12-test
 spec:
-  nodeSelector:
-    dc: dc-a
-  cpu: 2
-  memoryBytes: 4GiB
-  disks:
-    - name: root
-      sizeBytes: 40GiB
-      storageClassName: local-lvm
-      bus: virtio
-    - name: data
-      sizeBytes: 100GiB
-      storageClassName: local-dir
-      bus: virtio
+  cpu: 1
+  memory: 2G
+  image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+  enableKcoreLogin: true
   nics:
     - network: default
       model: virtio
-

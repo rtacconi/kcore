@@ -114,6 +114,25 @@ func resourceVM() *schema.Resource {
 					},
 				},
 			},
+			"image_uri": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "HTTP/HTTPS URI to a cloud image (e.g. Debian, Ubuntu qcow2)",
+			},
+			"enable_kcore_login": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Default:     true,
+				ForceNew:    true,
+				Description: "Enable kcore default credentials via cloud-init (default: true)",
+			},
+			"cloud_init_user_data": {
+				Type:        schema.TypeString,
+				Optional:    true,
+				ForceNew:    true,
+				Description: "Custom cloud-init #cloud-config YAML (overrides default)",
+			},
 			"state": {
 				Type:        schema.TypeString,
 				Computed:    true,
@@ -137,12 +156,12 @@ func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interfac
 	client := meta.(*apiClient)
 	vmID := uuid.NewString()
 
-	// Build VM spec
 	spec := &pb.VmSpec{
-		Id:          vmID,
-		Name:        d.Get("name").(string),
-		Cpu:         int32(d.Get("cpu").(int)),
-		MemoryBytes: int64(d.Get("memory_bytes").(int)),
+		Id:               vmID,
+		Name:             d.Get("name").(string),
+		Cpu:              int32(d.Get("cpu").(int)),
+		MemoryBytes:      int64(d.Get("memory_bytes").(int)),
+		EnableKcoreLogin: d.Get("enable_kcore_login").(bool),
 	}
 
 	// Add disks
@@ -175,11 +194,16 @@ func resourceVMCreate(ctx context.Context, d *schema.ResourceData, meta interfac
 		}
 	}
 
-	// Create VM request
 	req := &pb.CreateVmRequest{
 		Spec: spec,
 	}
 
+	if v, ok := d.GetOk("image_uri"); ok {
+		req.ImageUri = v.(string)
+	}
+	if v, ok := d.GetOk("cloud_init_user_data"); ok {
+		req.CloudInitUserData = v.(string)
+	}
 	if targetNode, ok := d.GetOk("target_node"); ok {
 		req.TargetNode = targetNode.(string)
 	}

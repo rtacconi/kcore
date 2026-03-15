@@ -2,6 +2,7 @@ package controller_test
 
 import (
 	"context"
+	"net"
 	"testing"
 	"time"
 
@@ -17,9 +18,15 @@ const (
 	testTimeout        = 10 * time.Second
 )
 
-// TestControllerBasicOperations tests basic controller functionality
+// TestControllerBasicOperations tests basic controller functionality.
+// Requires a running controller at testControllerAddr; skips otherwise.
 func TestControllerBasicOperations(t *testing.T) {
-	// Connect to controller
+	tcpConn, err := net.DialTimeout("tcp", testControllerAddr, 2*time.Second)
+	if err != nil {
+		t.Skipf("Controller not reachable at %s: %v", testControllerAddr, err)
+	}
+	tcpConn.Close()
+
 	conn, err := grpc.Dial(testControllerAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Skipf("Controller not available at %s: %v", testControllerAddr, err)

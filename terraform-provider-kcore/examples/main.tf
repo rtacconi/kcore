@@ -24,25 +24,14 @@ data "kcore_node" "example" {
   id = "node-1" # Replace with actual node ID
 }
 
-# Create a VM
+# Create a VM from a cloud image
 resource "kcore_vm" "example" {
-  name         = "terraform-vm-example"
-  cpu          = 2
-  memory_bytes = 4294967296 # 4GB
+  name         = "debian12-test"
+  cpu          = 1
+  memory_bytes = 2147483648 # 2GB
 
-  disk {
-    name           = "root"
-    backend_handle = "/var/lib/libvirt/images/terraform-vm-root.qcow2"
-    bus            = "virtio"
-    device         = "disk"
-  }
-
-  disk {
-    name           = "data"
-    backend_handle = "/var/lib/libvirt/images/terraform-vm-data.qcow2"
-    bus            = "virtio"
-    device         = "disk"
-  }
+  image_uri          = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+  enable_kcore_login = true
 
   nic {
     network = "default"

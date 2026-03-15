@@ -66,12 +66,8 @@ resource "kcore_vm" "test" {
   cpu          = 2
   memory_bytes = 4294967296
 
-  disk {
-    name           = "root"
-    backend_handle = "/tmp/test-vm-root.qcow2"
-    bus            = "virtio"
-    device         = "disk"
-  }
+  image_uri          = "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+  enable_kcore_login = true
 
   nic {
     network = "default"

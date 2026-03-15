@@ -244,37 +244,29 @@ NODE_IP=192.168.40.146 make test-node
 
 ### 3. VM Management
 ```bash
-# Set node IP
-export NODE_IP=192.168.40.146
-
-# Create VM
-make create-vm
-# Output: VM ID: 5fc2b3d5-57e0-4991-bc1e-349ee5ec3784
+# Create VM from manifest
+kctl apply -f examples/vm.yaml
 
 # List VMs on kcore node
-ssh root@$NODE_IP virsh list --all
+kctl get vms
 
 # Delete VM
-VM_ID=5fc2b3d5-57e0-4991-bc1e-349ee5ec3784 make delete-vm
+kctl delete vm debian12-test
 ```
 
 ### 3b. Cloud Image Login Policy
-```bash
-# Secure default (no known guest password injected)
-kctl create vm ubuntu-secure \
-  --cpu 2 --memory 4G --disk 20G \
-  --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
 
-# Explicitly enable lab credentials for console/SSH
-kctl create vm ubuntu-lab \
-  --cpu 2 --memory 4G --disk 20G \
-  --image https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img \
-  --enable-kcore-login
+VMs are created declaratively via YAML manifests:
+
+```bash
+kctl apply -f vm.yaml
 ```
 
-When `--enable-kcore-login` is used, cloud-init adds known credentials:
+When `enableKcoreLogin: true` is set in the manifest (default), cloud-init adds known credentials:
 - `kcore/kcore`
 - distro default user (`ubuntu` for Ubuntu images, `debian` for Debian images)
+
+See `examples/vm.yaml` for a complete example manifest.
 
 ### 4. Update Existing kcore Node
 ```bash

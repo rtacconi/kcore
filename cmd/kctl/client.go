@@ -91,11 +91,12 @@ func (c *NodeClient) Close() error {
 }
 
 // CreateVM creates a new VM on the node
-func (c *NodeClient) CreateVM(ctx context.Context, spec *pb.VmSpec, imageURI, imagePath string) (*pb.VmStatus, error) {
+func (c *NodeClient) CreateVM(ctx context.Context, spec *pb.VmSpec, imageURI, imagePath, cloudInitUserData string) (*pb.VmStatus, error) {
 	resp, err := c.compute.CreateVm(ctx, &nodepb.CreateVmRequest{
-		Spec:      spec,
-		ImageUri:  imageURI,
-		ImagePath: imagePath,
+		Spec:               spec,
+		ImageUri:           imageURI,
+		ImagePath:          imagePath,
+		CloudInitUserData:  cloudInitUserData,
 	})
 	if err != nil {
 		return nil, err

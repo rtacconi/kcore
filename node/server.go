@@ -247,7 +247,8 @@ runcmd:
 
 // prepareCloudInitDisk creates a NoCloud seed ISO for cloud-init so that the
 // guest can be configured with known credentials and basic metadata.
-func (s *Server) prepareCloudInitDisk(vmID, vmName, imageRef string, enableKcoreLogin bool) (string, error) {
+// If customUserData is non-empty, it is used verbatim instead of the generated default.
+func (s *Server) prepareCloudInitDisk(vmID, vmName, imageRef string, enableKcoreLogin bool, customUserData string) (string, error) {
 	baseDir := filepath.Join("/var/lib/kcore/cloud-init", vmID)
 	if err := os.MkdirAll(baseDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create cloud-init dir: %w", err)
@@ -257,7 +258,13 @@ func (s *Server) prepareCloudInitDisk(vmID, vmName, imageRef string, enableKcore
 	metaDataPath := filepath.Join(baseDir, "meta-data")
 	seedPath := filepath.Join(baseDir, "seed.iso")
 
-	userData, flavor := buildCloudInitUserData(imageRef, enableKcoreLogin)
+	var userData, flavor string
+	if customUserData != "" {
+		userData = customUserData
+		flavor = "custom"
+	} else {
+		userData, flavor = buildCloudInitUserData(imageRef, enableKcoreLogin)
+	}
 
 	metaData := fmt.Sprintf("instance-id: %s\nlocal-hostname: %s\n", vmID, vmName)
 
@@ -346,7 +353,7 @@ func (s *Server) CreateVm(ctx context.Context, req *node.CreateVmRequest) (*node
 		// When we boot from an image, also attach a cloud-init NoCloud seed ISO
 		// so we can guarantee a known root password and basic metadata, without
 		// needing external cloud-init infrastructure.
-		if seedPath, err := s.prepareCloudInitDisk(spec.Id, spec.Name, imageRef, spec.EnableKcoreLogin); err != nil {
+		if seedPath, err := s.prepareCloudInitDisk(spec.Id, spec.Name, imageRef, spec.EnableKcoreLogin, req.CloudInitUserData); err != nil {
 			log.Printf("Warning: failed to prepare cloud-init disk for VM %s: %v", spec.Name, err)
 		} else {
 			// Attach the seed ISO as a separate raw data disk. Cloud-init NoCloud
@@ -450,7 +457,7 @@ func (s *Server) UpdateVm(ctx context.Context, req *node.UpdateVmRequest) (*node
 	seedExists := false
 	if _, err := os.Stat(seedPath); err == nil {
 		seedExists = true
-		if _, err := s.prepareCloudInitDisk(spec.Id, spec.Name, "", spec.EnableKcoreLogin); err != nil {
+		if _, err := s.prepareCloudInitDisk(spec.Id, spec.Name, "", spec.EnableKcoreLogin, ""); err != nil {
 			log.Printf("Warning: failed to refresh cloud-init seed for VM %s: %v", spec.Name, err)
 		}
 	}

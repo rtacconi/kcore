@@ -7,8 +7,7 @@ tls:
   keyFile: "/etc/kcore/certs/node.key"
 
 networks:
-  default: br0
-  storage: br1
+  default: virbr0
 
 storage:
   drivers:
