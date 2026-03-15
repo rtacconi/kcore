@@ -1,8 +1,9 @@
 (function () {
-  var SUPPORTED = ['en', 'es', 'it', 'de', 'zh', 'ja', 'ko'];
+  var SUPPORTED = ['en', 'es', 'fr', 'it', 'de', 'zh', 'ja', 'ko'];
   var LANG_NAMES = {
     en: 'English',
     es: 'Español',
+    fr: 'Français',
     it: 'Italiano',
     de: 'Deutsch',
     zh: '中文',
@@ -12,6 +13,7 @@
   var LANG_FLAGS = {
     en: '🇬🇧',
     es: '🇪🇸',
+    fr: '🇫🇷',
     it: '🇮🇹',
     de: '🇩🇪',
     zh: '🇨🇳',
