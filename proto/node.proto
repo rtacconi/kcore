@@ -1,0 +1,335 @@
+syntax = "proto3";
+
+package kcore.node;
+
+option go_package = "github.com/kcore/kcore/api/node";
+
+import "google/protobuf/timestamp.proto";
+
+// NodeCompute service handles VM lifecycle operations
+service NodeCompute {
+  rpc CreateVm(CreateVmRequest) returns (CreateVmResponse);
+  rpc UpdateVm(UpdateVmRequest) returns (UpdateVmResponse);
+  rpc DeleteVm(DeleteVmRequest) returns (DeleteVmResponse);
+  rpc StartVm(StartVmRequest) returns (StartVmResponse);
+  rpc StopVm(StopVmRequest) returns (StopVmResponse);
+  rpc RebootVm(RebootVmRequest) returns (RebootVmResponse);
+  rpc GetVm(GetVmRequest) returns (GetVmResponse);
+  rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+  rpc PullImage(PullImageRequest) returns (PullImageResponse);
+  rpc ListImages(ListImagesRequest) returns (ListImagesResponse);
+  rpc DeleteImage(DeleteImageRequest) returns (DeleteImageResponse);
+}
+
+// NodeStorage service handles volume operations
+service NodeStorage {
+  rpc CreateVolume(CreateVolumeRequest) returns (CreateVolumeResponse);
+  rpc DeleteVolume(DeleteVolumeRequest) returns (DeleteVolumeResponse);
+  rpc AttachVolume(AttachVolumeRequest) returns (AttachVolumeResponse);
+  rpc DetachVolume(DetachVolumeRequest) returns (DetachVolumeResponse);
+}
+
+// NodeInfo service reports node capacity and status
+service NodeInfo {
+  rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
+}
+
+// NodeAdmin service provides node-level management operations
+// NOTE: For now this is intentionally unauthenticated and very simple, for development use only.
+service NodeAdmin {
+  // ApplyNixConfig replaces the node's /etc/nixos/configuration.nix with the
+  // provided content and (optionally) triggers a nixos-rebuild.
+  rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+
+  // ListDisks returns block devices available on the node.
+  rpc ListDisks(ListDisksRequest) returns (ListDisksResponse);
+
+  // ListNetworkInterfaces returns network interfaces and addresses.
+  rpc ListNetworkInterfaces(ListNetworkInterfacesRequest) returns (ListNetworkInterfacesResponse);
+
+  // InstallToDisk triggers a non-interactive install-to-disk workflow.
+  // The implementation enforces disk wipe and reboot at the end.
+  rpc InstallToDisk(InstallToDiskRequest) returns (InstallToDiskResponse);
+}
+
+// VM specification
+message VmSpec {
+  string id = 1;
+  string name = 2;
+  int32 cpu = 3;
+  int64 memory_bytes = 4;
+  repeated Disk disks = 5;
+  repeated Nic nics = 6;
+}
+
+message Disk {
+  string name = 1;
+  string backend_handle = 2; // e.g., /dev/vg0/vm-123-root or /path/to/file.qcow2
+  string bus = 3; // virtio, scsi, etc.
+  string device = 4; // vda, sda, etc.
+}
+
+message Nic {
+  string network = 1;
+  string model = 2; // virtio, e1000, etc.
+  string mac_address = 3;
+}
+
+// VM status
+enum VmState {
+  VM_STATE_UNKNOWN = 0;
+  VM_STATE_STOPPED = 1;
+  VM_STATE_RUNNING = 2;
+  VM_STATE_PAUSED = 3;
+  VM_STATE_ERROR = 4;
+}
+
+message VmStatus {
+  string id = 1;
+  VmState state = 2;
+  google.protobuf.Timestamp created_at = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+// CreateVm
+message CreateVmRequest {
+  VmSpec spec = 1;
+  
+  // Optional: Boot image (cloud-init images, ISOs, etc.)
+  string image_uri = 2;    // HTTP/HTTPS URI to download image (e.g., "https://cloud.debian.org/images/...")
+  string image_path = 3;   // Path to local image file (e.g., "/var/lib/images/debian-12.qcow2")
+  string image_format = 4; // Image format: qcow2, raw, iso (auto-detected if empty)
+}
+
+message CreateVmResponse {
+  VmStatus status = 1;
+}
+
+// UpdateVm
+message UpdateVmRequest {
+  VmSpec spec = 1;
+}
+
+message UpdateVmResponse {
+  VmStatus status = 1;
+}
+
+// DeleteVm
+message DeleteVmRequest {
+  string vm_id = 1;
+}
+
+message DeleteVmResponse {}
+
+// StartVm
+message StartVmRequest {
+  string vm_id = 1;
+}
+
+message StartVmResponse {
+  VmStatus status = 1;
+}
+
+// StopVm
+message StopVmRequest {
+  string vm_id = 1;
+  bool force = 2;
+}
+
+message StopVmResponse {
+  VmStatus status = 1;
+}
+
+// RebootVm
+message RebootVmRequest {
+  string vm_id = 1;
+  bool force = 2;
+}
+
+message RebootVmResponse {
+  VmStatus status = 1;
+}
+
+// GetVm
+message GetVmRequest {
+  string vm_id = 1;
+}
+
+message GetVmResponse {
+  VmSpec spec = 1;
+  VmStatus status = 2;
+}
+
+// ListVms
+message ListVmsRequest {}
+
+message ListVmsResponse {
+  repeated VmInfo vms = 1;
+}
+
+message VmInfo {
+  string id = 1;
+  string name = 2;
+  VmState state = 3;
+  int32 cpu = 4;
+  int64 memory_bytes = 5;
+  google.protobuf.Timestamp created_at = 6;
+}
+
+// CreateVolume
+message CreateVolumeRequest {
+  string volume_id = 1;
+  string storage_class = 2;
+  int64 size_bytes = 3;
+  map<string, string> parameters = 4; // StorageClass-specific params
+}
+
+message CreateVolumeResponse {
+  string backend_handle = 1;
+}
+
+// DeleteVolume
+message DeleteVolumeRequest {
+  string backend_handle = 1;
+}
+
+message DeleteVolumeResponse {}
+
+// AttachVolume
+message AttachVolumeRequest {
+  string backend_handle = 1;
+  string vm_id = 2;
+  string target_device = 3; // vda, sda, etc.
+  string bus = 4; // virtio, scsi, etc.
+}
+
+message AttachVolumeResponse {}
+
+// DetachVolume
+message DetachVolumeRequest {
+  string backend_handle = 1;
+  string vm_id = 2;
+}
+
+message DetachVolumeResponse {}
+
+// GetNodeInfo
+message GetNodeInfoRequest {}
+
+message GetNodeInfoResponse {
+  string node_id = 1;
+  string hostname = 2;
+  NodeCapacity capacity = 3;
+  NodeUsage usage = 4;
+  repeated StorageBackend storage_backends = 5;
+}
+
+message NodeCapacity {
+  int32 cpu_cores = 1;
+  int64 memory_bytes = 2;
+}
+
+message NodeUsage {
+  int32 cpu_cores_used = 1;
+  int64 memory_bytes_used = 2;
+}
+
+message StorageBackend {
+  string storage_class = 1;
+  int64 total_bytes = 2;
+  int64 free_bytes = 3;
+  bool shared = 4; // Whether volumes are visible from other nodes
+}
+
+// Management API messages
+
+message ApplyNixConfigRequest {
+  // Full contents to write to /etc/nixos/configuration.nix
+  string configuration_nix = 1;
+
+  // When true, run `nixos-rebuild switch` after writing the file.
+  // When false, only write the file.
+  bool rebuild = 2;
+}
+
+message ApplyNixConfigResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message ListDisksRequest {}
+
+message DiskInfo {
+  string name = 1;
+  string path = 2;
+  string size = 3;
+  string model = 4;
+  string fstype = 5;
+  string mountpoint = 6;
+}
+
+message ListDisksResponse {
+  repeated DiskInfo disks = 1;
+}
+
+message ListNetworkInterfacesRequest {}
+
+message NetworkInterfaceInfo {
+  string name = 1;
+  string mac_address = 2;
+  string state = 3;
+  int32 mtu = 4;
+  repeated string addresses = 5; // CIDR format
+}
+
+message ListNetworkInterfacesResponse {
+  repeated NetworkInterfaceInfo interfaces = 1;
+}
+
+message InstallToDiskRequest {
+  string os_disk = 1;            // e.g. /dev/sda
+  repeated string data_disks = 2; // e.g. /dev/nvme0n1
+  string controller = 3;         // existing controller endpoint (IP/FQDN[:port])
+}
+
+message InstallToDiskResponse {
+  bool accepted = 1;
+  string message = 2;
+}
+
+// Image management
+
+message PullImageRequest {
+  string uri = 1;           // HTTP/HTTPS URI to download image
+  string name = 2;          // Optional: custom name for the image (defaults to filename from URI)
+}
+
+message PullImageResponse {
+  string path = 1;          // Local path where image was saved
+  int64 size_bytes = 2;     // Size of the downloaded image
+  bool cached = 3;          // True if image was already cached (not downloaded)
+}
+
+message ListImagesRequest {}
+
+message ListImagesResponse {
+  repeated ImageInfo images = 1;
+}
+
+message ImageInfo {
+  string name = 1;          // Filename
+  string path = 2;          // Full path
+  int64 size_bytes = 3;     // File size
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message DeleteImageRequest {
+  string name = 1;          // Image name (filename) or full path
+  bool force = 2;           // Force deletion even if in use
+}
+
+message DeleteImageResponse {
+  bool success = 1;
+  string message = 2;       // Optional message (e.g., "Image deleted" or "Image in use")
+}
+

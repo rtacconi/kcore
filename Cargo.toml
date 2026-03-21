@@ -1,0 +1,3 @@
+[workspace]
+members = ["crates/node-agent", "crates/controller", "crates/kctl"]
+resolver = "2"
