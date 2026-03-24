@@ -93,6 +93,8 @@ ctrl-os.vms = {
 
 ## How `vm-module.nix` is applied in tests
 
+It will be executed by the node when the new config is received as any other Nix configuration.
+
 `kcore-rust/tests/vm-module.nix` is executed by the NixOS test harness (`pkgs.testers.runNixOSTest`) and used to build an ephemeral test machine configuration.
 
 High-level flow:
