@@ -25,6 +25,7 @@
           inherit system;
           overlays = [rustOverlay];
         };
+        kcoreVersion = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./VERSION);
         rustToolchain = pkgsWithRust.rust-bin.stable.latest.default.override {
           extensions = ["rust-src" "rust-analyzer"];
         };
@@ -34,6 +35,8 @@
 
         commonArgs = {
           inherit src;
+          pname = "kcore-workspace";
+          version = kcoreVersion;
           strictDeps = true;
           nativeBuildInputs = [pkgs.protobuf];
         };
@@ -43,18 +46,21 @@
         kcore-node-agent = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
+            pname = "kcore-node-agent";
             cargoExtraArgs = "-p kcore-node-agent";
           });
 
         kcore-controller = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
+            pname = "kcore-controller";
             cargoExtraArgs = "-p kcore-controller";
           });
 
         kcore-kctl = craneLib.buildPackage (commonArgs
           // {
             inherit cargoArtifacts;
+            pname = "kcore-kctl";
             cargoExtraArgs = "-p kcore-kctl";
           });
       in {
