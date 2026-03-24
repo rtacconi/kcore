@@ -90,3 +90,20 @@ ctrl-os.vms = {
 
 - It is **not generated** at runtime; it is a checked-in test file.
 - It is **applied inside the NixOS test environment** when running the NixOS test (`pkgs.testers.runNixOSTest`), not applied to your host system as part of normal controller/node operations.
+
+## How `vm-module.nix` is applied in tests
+
+`kcore-rust/tests/vm-module.nix` is executed by the NixOS test harness (`pkgs.testers.runNixOSTest`) and used to build an ephemeral test machine configuration.
+
+High-level flow:
+
+1. The test defines a node (`nodes.machine`) that imports `../modules/ctrl-os-vms`.
+2. It sets `ctrl-os.vms` options in that node config.
+3. Nix builds a test system closure and boots a temporary VM for the test.
+4. The `testScript` runs runtime assertions against that VM, including:
+   - `machine.wait_for_unit("kcore-bridge-default.service")`
+   - `machine.succeed("ip link show kbr-default")`
+   - checking `kcore-vm-testvm.service` is not auto-started
+   - checking `/run/kcore` and `/etc/kcore/seeds/testvm.iso` exist
+
+This means module options are truly evaluated and realized in a booted test VM, but only in the test sandbox lifecycle.
