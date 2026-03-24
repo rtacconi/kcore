@@ -168,6 +168,7 @@
                   serviceConfig = {
                     Type = "simple";
                     ExecStart = "${nodeAgent}/bin/kcore-node-agent";
+                    Environment = "PATH=/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
                     Restart = "always";
                     RestartSec = "10s";
                     User = "root";
@@ -377,6 +378,25 @@
                     if [ -n "$CONTROLLER_ENDPOINT" ]; then
                       CONTROLLER_ADDR="$CONTROLLER_ENDPOINT"
                       RUN_CONTROLLER="false"
+
+                      CONTROLLER_HOST="$CONTROLLER_ENDPOINT"
+                      if [[ "$CONTROLLER_HOST" == \[*\]:* ]]; then
+                        CONTROLLER_HOST="''${CONTROLLER_HOST#\[}"
+                        CONTROLLER_HOST="''${CONTROLLER_HOST%%\]*}"
+                      elif [[ "$CONTROLLER_HOST" == *:* ]]; then
+                        CONTROLLER_HOST="''${CONTROLLER_HOST%%:*}"
+                      fi
+
+                      if [ "$CONTROLLER_HOST" = "127.0.0.1" ] || [ "$CONTROLLER_HOST" = "localhost" ]; then
+                        RUN_CONTROLLER="true"
+                      else
+                        for ip in $(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1); do
+                          if [ "$CONTROLLER_HOST" = "$ip" ]; then
+                            RUN_CONTROLLER="true"
+                            break
+                          fi
+                        done
+                      fi
                     fi
 
                     cat > /mnt/etc/kcore/node-agent.yaml << AGENTEOF
@@ -476,6 +496,7 @@ $SSH_KEYS
     serviceConfig = {
       Type = "simple";
       ExecStart = "/opt/kcore/bin/kcore-node-agent --config /etc/kcore/node-agent.yaml";
+      Environment = "PATH=/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
       Restart = "always";
       RestartSec = "10s";
       User = "root";

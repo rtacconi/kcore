@@ -43,11 +43,62 @@ pub fn default_config_path() -> PathBuf {
         .join("config")
 }
 
-pub fn default_certs_dir() -> PathBuf {
+pub fn default_kcore_dir() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".kcore")
-        .join("certs")
+}
+
+pub fn default_certs_dir() -> PathBuf {
+    default_kcore_dir().join("certs")
+}
+
+pub fn default_cluster_certs_dir(cluster_name: &str) -> PathBuf {
+    default_kcore_dir().join(cluster_name)
+}
+
+pub fn resolve_install_certs_dir(config_path: &Path) -> Result<PathBuf, String> {
+    let cfg = load_config(config_path).map_err(|e| format!("loading config: {e}"))?;
+    let context_name = cfg
+        .current_context
+        .clone()
+        .or_else(|| cfg.contexts.keys().next().cloned())
+        .ok_or_else(|| {
+            format!(
+                "no cluster context configured in {} (run `kctl create cluster --context <name> ...` first)",
+                config_path.display()
+            )
+        })?;
+    let ctx = cfg
+        .contexts
+        .get(&context_name)
+        .ok_or_else(|| format!("context '{context_name}' not found in {}", config_path.display()))?;
+
+    if let Some(ca_path) = &ctx.ca {
+        let parent = PathBuf::from(ca_path)
+            .parent()
+            .map(|p| p.to_path_buf())
+            .ok_or_else(|| format!("invalid CA path in context '{context_name}': {ca_path}"))?;
+        return Ok(parent);
+    }
+
+    // Preferred cluster-scoped layout: ~/.kcore/<cluster-name>/
+    let cluster_scoped = default_cluster_certs_dir(&context_name);
+    if cluster_scoped.exists() {
+        return Ok(cluster_scoped);
+    }
+
+    // Backward compatibility for older flat layout.
+    let flat = default_certs_dir();
+    if flat.exists() {
+        return Ok(flat);
+    }
+
+    Err(format!(
+        "unable to resolve cert directory for context '{context_name}'. Tried {} and {}",
+        default_cluster_certs_dir(&context_name).display(),
+        default_certs_dir().display()
+    ))
 }
 
 pub fn load_config(path: &Path) -> Result<Config, Box<dyn std::error::Error>> {

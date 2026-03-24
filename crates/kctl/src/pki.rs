@@ -185,6 +185,28 @@ pub fn load_install_pki(certs_dir: &Path, node_host: &str) -> Result<InstallPkiP
     let kctl_cert_path = certs_dir.join("kctl.crt");
     let kctl_key_path = certs_dir.join("kctl.key");
 
+    let required_paths = [
+        &ca_cert_path,
+        &ca_key_path,
+        &controller_cert_path,
+        &controller_key_path,
+        &kctl_cert_path,
+        &kctl_key_path,
+    ];
+    let missing: Vec<String> = required_paths
+        .iter()
+        .filter(|path| !path.exists())
+        .map(|path| path.display().to_string())
+        .collect();
+    if !missing.is_empty() {
+        return Err(format!(
+            "missing install bootstrap PKI files in {}: {}. \
+run `kctl create cluster --context <cluster-name> --controller <host:9090>` and select that context before node install",
+            certs_dir.display(),
+            missing.join(", ")
+        ));
+    }
+
     let ca_cert_pem = std::fs::read_to_string(&ca_cert_path)
         .map_err(|e| format!("reading {}: {e}", ca_cert_path.display()))?;
     let ca_key_pem = std::fs::read_to_string(&ca_key_path)

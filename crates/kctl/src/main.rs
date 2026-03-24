@@ -314,7 +314,9 @@ async fn main() {
                 .config
                 .clone()
                 .unwrap_or_else(config::default_config_path);
-            let certs_path = certs_dir.clone().unwrap_or_else(config::default_certs_dir);
+            let certs_path = certs_dir
+                .clone()
+                .unwrap_or_else(|| config::default_cluster_certs_dir(context));
             commands::cluster::create(&config_path, controller, &certs_path, context, *force)
         }
 
@@ -411,11 +413,13 @@ async fn main() {
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
-            let certs_dir = info
-                .ca
-                .as_ref()
-                .and_then(|p| PathBuf::from(p).parent().map(|v| v.to_path_buf()))
-                .unwrap_or_else(config::default_certs_dir);
+            let config_path = cli
+                .config
+                .clone()
+                .unwrap_or_else(config::default_config_path);
+            let certs_dir = config::resolve_install_certs_dir(&config_path).unwrap_or_else(|e| {
+                fatal(&format!("resolving install cert directory: {e}"));
+            });
             commands::node::install(
                 &info,
                 os_disk,

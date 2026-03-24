@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::process::Command;
 use tonic::{Request, Response, Status};
@@ -12,6 +13,7 @@ pub struct AdminService {
 }
 
 const BOOTSTRAP_CERT_DIR: &str = "/etc/kcore/certs";
+const INSTALL_LOG_DIR: &str = "/var/log/kcore";
 
 impl AdminService {
     pub fn new(nix_config_path: String) -> Self {
@@ -117,6 +119,22 @@ fn write_bootstrap_pki_at(
     Ok(())
 }
 
+fn prepare_install_log() -> Result<(std::fs::File, PathBuf), Status> {
+    std::fs::create_dir_all(INSTALL_LOG_DIR)
+        .map_err(|e| Status::internal(format!("creating {INSTALL_LOG_DIR}: {e}")))?;
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| Status::internal(format!("system clock before UNIX_EPOCH: {e}")))?
+        .as_secs();
+    let log_path = PathBuf::from(INSTALL_LOG_DIR).join(format!("install-to-disk-{timestamp}.log"));
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log_path)
+        .map_err(|e| Status::internal(format!("opening {}: {e}", log_path.display())))?;
+    Ok((file, log_path))
+}
+
 #[tonic::async_trait]
 impl proto::node_admin_server::NodeAdmin for AdminService {
     async fn list_disks(
@@ -189,7 +207,6 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         write_bootstrap_pki(&req)?;
 
         let mut args = vec![
-            "install-to-disk".to_string(),
             "--disk".to_string(),
             req.os_disk,
             "--yes".to_string(),
@@ -206,18 +223,34 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
             args.push(req.controller);
         }
 
-        let cmd_str = args.join(" ");
-        let spawn_result = std::process::Command::new("nohup")
+        let cmd_str = format!("install-to-disk {}", args.join(" "));
+        let (mut log_file, log_path) = prepare_install_log()?;
+        use std::io::Write as _;
+        writeln!(log_file, "Starting install command: {cmd_str}")
+            .map_err(|e| Status::internal(format!("writing {}: {e}", log_path.display())))?;
+        let stderr_log = log_file
+            .try_clone()
+            .map_err(|e| Status::internal(format!("cloning {}: {e}", log_path.display())))?;
+
+        let spawn_result = std::process::Command::new("install-to-disk")
             .args(&args)
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(log_file))
+            .stderr(std::process::Stdio::from(stderr_log))
             .spawn();
 
         match spawn_result {
-            Ok(_) => Ok(Response::new(proto::InstallToDiskResponse {
+            Ok(child) => {
+                let pid = child.id();
+                info!(pid, log_path = %log_path.display(), "started install-to-disk");
+                Ok(Response::new(proto::InstallToDiskResponse {
                 accepted: true,
-                message: format!("install started: {cmd_str}"),
-            })),
+                message: format!(
+                    "install started (pid {pid}): {cmd_str}; logs: {}",
+                    log_path.display()
+                ),
+                }))
+            }
             Err(e) => Err(Status::internal(format!("failed to start install: {e}"))),
         }
     }

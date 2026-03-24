@@ -6,6 +6,7 @@
 
 - [Architecture](docs/Architecture.md)
 - [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)
+- [Node install bootstrap flow](docs/node-install-bootstrap-flow.md)
 - [Nix VM config generation](docs/nix-vm-config-generation.md)
 - [kctl commands and workflows](docs/kctl-commands-and-workflows.md)
 
