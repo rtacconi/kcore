@@ -135,15 +135,22 @@ pub async fn set_desired_state(
     state_label: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = client::controller_client(info).await?;
-    client
-        .set_vm_desired_state(proto::SetVmDesiredStateRequest {
-            vm_id: vm_id.to_string(),
-            desired_state: desired_state as i32,
-            target_node: target_node.unwrap_or_default(),
-        })
-        .await?;
+    let req = build_set_vm_desired_state_request(vm_id, desired_state, target_node);
+    client.set_vm_desired_state(req).await?;
     println!("VM '{vm_id}' desired state set to {state_label} (declarative apply started)");
     Ok(())
+}
+
+fn build_set_vm_desired_state_request(
+    vm_id: &str,
+    desired_state: proto::VmDesiredState,
+    target_node: Option<String>,
+) -> proto::SetVmDesiredStateRequest {
+    proto::SetVmDesiredStateRequest {
+        vm_id: vm_id.to_string(),
+        desired_state: desired_state as i32,
+        target_node: target_node.unwrap_or_default(),
+    }
 }
 
 pub async fn get(
@@ -233,4 +240,29 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest, Box<dyn std::error::Error
         memory_bytes,
         nics,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn build_set_vm_desired_state_request_sets_running_and_target_node() {
+        let req = build_set_vm_desired_state_request(
+            "web-1",
+            proto::VmDesiredState::Running,
+            Some("node-a".to_string()),
+        );
+        assert_eq!(req.vm_id, "web-1");
+        assert_eq!(req.desired_state, proto::VmDesiredState::Running as i32);
+        assert_eq!(req.target_node, "node-a");
+    }
+
+    #[test]
+    fn build_set_vm_desired_state_request_defaults_empty_target_node() {
+        let req = build_set_vm_desired_state_request("web-1", proto::VmDesiredState::Stopped, None);
+        assert_eq!(req.vm_id, "web-1");
+        assert_eq!(req.desired_state, proto::VmDesiredState::Stopped as i32);
+        assert!(req.target_node.is_empty());
+    }
 }

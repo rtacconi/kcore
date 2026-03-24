@@ -11,6 +11,9 @@ pub struct ControllerService {
     db: Database,
     clients: NodeClients,
     default_network: NetworkConfig,
+    #[cfg(test)]
+    test_push_hook:
+        Option<std::sync::Arc<dyn Fn(&NodeRow) -> Result<(), Status> + Send + Sync + 'static>>,
 }
 
 impl ControllerService {
@@ -19,10 +22,32 @@ impl ControllerService {
             db,
             clients,
             default_network,
+            #[cfg(test)]
+            test_push_hook: None,
+        }
+    }
+
+    #[cfg(test)]
+    pub fn new_with_test_push_hook(
+        db: Database,
+        clients: NodeClients,
+        default_network: NetworkConfig,
+        hook: std::sync::Arc<dyn Fn(&NodeRow) -> Result<(), Status> + Send + Sync + 'static>,
+    ) -> Self {
+        Self {
+            db,
+            clients,
+            default_network,
+            test_push_hook: Some(hook),
         }
     }
 
     async fn push_config_to_node(&self, node: &NodeRow) -> Result<(), Status> {
+        #[cfg(test)]
+        if let Some(hook) = &self.test_push_hook {
+            return hook(node);
+        }
+
         let vms = self
             .db
             .list_vms_for_node(&node.id)
@@ -477,4 +502,140 @@ fn uuid_v4() -> String {
         .unwrap()
         .as_nanos();
     format!("{t:032x}")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    fn test_network() -> NetworkConfig {
+        NetworkConfig {
+            gateway_interface: "eno1".to_string(),
+            external_ip: "203.0.113.10".to_string(),
+            gateway_ip: "10.0.0.1".to_string(),
+            internal_netmask: "255.255.255.0".to_string(),
+        }
+    }
+
+    fn test_node() -> NodeRow {
+        NodeRow {
+            id: "node-1".to_string(),
+            hostname: "node-1".to_string(),
+            address: "127.0.0.1:9091".to_string(),
+            cpu_cores: 4,
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+            status: "ready".to_string(),
+            last_heartbeat: String::new(),
+            gateway_interface: "eno1".to_string(),
+        }
+    }
+
+    fn test_vm(node_id: &str) -> VmRow {
+        VmRow {
+            id: "vm-1".to_string(),
+            name: "web-1".to_string(),
+            cpu: 2,
+            memory_bytes: 2 * 1024 * 1024 * 1024,
+            image_path: "/var/lib/kcore/images/web-1.raw".to_string(),
+            image_size: 8192,
+            network: "default".to_string(),
+            auto_start: true,
+            node_id: node_id.to_string(),
+            created_at: String::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn set_vm_desired_state_updates_db_and_invokes_push_hook() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+        db.insert_vm(&test_vm(&node.id)).expect("insert vm");
+
+        let push_count = Arc::new(AtomicUsize::new(0));
+        let pushed_node = Arc::new(Mutex::new(String::new()));
+        let count_clone = Arc::clone(&push_count);
+        let node_clone = Arc::clone(&pushed_node);
+        let hook = Arc::new(move |n: &NodeRow| {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+            *node_clone.lock().expect("lock pushed node") = n.id.clone();
+            Ok(())
+        });
+
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let req = controller_proto::SetVmDesiredStateRequest {
+            vm_id: "vm-1".to_string(),
+            desired_state: controller_proto::VmDesiredState::Stopped as i32,
+            target_node: node.id.clone(),
+        };
+
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::set_vm_desired_state(
+            &svc,
+            Request::new(req),
+        )
+        .await
+        .expect("set desired state")
+        .into_inner();
+
+        assert_eq!(resp.state, controller_proto::VmState::Stopped as i32);
+        let vm = db.get_vm("vm-1").expect("get vm").expect("vm exists");
+        assert!(
+            !vm.auto_start,
+            "desired stopped state should set auto_start=false"
+        );
+        assert_eq!(push_count.load(Ordering::SeqCst), 1);
+        assert_eq!(*pushed_node.lock().expect("lock pushed node"), "node-1");
+    }
+
+    #[tokio::test]
+    async fn set_vm_desired_state_rejects_unspecified_without_push() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+        db.insert_vm(&test_vm(&node.id)).expect("insert vm");
+
+        let push_count = Arc::new(AtomicUsize::new(0));
+        let count_clone = Arc::clone(&push_count);
+        let hook = Arc::new(move |_n: &NodeRow| {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        });
+
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let req = controller_proto::SetVmDesiredStateRequest {
+            vm_id: "vm-1".to_string(),
+            desired_state: controller_proto::VmDesiredState::Unspecified as i32,
+            target_node: String::new(),
+        };
+
+        let err = <ControllerService as controller_proto::controller_server::Controller>::set_vm_desired_state(
+            &svc,
+            Request::new(req),
+        )
+        .await
+        .expect_err("unspecified should fail");
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let vm = db.get_vm("vm-1").expect("get vm").expect("vm exists");
+        assert!(
+            vm.auto_start,
+            "invalid request should not mutate desired state"
+        );
+        assert_eq!(push_count.load(Ordering::SeqCst), 0);
+    }
 }

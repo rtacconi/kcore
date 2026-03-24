@@ -1,4 +1,4 @@
-# kcore-rust Analysis Report
+# kcore-rust
 
 `kcore-rust` is a Rust workspace with a clean early-stage control-plane design: one controller, one node agent, and one CLI. It now includes end-to-end mTLS plumbing for cluster traffic when TLS is configured.
 

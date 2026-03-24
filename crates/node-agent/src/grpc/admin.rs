@@ -226,6 +226,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tonic::Request;
 
     #[test]
     fn bootstrap_pki_writes_supplied_materials() {
@@ -262,6 +263,29 @@ mod tests {
     }
 
     #[test]
+    fn bootstrap_pki_no_materials_is_noop() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cert_dir = temp.path().join("certs");
+        let req = proto::InstallToDiskRequest {
+            os_disk: "/dev/sda".to_string(),
+            data_disks: vec![],
+            controller: String::new(),
+            ca_cert_pem: String::new(),
+            node_cert_pem: String::new(),
+            node_key_pem: String::new(),
+            controller_cert_pem: String::new(),
+            controller_key_pem: String::new(),
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
+        };
+        write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
+        assert!(
+            !cert_dir.exists(),
+            "no certificate directory should be created when payload is empty"
+        );
+    }
+
+    #[test]
     fn rebuild_args_uses_requested_mode() {
         assert_eq!(rebuild_args("test"), vec!["test"]);
         assert_eq!(rebuild_args("switch"), vec!["switch"]);
@@ -271,5 +295,29 @@ mod tests {
     fn rebuild_sequence_skips_switch_on_test_failure() {
         assert_eq!(rebuild_sequence(false), vec!["test"]);
         assert_eq!(rebuild_sequence(true), vec!["test", "switch"]);
+    }
+
+    #[tokio::test]
+    async fn apply_nix_config_without_rebuild_writes_file_only() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nix_path = temp.path().join("kcore-vms.nix");
+        let svc = AdminService::new(nix_path.display().to_string());
+        let req = proto::ApplyNixConfigRequest {
+            configuration_nix: "{ ... }: { test = true; }\n".to_string(),
+            rebuild: false,
+        };
+
+        let resp = <AdminService as proto::node_admin_server::NodeAdmin>::apply_nix_config(
+            &svc,
+            Request::new(req),
+        )
+        .await
+        .expect("apply without rebuild")
+        .into_inner();
+
+        assert!(resp.success);
+        assert!(resp.message.contains("config written to"));
+        let written = std::fs::read_to_string(&nix_path).expect("read written nix file");
+        assert_eq!(written, "{ ... }: { test = true; }\n");
     }
 }

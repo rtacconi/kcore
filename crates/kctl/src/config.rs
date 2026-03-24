@@ -191,3 +191,39 @@ pub fn resolve_node(
         ca,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_controller_uses_flag_and_defaults_port() {
+        let info = resolve_controller(Path::new("/nonexistent"), &Some("10.0.0.10".into()), true)
+            .expect("resolve controller");
+        assert_eq!(info.address, "10.0.0.10:9090");
+        assert!(info.insecure);
+        assert!(info.cert.is_none());
+        assert!(info.key.is_none());
+        assert!(info.ca.is_none());
+    }
+
+    #[test]
+    fn resolve_node_requires_node_flag() {
+        let result = resolve_node(Path::new("/nonexistent"), &None, true);
+        match result {
+            Ok(_) => panic!("expected missing --node error"),
+            Err(err) => assert!(err.contains("--node flag is required")),
+        }
+    }
+
+    #[test]
+    fn resolve_node_defaults_port_and_uses_insecure_mode() {
+        let info = resolve_node(Path::new("/nonexistent"), &Some("10.0.0.21".into()), true)
+            .expect("resolve node");
+        assert_eq!(info.address, "10.0.0.21:9091");
+        assert!(info.insecure);
+        assert!(info.cert.is_none());
+        assert!(info.key.is_none());
+        assert!(info.ca.is_none());
+    }
+}
