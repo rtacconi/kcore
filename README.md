@@ -1,6 +1,11 @@
 # kcore-rust Analysis Report
 
-`kcore-rust` is a Rust workspace with a clean early-stage control-plane design: one controller, one node agent, and one CLI.
+`kcore-rust` is a Rust workspace with a clean early-stage control-plane design: one controller, one node agent, and one CLI. It now includes end-to-end mTLS plumbing for cluster traffic when TLS is configured.
+
+## Documentation
+
+- [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)
+- [Nix VM config generation](docs/nix-vm-config-generation.md)
 
 ## What It Is
 
@@ -19,27 +24,29 @@
   - async runtime: `tokio`
   - DB: `rusqlite` with WAL
   - config: YAML (`serde_yaml`)
+  - transport security: mTLS support across `kctl`, `controller`, and `node-agent`
 
 ## Strengths
 
 - Clear separation of responsibilities between control plane, node plane, and CLI
 - Declarative VM management model (Nix generation) is consistent with immutable infra patterns
 - Workspace compiles and tests pass (`cargo check --workspace`, `cargo test --workspace`)
-- CLI supports TLS client config and insecure mode for dev workflows
+- `kctl create cluster` generates cluster CA and cert/key pairs for secure bootstrap
+- Node installation bootstraps CA and mTLS certificates into installed KcoreOS
+- Runtime mTLS authentication is supported for client/server and controller/node links
 
 ## Key Risks / Gaps
 
 - **Lifecycle mismatch (high):** controller forwards `start_vm`/`stop_vm` to node compute RPC, but node-agent currently returns `unimplemented` for those mutating VM methods.
-- **Security exposure (high):** `NodeAdmin` is explicitly unauthenticated in proto comments.
-- **TLS inconsistency (high):** TLS fields exist in configs and CLI supports TLS, but controller->node client currently dials `http://...` and servers are started without TLS wiring.
+- **Security hardening incomplete (medium):** mTLS is implemented and materially lowers network attack risk, but cert rotation/revocation workflows and finer-grained authorization are not yet in place.
 - **State sync is stubbed (medium):** `sync_vm_state` logs and returns success without persisting reconciliation.
 - **Scheduler is minimal (medium):** first-ready-node selection only; no capacity/affinity/load awareness.
-- **Testing is sparse (medium):** only one unit test exists (Nix generator).
+- **Testing depth still limited (medium):** meaningful mTLS/bootstrap tests were added, but broader integration and failure-mode coverage is still needed.
 
 ## Practical Priorities
 
 1. Align VM lifecycle semantics: either implement node mutating RPCs or remove/deprecate start/stop RPC path in controller.
-2. Add authn/authz and transport hardening for `NodeAdmin` and controller<->node links.
-3. Implement real VM state reconciliation in `sync_vm_state`.
-4. Improve scheduler to include resource checks and placement policy.
-5. Expand tests around controller DB logic, RPC behavior, and failure paths.
+2. Add certificate lifecycle operations (rotation, expiry alerts, revocation strategy).
+3. Add fine-grained authorization on top of mTLS identity.
+4. Implement real VM state reconciliation in `sync_vm_state`.
+5. Improve scheduler to include resource checks and placement policy.

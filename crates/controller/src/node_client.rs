@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
-use tonic::transport::Channel;
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tracing::info;
 
 use crate::node_proto;
@@ -10,14 +10,23 @@ type ComputeClient = node_proto::node_compute_client::NodeComputeClient<Channel>
 type AdminClient = node_proto::node_admin_client::NodeAdminClient<Channel>;
 
 #[derive(Clone)]
+pub struct TlsClientConfig {
+    pub ca_file: String,
+    pub cert_file: String,
+    pub key_file: String,
+}
+
+#[derive(Clone)]
 pub struct NodeClients {
     clients: Arc<Mutex<HashMap<String, (ComputeClient, AdminClient)>>>,
+    tls: Option<TlsClientConfig>,
 }
 
 impl NodeClients {
-    pub fn new() -> Self {
+    pub fn new(tls: Option<TlsClientConfig>) -> Self {
         Self {
             clients: Arc::new(Mutex::new(HashMap::new())),
+            tls,
         }
     }
 
@@ -25,8 +34,22 @@ impl NodeClients {
         &self,
         address: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let endpoint = format!("http://{address}");
-        let channel = Channel::from_shared(endpoint.clone())?.connect().await?;
+        let channel = if let Some(tls_cfg) = &self.tls {
+            let endpoint = format!("https://{address}");
+            let ca_pem = std::fs::read_to_string(&tls_cfg.ca_file)?;
+            let cert_pem = std::fs::read_to_string(&tls_cfg.cert_file)?;
+            let key_pem = std::fs::read_to_string(&tls_cfg.key_file)?;
+            let tls = ClientTlsConfig::new()
+                .ca_certificate(Certificate::from_pem(ca_pem))
+                .identity(Identity::from_pem(cert_pem, key_pem));
+            Channel::from_shared(endpoint)?
+                .tls_config(tls)?
+                .connect()
+                .await?
+        } else {
+            let endpoint = format!("http://{address}");
+            Channel::from_shared(endpoint)?.connect().await?
+        };
         let compute = ComputeClient::new(channel.clone());
         let admin = AdminClient::new(channel);
 

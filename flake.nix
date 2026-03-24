@@ -71,6 +71,7 @@
               cargoClippyExtraArgs = "--all-targets -- --deny warnings";
             });
           fmt-rust = craneLib.cargoFmt {inherit src;};
+          vm-module = import ./tests/vm-module.nix {inherit pkgs;};
           fmt-nix = pkgs.runCommand "check-nix-fmt" {nativeBuildInputs = [pkgs.nixfmt-rfc-style pkgs.findutils];} ''
             find ${./.} -name '*.nix' -exec nixfmt --check {} + 2>&1 || {
               echo "Run 'nixfmt' to fix formatting"
@@ -373,6 +374,10 @@ listenAddr: "0.0.0.0:9091"
 controllerAddr: "$CONTROLLER_ADDR"
 vmSocketDir: /run/kcore
 nixConfigPath: /etc/nixos/kcore-vms.nix
+tls:
+  caFile: /etc/kcore/certs/ca.crt
+  certFile: /etc/kcore/certs/node.crt
+  keyFile: /etc/kcore/certs/node.key
 AGENTEOF
 
                     cat > /mnt/etc/kcore/controller.yaml << CTRLEOF
@@ -380,6 +385,10 @@ listenAddr: "0.0.0.0:9090"
 dbPath: /var/lib/kcore/controller.db
 defaultNetwork:
   gatewayInterface: eno1
+tls:
+  caFile: /etc/kcore/certs/ca.crt
+  certFile: /etc/kcore/certs/controller.crt
+  keyFile: /etc/kcore/certs/controller.key
 CTRLEOF
 
                     cat > /mnt/etc/nixos/kcore-vms.nix << 'VMSEOF'

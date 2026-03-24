@@ -219,7 +219,7 @@ message ApplyNixConfigResponse {
 }
 
 // ControllerAdmin service provides controller-level management operations.
-// For now this is intentionally unauthenticated and simple, for development use.
+// Deployments are expected to enforce mTLS on the transport layer.
 service ControllerAdmin {
   // ApplyNixConfig replaces the controller's /etc/nixos/configuration.nix with
   // the provided content and (optionally) triggers a nixos-rebuild.

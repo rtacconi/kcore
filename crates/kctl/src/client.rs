@@ -17,21 +17,30 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel, Box<dyn std::erro
     let mut endpoint = Endpoint::from_shared(uri)?;
 
     if !info.insecure {
+        let ca = info
+            .ca
+            .as_ref()
+            .ok_or("missing CA certificate path for TLS connection")?;
+        let cert = info
+            .cert
+            .as_ref()
+            .ok_or("missing client certificate path for mTLS connection")?;
+        let key = info
+            .key
+            .as_ref()
+            .ok_or("missing client key path for mTLS connection")?;
+
         let mut tls = ClientTlsConfig::new();
 
-        if let Some(ca) = &info.ca {
-            let ca_pem =
-                std::fs::read_to_string(ca).map_err(|e| format!("reading CA cert {ca}: {e}"))?;
-            tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
-        }
+        let ca_pem =
+            std::fs::read_to_string(ca).map_err(|e| format!("reading CA cert {ca}: {e}"))?;
+        tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
 
-        if let (Some(cert), Some(key)) = (&info.cert, &info.key) {
-            let cert_pem = std::fs::read_to_string(cert)
-                .map_err(|e| format!("reading client cert {cert}: {e}"))?;
-            let key_pem = std::fs::read_to_string(key)
-                .map_err(|e| format!("reading client key {key}: {e}"))?;
-            tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
-        }
+        let cert_pem = std::fs::read_to_string(cert)
+            .map_err(|e| format!("reading client cert {cert}: {e}"))?;
+        let key_pem =
+            std::fs::read_to_string(key).map_err(|e| format!("reading client key {key}: {e}"))?;
+        tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
 
         endpoint = endpoint.tls_config(tls)?;
     }
@@ -118,4 +127,104 @@ pub fn format_bytes(bytes: i64) -> String {
         value /= 1024.0;
     }
     format!("{value:.1} PB")
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
+    use tokio_stream::wrappers::TcpListenerStream;
+    use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
+
+    use crate::config::ConnectionInfo;
+    use crate::pki;
+
+    async fn start_mtls_server(certs_dir: &Path) -> (String, oneshot::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+
+        let cert_pem =
+            std::fs::read_to_string(certs_dir.join("controller.crt")).expect("controller cert");
+        let key_pem =
+            std::fs::read_to_string(certs_dir.join("controller.key")).expect("controller key");
+        let ca_pem = std::fs::read_to_string(certs_dir.join("ca.crt")).expect("ca cert");
+
+        let tls = ServerTlsConfig::new()
+            .identity(Identity::from_pem(cert_pem, key_pem))
+            .client_ca_root(Certificate::from_pem(ca_pem));
+
+        let (_reporter, service) = tonic_health::server::health_reporter();
+        let (tx, rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            Server::builder()
+                .tls_config(tls)
+                .expect("tls config")
+                .add_service(service)
+                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                    let _ = rx.await;
+                })
+                .await
+                .expect("serve");
+        });
+
+        (addr.to_string(), tx)
+    }
+
+    #[tokio::test]
+    async fn mtls_connect_succeeds_with_valid_client_cert() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let certs_dir = temp.path().join("certs");
+        pki::create_cluster_pki(&certs_dir, "127.0.0.1", false).expect("create pki");
+        let (addr, shutdown) = start_mtls_server(&certs_dir).await;
+
+        let info = ConnectionInfo {
+            address: addr,
+            insecure: false,
+            cert: Some(certs_dir.join("kctl.crt").display().to_string()),
+            key: Some(certs_dir.join("kctl.key").display().to_string()),
+            ca: Some(certs_dir.join("ca.crt").display().to_string()),
+        };
+
+        let channel = super::connect(&info).await.expect("channel");
+        let mut health = tonic_health::pb::health_client::HealthClient::new(channel);
+        let resp = health
+            .check(tonic_health::pb::HealthCheckRequest {
+                service: String::new(),
+            })
+            .await;
+        let _ = shutdown.send(());
+        assert!(resp.is_ok());
+    }
+
+    #[tokio::test]
+    async fn mtls_connect_fails_with_untrusted_client_cert() {
+        let good = tempfile::tempdir().expect("tempdir");
+        let good_dir = good.path().join("certs");
+        pki::create_cluster_pki(&good_dir, "127.0.0.1", false).expect("create pki");
+        let (addr, shutdown) = start_mtls_server(&good_dir).await;
+
+        let bad = tempfile::tempdir().expect("tempdir");
+        let bad_dir = bad.path().join("certs");
+        pki::create_cluster_pki(&bad_dir, "127.0.0.1", false).expect("create pki");
+
+        let info = ConnectionInfo {
+            address: addr,
+            insecure: false,
+            cert: Some(bad_dir.join("kctl.crt").display().to_string()),
+            key: Some(bad_dir.join("kctl.key").display().to_string()),
+            ca: Some(good_dir.join("ca.crt").display().to_string()),
+        };
+
+        let channel = super::connect(&info).await.expect("channel");
+        let mut health = tonic_health::pb::health_client::HealthClient::new(channel);
+        let resp = health
+            .check(tonic_health::pb::HealthCheckRequest {
+                service: String::new(),
+            })
+            .await;
+        let _ = shutdown.send(());
+        assert!(resp.is_err());
+    }
 }

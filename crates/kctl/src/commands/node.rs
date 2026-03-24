@@ -1,6 +1,8 @@
 use crate::client::{self, controller_proto, node_proto};
 use crate::config::ConnectionInfo;
 use crate::output;
+use crate::pki;
+use std::path::Path;
 
 pub async fn list_nodes(info: &ConnectionInfo) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = client::controller_client(info).await?;
@@ -72,13 +74,25 @@ pub async fn install(
     os_disk: &str,
     data_disks: Vec<String>,
     join_controller: &str,
+    certs_dir: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let node_host = pki::host_from_address(&info.address).map_err(|e| format!("node address: {e}"))?;
+    let install_pki =
+        pki::load_install_pki(certs_dir, &node_host).map_err(|e| format!("loading PKI: {e}"))?;
+
     let mut client = client::node_admin_client(info).await?;
     let resp = client
         .install_to_disk(node_proto::InstallToDiskRequest {
             os_disk: os_disk.to_string(),
             data_disks,
             controller: join_controller.to_string(),
+            ca_cert_pem: install_pki.ca_cert_pem,
+            node_cert_pem: install_pki.node_cert_pem,
+            node_key_pem: install_pki.node_key_pem,
+            controller_cert_pem: install_pki.controller_cert_pem,
+            controller_key_pem: install_pki.controller_key_pem,
+            kctl_cert_pem: install_pki.kctl_cert_pem,
+            kctl_key_pem: install_pki.kctl_key_pem,
         })
         .await?
         .into_inner();

@@ -2,6 +2,7 @@ mod client;
 mod commands;
 mod config;
 mod output;
+mod pki;
 
 use std::path::PathBuf;
 use std::process;
@@ -107,6 +108,21 @@ enum CreateResource {
         /// Target node (optional, controller picks if empty)
         #[arg(long = "target-node")]
         target_node: Option<String>,
+    },
+    /// Create cluster PKI and local context for mTLS
+    Cluster {
+        /// Controller address (host:port)
+        #[arg(long)]
+        controller: String,
+        /// Optional cert output directory
+        #[arg(long)]
+        certs_dir: Option<PathBuf>,
+        /// Context name to write in config
+        #[arg(long, default_value = "default")]
+        context: String,
+        /// Overwrite existing certificate files
+        #[arg(long)]
+        force: bool,
     },
 }
 
@@ -223,7 +239,11 @@ fn resolve_controller(cli: &Cli) -> Result<config::ConnectionInfo, String> {
 }
 
 fn resolve_node(cli: &Cli) -> Result<config::ConnectionInfo, String> {
-    config::resolve_node(&cli.node, cli.insecure)
+    let config_path = cli
+        .config
+        .clone()
+        .unwrap_or_else(config::default_config_path);
+    config::resolve_node(&config_path, &cli.node, cli.insecure)
 }
 
 #[tokio::main]
@@ -257,6 +277,24 @@ async fn main() {
                 },
             )
             .await
+        }
+        Command::Create {
+            resource:
+                CreateResource::Cluster {
+                    controller,
+                    certs_dir,
+                    context,
+                    force,
+                },
+        } => {
+            let config_path = cli
+                .config
+                .clone()
+                .unwrap_or_else(config::default_config_path);
+            let certs_path = certs_dir
+                .clone()
+                .unwrap_or_else(config::default_certs_dir);
+            commands::cluster::create(&config_path, controller, &certs_path, context, *force)
         }
 
         Command::Delete {
@@ -337,7 +375,19 @@ async fn main() {
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
-            commands::node::install(&info, os_disk, data_disk.clone(), join_controller).await
+            let certs_dir = info
+                .ca
+                .as_ref()
+                .and_then(|p| PathBuf::from(p).parent().map(|v| v.to_path_buf()))
+                .unwrap_or_else(config::default_certs_dir);
+            commands::node::install(
+                &info,
+                os_disk,
+                data_disk.clone(),
+                join_controller,
+                &certs_dir,
+            )
+            .await
         }
 
         Command::Node {

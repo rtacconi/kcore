@@ -8,14 +8,12 @@ pub struct Config {
     pub listen_addr: String,
     #[serde(default = "default_db_path")]
     pub db_path: String,
-    #[allow(dead_code)]
     pub tls: Option<TlsConfig>,
     pub default_network: NetworkConfig,
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct TlsConfig {
     pub ca_file: String,
     pub cert_file: String,

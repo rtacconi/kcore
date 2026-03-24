@@ -4,7 +4,7 @@ mod grpc;
 mod vmm;
 
 use clap::Parser;
-use tonic::transport::Server;
+use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::info;
 
 pub mod proto {
@@ -46,7 +46,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(addr = %addr, node_id = %cfg.node_id, "starting node-agent");
 
-    Server::builder()
+    let mut server = Server::builder();
+    if let Some(tls) = cfg.tls.as_ref() {
+        let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
+        let key_pem = std::fs::read_to_string(&tls.key_file)?;
+        let ca_pem = std::fs::read_to_string(&tls.ca_file)?;
+        let server_tls = ServerTlsConfig::new()
+            .identity(Identity::from_pem(cert_pem, key_pem))
+            .client_ca_root(Certificate::from_pem(ca_pem));
+        server = server.tls_config(server_tls)?;
+    }
+
+    server
         .add_service(compute_svc)
         .add_service(info_svc)
         .add_service(admin_svc)
