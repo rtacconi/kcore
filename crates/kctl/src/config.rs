@@ -43,6 +43,13 @@ pub fn default_config_path() -> PathBuf {
         .join("config")
 }
 
+pub fn default_certs_dir() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".kcore")
+        .join("certs")
+}
+
 pub fn load_config(path: &Path) -> Result<Config, Box<dyn std::error::Error>> {
     if !path.exists() {
         return Ok(Config::default());
@@ -50,6 +57,15 @@ pub fn load_config(path: &Path) -> Result<Config, Box<dyn std::error::Error>> {
     let data = std::fs::read_to_string(path)?;
     let config: Config = serde_yaml::from_str(&data)?;
     Ok(config)
+}
+
+pub fn save_config(path: &Path, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let data = serde_yaml::to_string(config)?;
+    std::fs::write(path, data)?;
+    Ok(())
 }
 
 impl Config {
@@ -85,14 +101,15 @@ pub fn resolve_controller(
     controller_flag: &Option<String>,
     insecure_flag: bool,
 ) -> Result<ConnectionInfo, String> {
+    let default_certs = default_certs_dir();
     if let Some(addr) = controller_flag {
         let (cert, key, ca) = if insecure_flag {
             (None, None, None)
         } else {
             (
-                Some("certs/controller.crt".to_string()),
-                Some("certs/controller.key".to_string()),
-                Some("certs/ca.crt".to_string()),
+                Some(default_certs.join("kctl.crt").display().to_string()),
+                Some(default_certs.join("kctl.key").display().to_string()),
+                Some(default_certs.join("ca.crt").display().to_string()),
             )
         };
         return Ok(ConnectionInfo {
@@ -115,17 +132,33 @@ pub fn resolve_controller(
     Ok(ConnectionInfo {
         address: normalize_address(&ctx.controller, 9090),
         insecure: ctx.insecure || insecure_flag,
-        cert: ctx
-            .cert
-            .clone()
-            .or(Some("certs/controller.crt".to_string())),
-        key: ctx.key.clone().or(Some("certs/controller.key".to_string())),
-        ca: ctx.ca.clone().or(Some("certs/ca.crt".to_string())),
+        cert: if ctx.insecure || insecure_flag {
+            None
+        } else {
+            ctx.cert
+                .clone()
+                .or(Some(default_certs.join("kctl.crt").display().to_string()))
+        },
+        key: if ctx.insecure || insecure_flag {
+            None
+        } else {
+            ctx.key
+                .clone()
+                .or(Some(default_certs.join("kctl.key").display().to_string()))
+        },
+        ca: if ctx.insecure || insecure_flag {
+            None
+        } else {
+            ctx.ca
+                .clone()
+                .or(Some(default_certs.join("ca.crt").display().to_string()))
+        },
     })
 }
 
 /// Resolve a node-agent address. The `--node` flag is required for direct node commands.
 pub fn resolve_node(
+    config_path: &Path,
     node_flag: &Option<String>,
     insecure_flag: bool,
 ) -> Result<ConnectionInfo, String> {
@@ -133,13 +166,23 @@ pub fn resolve_node(
         .as_deref()
         .ok_or("--node flag is required for this command")?;
 
-    let (cert, key, ca) = if insecure_flag {
+    let default_certs = default_certs_dir();
+    let cfg = load_config(config_path).unwrap_or_default();
+    let ctx = cfg.current_context().ok();
+
+    let (cert, key, ca) = if insecure_flag || ctx.map(|c| c.insecure).unwrap_or(false) {
         (None, None, None)
     } else {
+        let ctx_cert = ctx.and_then(|c| c.cert.clone());
+        let ctx_key = ctx.and_then(|c| c.key.clone());
+        let ctx_ca = ctx.and_then(|c| c.ca.clone());
         (
-            Some("certs/controller.crt".to_string()),
-            Some("certs/controller.key".to_string()),
-            Some("certs/ca.crt".to_string()),
+            ctx_cert
+                .or(Some(default_certs.join("kctl.crt").display().to_string())),
+            ctx_key
+                .or(Some(default_certs.join("kctl.key").display().to_string())),
+            ctx_ca
+                .or(Some(default_certs.join("ca.crt").display().to_string())),
         )
     };
 

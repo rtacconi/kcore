@@ -1,7 +1,8 @@
-.PHONY: all build check fmt clippy iso iso-remote kctl clean help
+.PHONY: all build check fmt clippy test test-all test-rust test-nix test-vm test-controller test-node-agent test-kctl test-rust-filter iso iso-remote kctl clean help
 
 VERSION := $(shell cat VERSION)
 V ?= v$(VERSION)
+SYSTEM ?= $(shell nix eval --impure --raw --expr builtins.currentSystem)
 
 all: build
 
@@ -17,6 +18,35 @@ fmt:
 
 clippy:
 	cargo clippy --all-targets -- --deny warnings
+
+test: test-rust
+
+test-all: test-rust test-nix
+
+test-rust:
+	cargo test --workspace
+
+test-nix:
+	nix flake check
+
+test-vm:
+	nix build .#checks.$(SYSTEM).vm-module
+
+test-controller:
+	cargo test -p kcore-controller
+
+test-node-agent:
+	cargo test -p kcore-node-agent
+
+test-kctl:
+	cargo test -p kcore-kctl
+
+test-rust-filter:
+	@if [ -z "$(TEST)" ]; then \
+		echo "Usage: make test-rust-filter TEST=<pattern>"; \
+		exit 1; \
+	fi
+	cargo test --workspace "$(TEST)"
 
 iso:
 	@echo "Building kcore ISO $(V) (requires Linux)..."
@@ -45,6 +75,15 @@ help:
 	@echo "  check       Run clippy + fmt check"
 	@echo "  fmt         Format Rust code"
 	@echo "  clippy      Run clippy lints"
+	@echo "  test        Run Rust tests (workspace)"
+	@echo "  test-all    Run Rust tests + Nix flake checks"
+	@echo "  test-rust   Run all Rust tests in workspace"
+	@echo "  test-nix    Run Nix flake checks"
+	@echo "  test-vm     Run NixOS VM module test (tests/vm-module.nix)"
+	@echo "  test-controller  Run controller crate tests"
+	@echo "  test-node-agent  Run node-agent crate tests"
+	@echo "  test-kctl   Run kctl crate tests"
+	@echo "  test-rust-filter TEST=<pattern>  Run matching Rust tests only"
 	@echo "  iso         Build NixOS ISO (Linux only)"
 	@echo "  iso-remote  Build NixOS ISO on remote Linux server (from macOS)"
 	@echo "  kctl        Build kctl CLI only"

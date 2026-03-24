@@ -11,12 +11,49 @@ pub struct AdminService {
     nix_config_path: PathBuf,
 }
 
+const BOOTSTRAP_CERT_DIR: &str = "/etc/kcore/certs";
+
 impl AdminService {
     pub fn new(nix_config_path: String) -> Self {
         Self {
             nix_config_path: PathBuf::from(nix_config_path),
         }
     }
+}
+
+fn write_bootstrap_pki(req: &proto::InstallToDiskRequest) -> Result<(), Status> {
+    write_bootstrap_pki_at(req, &PathBuf::from(BOOTSTRAP_CERT_DIR))
+}
+
+fn write_bootstrap_pki_at(req: &proto::InstallToDiskRequest, base_dir: &PathBuf) -> Result<(), Status> {
+    let certs = [
+        ("ca.crt", &req.ca_cert_pem),
+        ("node.crt", &req.node_cert_pem),
+        ("node.key", &req.node_key_pem),
+        ("controller.crt", &req.controller_cert_pem),
+        ("controller.key", &req.controller_key_pem),
+        ("kctl.crt", &req.kctl_cert_pem),
+        ("kctl.key", &req.kctl_key_pem),
+    ];
+
+    let has_any = certs.iter().any(|(_, content)| !content.trim().is_empty());
+    if !has_any {
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(base_dir)
+        .map_err(|e| Status::internal(format!("creating {}: {e}", base_dir.display())))?;
+
+    for (name, content) in certs {
+        if content.trim().is_empty() {
+            continue;
+        }
+        let path = base_dir.join(name);
+        std::fs::write(&path, content)
+            .map_err(|e| Status::internal(format!("writing {}: {e}", path.display())))?;
+    }
+
+    Ok(())
 }
 
 #[tonic::async_trait]
@@ -102,6 +139,8 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
             return Err(Status::invalid_argument("invalid os_disk path"));
         }
 
+        write_bootstrap_pki(&req)?;
+
         let mut args = vec![
             "install-to-disk".to_string(),
             "--disk".to_string(),
@@ -134,5 +173,44 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
             })),
             Err(e) => Err(Status::internal(format!("failed to start install: {e}"))),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bootstrap_pki_writes_supplied_materials() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let cert_dir = temp.path().join("certs");
+        let req = proto::InstallToDiskRequest {
+            os_disk: "/dev/sda".to_string(),
+            data_disks: vec![],
+            controller: String::new(),
+            ca_cert_pem: "ca".to_string(),
+            node_cert_pem: "node-cert".to_string(),
+            node_key_pem: "node-key".to_string(),
+            controller_cert_pem: String::new(),
+            controller_key_pem: String::new(),
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
+        };
+
+        write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
+
+        assert_eq!(
+            std::fs::read_to_string(cert_dir.join("ca.crt")).expect("ca"),
+            "ca"
+        );
+        assert_eq!(
+            std::fs::read_to_string(cert_dir.join("node.crt")).expect("node cert"),
+            "node-cert"
+        );
+        assert_eq!(
+            std::fs::read_to_string(cert_dir.join("node.key")).expect("node key"),
+            "node-key"
+        );
+        assert!(!cert_dir.join("controller.crt").exists());
     }
 }

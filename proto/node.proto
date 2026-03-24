@@ -34,8 +34,8 @@ service NodeInfo {
   rpc GetNodeInfo(GetNodeInfoRequest) returns (GetNodeInfoResponse);
 }
 
-// NodeAdmin service provides node-level management operations
-// NOTE: For now this is intentionally unauthenticated and very simple, for development use only.
+// NodeAdmin service provides node-level management operations.
+// Deployments are expected to enforce mTLS on the transport layer.
 service NodeAdmin {
   // ApplyNixConfig replaces the node's /etc/nixos/configuration.nix with the
   // provided content and (optionally) triggers a nixos-rebuild.
@@ -290,6 +290,13 @@ message InstallToDiskRequest {
   string os_disk = 1;            // e.g. /dev/sda
   repeated string data_disks = 2; // e.g. /dev/nvme0n1
   string controller = 3;         // existing controller endpoint (IP/FQDN[:port])
+  string ca_cert_pem = 4;        // Cluster CA certificate (PEM)
+  string node_cert_pem = 5;      // Node mTLS certificate (PEM)
+  string node_key_pem = 6;       // Node mTLS private key (PEM)
+  string controller_cert_pem = 7; // Controller server/client certificate (PEM)
+  string controller_key_pem = 8;  // Controller server/client private key (PEM)
+  string kctl_cert_pem = 9;      // kctl client certificate (PEM)
+  string kctl_key_pem = 10;      // kctl client private key (PEM)
 }
 
 message InstallToDiskResponse {

@@ -8,10 +8,16 @@ clap = { version = "4", features = ["derive"] }
 dirs = "6"
 prost = "0.13"
 prost-types = "0.13"
+rcgen = { version = "0.12", features = ["x509-parser"] }
 serde = { version = "1", features = ["derive"] }
 serde_yaml = "0.9"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 tonic = { version = "0.12", features = ["tls", "transport"] }
+
+[dev-dependencies]
+tempfile = "3"
+tonic-health = "0.12"
+tokio-stream = { version = "0.1", features = ["net"] }
 
 [build-dependencies]
 tonic-build = "0.12"

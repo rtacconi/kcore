@@ -9,7 +9,6 @@ pub struct Config {
     pub listen_addr: String,
     #[allow(dead_code)]
     pub controller_addr: Option<String>,
-    #[allow(dead_code)]
     pub tls: Option<TlsConfig>,
     #[serde(default = "default_vm_socket_dir")]
     pub vm_socket_dir: String,
@@ -19,7 +18,6 @@ pub struct Config {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-#[allow(dead_code)]
 pub struct TlsConfig {
     pub ca_file: String,
     pub cert_file: String,
