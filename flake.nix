@@ -31,7 +31,12 @@
         };
         craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-        src = craneLib.cleanCargoSource ./.;
+        src = pkgs.lib.cleanSourceWith {
+          src = ./.;
+          filter = path: type:
+            (craneLib.filterCargoSources path type)
+            || pkgs.lib.hasPrefix "${toString ./.}/proto/" (toString path);
+        };
 
         commonArgs = {
           inherit src;
