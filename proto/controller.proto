@@ -100,7 +100,7 @@ message StartVmResponse {
 
 message StopVmRequest {
   string vm_id = 1;
-  bool force = 2;
+  bool force = 2;           // Deprecated/ignored in declarative mode
   string target_node = 3;  // Optional
 }
 

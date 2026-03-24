@@ -281,12 +281,6 @@ impl controller_proto::controller_server::Controller for ControllerService {
     ) -> Result<Response<controller_proto::StopVmResponse>, Status> {
         let req = request.into_inner();
         let node = self.resolve_node_for_vm(&req.vm_id, &req.target_node)?;
-        if req.force {
-            warn!(
-                vm_id = %req.vm_id,
-                "force stop is ignored in declarative mode; applying desired stopped state"
-            );
-        }
         let updated = self
             .db
             .set_vm_auto_start(&req.vm_id, false)

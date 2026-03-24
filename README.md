@@ -6,6 +6,7 @@
 
 - [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)
 - [Nix VM config generation](docs/nix-vm-config-generation.md)
+- [kctl commands and workflows](docs/kctl-commands-and-workflows.md)
 
 ## What It Is
 

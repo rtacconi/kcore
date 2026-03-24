@@ -114,14 +114,13 @@ pub async fn start(
 pub async fn stop(
     info: &ConnectionInfo,
     vm_id: &str,
-    force: bool,
     target_node: Option<String>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut client = client::controller_client(info).await?;
     client
         .stop_vm(proto::StopVmRequest {
             vm_id: vm_id.to_string(),
-            force,
+            force: false,
             target_node: target_node.unwrap_or_default(),
         })
         .await?;

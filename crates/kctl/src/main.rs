@@ -148,7 +148,7 @@ enum DeleteResource {
 
 #[derive(Subcommand)]
 enum StartResource {
-    /// Start a virtual machine
+    /// Request desired running state for a virtual machine (declarative apply)
     Vm {
         /// VM ID or name
         vm_id: String,
@@ -160,13 +160,10 @@ enum StartResource {
 
 #[derive(Subcommand)]
 enum StopResource {
-    /// Stop a virtual machine
+    /// Request desired stopped state for a virtual machine (declarative apply)
     Vm {
         /// VM ID or name
         vm_id: String,
-        /// Force stop
-        #[arg(long)]
-        force: bool,
         /// Target node (optional)
         #[arg(long = "target-node")]
         target_node: Option<String>,
@@ -322,12 +319,11 @@ async fn main() {
             resource:
                 StopResource::Vm {
                     vm_id,
-                    force,
                     target_node,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
-            commands::vm::stop(&info, vm_id, *force, target_node.clone()).await
+            commands::vm::stop(&info, vm_id, target_node.clone()).await
         }
 
         Command::Get {
