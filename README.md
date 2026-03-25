@@ -1,54 +1,74 @@
 # kcore-rust
 
-`kcore-rust` is a Rust workspace with a clean early-stage control-plane design: one controller, one node agent, and one CLI. It now includes end-to-end mTLS plumbing for cluster traffic when TLS is configured.
+`kcore-rust` is a Rust control plane for declarative VM lifecycle management on NixOS hosts.
+It is organized as a multi-crate workspace with a controller, node agent, and CLI.
 
-## Documentation
+## Current Project State
 
-- [Architecture](docs/Architecture.md)
-- [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)
-- [Node install bootstrap flow](docs/node-install-bootstrap-flow.md)
-- [Nix VM config generation](docs/nix-vm-config-generation.md)
-- [kctl commands and workflows](docs/kctl-commands-and-workflows.md)
+- Declarative VM lifecycle is implemented end-to-end (`create/delete/set desired state` -> controller DB -> generated Nix -> node apply).
+- Runtime transport security uses mTLS between `kctl`, `kcore-controller`, and `kcore-node-agent` when TLS is configured.
+- Certificate Common Name (CN)-based authorization is enforced per gRPC method in secure mode.
+- Node installation bootstraps cluster PKI material into `/etc/kcore/certs` on installed systems.
+- Cloud Hypervisor runtime status is surfaced from node-agent via API sockets under `/run/kcore`.
 
-## What It Is
+## Components
 
-- `kcore-controller`: central orchestration API (gRPC), SQLite-backed state, Nix config generation/push to nodes
-- `kcore-node-agent`: node-side gRPC service, Cloud Hypervisor status discovery via Unix sockets, node admin ops
-- `kctl`: operator CLI (create/get/start/stop VM, node admin, apply config, image pull/delete)
+- `kcore-controller`: gRPC orchestration API, SQLite-backed desired state, scheduler, and Nix config rendering/push.
+- `kcore-node-agent`: node-side gRPC service for admin operations, config apply, install flow, and VM runtime visibility.
+- `kctl`: operator CLI for cluster PKI setup, VM lifecycle, node install/admin operations, and image operations.
 
 ## Architecture Snapshot
 
-- **Control flow**
-  - `kctl` talks to controller (or directly to node for admin/image ops)
-  - controller stores nodes/VMs in SQLite and pushes generated Nix (`ctrl-os.vms`) to target node
-  - node-agent applies Nix and reports VM state from Cloud Hypervisor sockets
-- **Protocols/stack**
-  - gRPC via `tonic` + protobuf (`proto/controller.proto`, `proto/node.proto`)
-  - async runtime: `tokio`
-  - DB: `rusqlite` with WAL
-  - config: YAML (`serde_yaml`)
-  - transport security: mTLS support across `kctl`, `controller`, and `node-agent`
+- `kctl` sends intent to controller (and can call node-agent directly for node-scoped operations).
+- Controller persists desired state, selects target nodes, and renders `ctrl-os.vms` with `nixgen`.
+- Node-agent writes generated config, runs `nixos-rebuild`, and reports runtime state back to controller.
+- VM networking and units are realized by the `ctrl-os-vms` module and executed by `cloud-hypervisor`.
 
-## Strengths
+See: [Architecture](docs/Architecture.md)
 
-- Clear separation of responsibilities between control plane, node plane, and CLI
-- Declarative VM management model (Nix generation) is consistent with immutable infra patterns
-- Workspace compiles and tests pass (`cargo check --workspace`, `cargo test --workspace`)
-- `kctl create cluster` generates cluster CA and cert/key pairs for secure bootstrap
-- Node installation bootstraps CA and mTLS certificates into installed KcoreOS
-- Runtime mTLS authentication is supported for client/server and controller/node links
+## Security Snapshot
 
-## Key Risks / Gaps
+- mTLS is the default production posture; insecure mode is opt-in via `--allow-insecure` / `--insecure`.
+- Cluster PKI is created by `kctl create cluster`.
+- Node install flow sends only required cert/key material to target nodes; private key files are written with restricted permissions.
+- Known security work still pending: certificate rotation workflows, revocation checks (CRL/OCSP), and finer-grained authorization policies.
 
-- **Lifecycle semantics clarity (low/medium):** `start_vm`/`stop_vm` now work declaratively (desired state + config apply), but RPC names/flags (for example `force`) still look imperative and can confuse operators.
-- **Security hardening incomplete (medium):** mTLS is implemented and materially lowers network attack risk, but cert rotation/revocation workflows and finer-grained authorization are not yet in place.
-- **State sync is stubbed (medium):** `sync_vm_state` logs and returns success without persisting reconciliation.
-- **Scheduler is minimal (medium):** first-ready-node selection only; no capacity/affinity/load awareness.
-- **Testing depth still limited (medium):** meaningful mTLS/bootstrap tests were added, but broader integration and failure-mode coverage is still needed.
+See: [Security model](docs/security.md)
 
-## Practical Priorities
+## Operator Workflows
 
-1. Add certificate lifecycle operations (rotation, expiry alerts, revocation strategy).
-2. Add fine-grained authorization on top of mTLS identity.
-3. Implement real VM state reconciliation in `sync_vm_state`.
-4. Improve scheduler to include resource checks and placement policy.
+- Initialize cluster PKI/context: `kctl create cluster --controller <host:9090>`
+- Install nodes from live ISO: `kctl --node <host:9091> node install ...`
+- Manage VM desired state declaratively: `kctl set vm <name> --state <running|stopped>`
+- Legacy compatibility aliases remain available: `kctl start vm ...`, `kctl stop vm ...`
+
+See:
+- [kctl commands and workflows](docs/kctl-commands-and-workflows.md)
+- [Node install bootstrap flow](docs/node-install-bootstrap-flow.md)
+- [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)
+- [Nix VM config generation](docs/nix-vm-config-generation.md)
+
+## Developer Workflow
+
+Use the Nix flake development environment for reproducible toolchains:
+
+```bash
+nix develop
+```
+
+Common checks:
+
+```bash
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace
+cargo fmt --check
+cargo audit
+```
+
+## Known Gaps / Next Priorities
+
+1. Add certificate lifecycle management (rotation, expiry handling, revocation strategy).
+2. Implement robust state reconciliation for VM runtime sync paths.
+3. Improve scheduler policy (capacity/affinity/load-aware placement).
+4. Expand integration and failure-mode test coverage across controller/node interactions.
