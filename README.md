@@ -20,9 +20,9 @@ It is organized as a multi-crate workspace with a controller, node agent, and CL
 ## Architecture Snapshot
 
 - `kctl` sends intent to controller (and can call node-agent directly for node-scoped operations).
-- Controller persists desired state, selects target nodes, and renders `ctrl-os.vms` with `nixgen`.
+- Controller persists desired state, selects target nodes, and renders `ch-vm.vms` with `nixgen`.
 - Node-agent writes generated config, runs `nixos-rebuild`, and reports runtime state back to controller.
-- VM networking and units are realized by the `ctrl-os-vms` module and executed by `cloud-hypervisor`.
+- VM networking and units are realized by the `ch-vm` module and executed by `cloud-hypervisor`.
 
 See: [Architecture](docs/Architecture.md)
 
@@ -39,14 +39,21 @@ See: [Security model](docs/security.md)
 
 - Initialize cluster PKI/context: `kctl create cluster --controller <host:9090>`
 - Install nodes from live ISO: `kctl --node <host:9091> node install ...`
+- Create VMs with an explicit boot image: `kctl create vm <name> --image /var/lib/kcore/images/<image>.raw`
 - Manage VM desired state declaratively: `kctl set vm <name> --state <running|stopped>`
 - Legacy compatibility aliases remain available: `kctl start vm ...`, `kctl stop vm ...`
+
+Cloud Hypervisor console endpoints:
+- API socket: `/run/kcore/<vm-name>.sock`
+- Serial socket: `/run/kcore/<vm-name>.serial.sock`
+- Example attach from node host: `socat -,raw,echo=0,icanon=0 UNIX-CONNECT:/run/kcore/<vm-name>.serial.sock`
 
 See:
 - [kctl commands and workflows](docs/kctl-commands-and-workflows.md)
 - [Node install bootstrap flow](docs/node-install-bootstrap-flow.md)
 - [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)
 - [Nix VM config generation](docs/nix-vm-config-generation.md)
+- [File structure](docs/file-structure.md)
 
 ## Developer Workflow
 
