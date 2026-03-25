@@ -4,12 +4,12 @@
   '';
 in
   pkgs.testers.runNixOSTest {
-    name = "ctrl-os-vms-basic";
+    name = "ch-vm-basic";
 
     nodes.machine = {pkgs, ...}: {
-      imports = [../modules/ctrl-os-vms];
+      imports = [../modules/ch-vm];
 
-      ctrl-os.vms = {
+      ch-vm.vms = {
         enable = true;
         cloudHypervisorPackage = pkgs.cloud-hypervisor;
         gatewayInterface = "eth0";
@@ -19,7 +19,7 @@ in
           gatewayIP = "192.168.100.1";
         };
 
-        virtualMachines.testvm = {
+        virtualMachines."this-name-is-way-too-long" = {
           image = testImage;
           cores = 1;
           memorySize = 256;
@@ -35,10 +35,15 @@ in
       machine.wait_for_unit("kcore-bridge-default.service")
       machine.succeed("ip link show kbr-default")
 
-      status = machine.get_unit_info("kcore-vm-testvm.service")
+      status = machine.get_unit_info("kcore-vm-this-name-is-way-too-long.service")
       assert status["ActiveState"] != "active", "VM should not auto-start"
 
+      machine.succeed("systemctl start kcore-tap-this-name-is-way-too-long.service")
+      machine.wait_for_unit("kcore-tap-this-name-is-way-too-long.service")
+      machine.succeed("test $(ip -o link show | awk -F': ' '/tap-[0-9a-f]{8}/ {print $2; exit}' | wc -c) -le 16")
+      machine.succeed("systemctl cat kcore-vm-this-name-is-way-too-long.service | grep -E 'tap-[0-9a-f]{8}'")
+
       machine.succeed("test -d /run/kcore")
-      machine.succeed("test -f /etc/kcore/seeds/testvm.iso")
+      machine.succeed("test -f /etc/kcore/seeds/this-name-is-way-too-long.iso")
     '';
   }

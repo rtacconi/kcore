@@ -70,10 +70,12 @@ pub fn resolve_install_certs_dir(config_path: &Path) -> Result<PathBuf, String> 
                 config_path.display()
             )
         })?;
-    let ctx = cfg
-        .contexts
-        .get(&context_name)
-        .ok_or_else(|| format!("context '{context_name}' not found in {}", config_path.display()))?;
+    let ctx = cfg.contexts.get(&context_name).ok_or_else(|| {
+        format!(
+            "context '{context_name}' not found in {}",
+            config_path.display()
+        )
+    })?;
 
     if let Some(ca_path) = &ctx.ca {
         let parent = PathBuf::from(ca_path)

@@ -23,7 +23,7 @@ fn ch_state_to_proto(state: &str) -> i32 {
     }
 }
 
-const DECLARATIVE_MSG: &str = "VMs are managed declaratively via NixOS config (ctrl-os.vms). \
+const DECLARATIVE_MSG: &str = "VMs are managed declaratively via NixOS config (ch-vm.vms). \
     Use `nixos-rebuild switch` to add, remove, or reconfigure VMs.";
 
 #[tonic::async_trait]
@@ -89,57 +89,178 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
 
     async fn create_vm(
         &self,
-        _request: Request<proto::CreateVmRequest>,
+        request: Request<proto::CreateVmRequest>,
     ) -> Result<Response<proto::CreateVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn update_vm(
         &self,
-        _request: Request<proto::UpdateVmRequest>,
+        request: Request<proto::UpdateVmRequest>,
     ) -> Result<Response<proto::UpdateVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn delete_vm(
         &self,
-        _request: Request<proto::DeleteVmRequest>,
+        request: Request<proto::DeleteVmRequest>,
     ) -> Result<Response<proto::DeleteVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn set_vm_desired_state(
         &self,
-        _request: Request<proto::SetVmDesiredStateRequest>,
+        request: Request<proto::SetVmDesiredStateRequest>,
     ) -> Result<Response<proto::SetVmDesiredStateResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn reboot_vm(
         &self,
-        _request: Request<proto::RebootVmRequest>,
+        request: Request<proto::RebootVmRequest>,
     ) -> Result<Response<proto::RebootVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn pull_image(
         &self,
-        _request: Request<proto::PullImageRequest>,
+        request: Request<proto::PullImageRequest>,
     ) -> Result<Response<proto::PullImageResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn list_images(
         &self,
-        _request: Request<proto::ListImagesRequest>,
+        request: Request<proto::ListImagesRequest>,
     ) -> Result<Response<proto::ListImagesResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
     async fn delete_image(
         &self,
-        _request: Request<proto::DeleteImageRequest>,
+        request: Request<proto::DeleteImageRequest>,
     ) -> Result<Response<proto::DeleteImageResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn svc() -> ComputeService {
+        ComputeService::new(vmm::Client::new("/run/kcore"))
+    }
+
+    fn assert_denied(res: Result<impl Sized, Status>) {
+        match res {
+            Ok(_) => panic!("expected permission denied without TLS"),
+            Err(err) => assert_eq!(err.code(), tonic::Code::PermissionDenied),
+        }
+    }
+
+    #[tokio::test]
+    async fn insecure_mode_denies_all_compute_endpoints() {
+        let s = svc();
+
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::get_vm(
+                &s,
+                Request::new(proto::GetVmRequest {
+                    vm_id: "vm-1".to_string(),
+                }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::list_vms(
+                &s,
+                Request::new(proto::ListVmsRequest {}),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::create_vm(
+                &s,
+                Request::new(proto::CreateVmRequest {
+                    spec: None,
+                    image_uri: String::new(),
+                    image_path: String::new(),
+                    image_format: String::new(),
+                }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::update_vm(
+                &s,
+                Request::new(proto::UpdateVmRequest { spec: None }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::delete_vm(
+                &s,
+                Request::new(proto::DeleteVmRequest {
+                    vm_id: "vm-1".to_string(),
+                }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::set_vm_desired_state(
+                &s,
+                Request::new(proto::SetVmDesiredStateRequest {
+                    vm_id: "vm-1".to_string(),
+                    desired_state: proto::VmDesiredState::Running as i32,
+                }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::reboot_vm(
+                &s,
+                Request::new(proto::RebootVmRequest {
+                    vm_id: "vm-1".to_string(),
+                    force: false,
+                }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::pull_image(
+                &s,
+                Request::new(proto::PullImageRequest {
+                    uri: "https://example.invalid/img.raw".to_string(),
+                    name: String::new(),
+                }),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::list_images(
+                &s,
+                Request::new(proto::ListImagesRequest {}),
+            )
+            .await,
+        );
+        assert_denied(
+            <ComputeService as proto::node_compute_server::NodeCompute>::delete_image(
+                &s,
+                Request::new(proto::DeleteImageRequest {
+                    name: "img.raw".to_string(),
+                    force: false,
+                }),
+            )
+            .await,
+        );
     }
 }

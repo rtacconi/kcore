@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use anyhow::Result;
 use crate::config::{self, Context};
 use crate::pki;
+use anyhow::Result;
 
 pub fn create(
     config_path: &Path,
@@ -11,8 +11,8 @@ pub fn create(
     context_name: &str,
     force: bool,
 ) -> Result<()> {
-    let controller_host =
-        pki::host_from_address(controller).map_err(|e| anyhow::anyhow!("invalid controller: {e}"))?;
+    let controller_host = pki::host_from_address(controller)
+        .map_err(|e| anyhow::anyhow!("invalid controller: {e}"))?;
     let pki_paths = pki::create_cluster_pki(certs_dir, &controller_host, force)
         .map_err(|e| anyhow::anyhow!("creating cluster PKI: {e}"))?;
 

@@ -33,14 +33,14 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
 
         let mut tls = ClientTlsConfig::new();
 
-        let ca_pem = std::fs::read_to_string(ca)
-            .with_context(|| format!("reading CA cert {ca}"))?;
+        let ca_pem =
+            std::fs::read_to_string(ca).with_context(|| format!("reading CA cert {ca}"))?;
         tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
 
-        let cert_pem = std::fs::read_to_string(cert)
-            .with_context(|| format!("reading client cert {cert}"))?;
-        let key_pem = std::fs::read_to_string(key)
-            .with_context(|| format!("reading client key {key}"))?;
+        let cert_pem =
+            std::fs::read_to_string(cert).with_context(|| format!("reading client cert {cert}"))?;
+        let key_pem =
+            std::fs::read_to_string(key).with_context(|| format!("reading client key {key}"))?;
         tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
 
         endpoint = endpoint.tls_config(tls)?;

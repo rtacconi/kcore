@@ -107,11 +107,11 @@
 
       flake = let
         kcoreVersion = builtins.replaceStrings ["\n"] [""] (builtins.readFile ./VERSION);
-        ctrlOsVmsModule = ./modules/ctrl-os-vms;
+        chVmModule = ./modules/ch-vm;
       in {
         nixosModules = {
-          ctrl-os-vms = ctrlOsVmsModule;
-          default = ctrlOsVmsModule;
+          ch-vm = chVmModule;
+          default = chVmModule;
         };
 
         nixosConfigurations.kcore-iso = inputs.nixpkgs.lib.nixosSystem {
@@ -168,7 +168,8 @@
                   wants = ["network-online.target"];
                   serviceConfig = {
                     Type = "simple";
-                    ExecStart = "${nodeAgent}/bin/kcore-node-agent";
+                    # Live ISO has no bootstrap TLS yet; allow insecure node admin RPCs.
+                    ExecStart = "${nodeAgent}/bin/kcore-node-agent --allow-insecure";
                     Environment = "PATH=/run/current-system/sw/bin:/nix/var/nix/profiles/default/bin:/run/wrappers/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
                     Restart = "always";
                     RestartSec = "10s";
@@ -205,6 +206,7 @@
                     FORCE_WIPE="false"
                     REBOOT_AFTER_INSTALL="false"
                     CONTROLLER_ENDPOINT=""
+                    RUN_CONTROLLER="false"
                     DATA_DISKS=()
 
                     while [[ $# -gt 0 ]]; do
@@ -233,13 +235,17 @@
                           CONTROLLER_ENDPOINT="''${2:-}"
                           shift 2
                           ;;
+                        --run-controller)
+                          RUN_CONTROLLER="true"
+                          shift
+                          ;;
                         --data-disk)
                           DATA_DISKS+=("''${2:-}")
                           shift 2
                           ;;
                         *)
                           echo "Unknown argument: $1"
-                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--controller 192.168.40.135[:9090]] [--yes --wipe --non-interactive --reboot]"
+                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--controller 192.168.40.135[:9090]] [--run-controller] [--yes --wipe --non-interactive --reboot]"
                           exit 1
                           ;;
                       esac
@@ -350,9 +356,9 @@
                     chmod +x /mnt/opt/kcore/bin/kcore-node-agent
                     chmod +x /mnt/opt/kcore/bin/kcore-controller
 
-                    echo "Copying ctrl-os-vms module..."
-                    mkdir -p /mnt/etc/nixos/modules/ctrl-os-vms
-                    cp -r ${ctrlOsVmsModule}/* /mnt/etc/nixos/modules/ctrl-os-vms/
+                    echo "Copying ch-vm module..."
+                    mkdir -p /mnt/etc/nixos/modules/ch-vm
+                    cp -r ${chVmModule}/* /mnt/etc/nixos/modules/ch-vm/
 
                     echo "Copying kcore config and certificates..."
                     mkdir -p /mnt/etc/kcore
@@ -372,41 +378,20 @@
                       SSH_KEYS=$(cat /root/.ssh/authorized_keys | sed 's/^/      "/' | sed 's/$/"/' | paste -sd '\n')
                     fi
 
-                    # Determine if this is a controller node or a joining agent node
-                    CONTROLLER_ADDR="127.0.0.1:9090"
-                    RUN_CONTROLLER="true"
-                    if [ -n "$CONTROLLER_ENDPOINT" ]; then
-                      CONTROLLER_ADDR="$CONTROLLER_ENDPOINT"
-                      RUN_CONTROLLER="false"
-
-                      CONTROLLER_HOST="$CONTROLLER_ENDPOINT"
-                      if [[ "$CONTROLLER_HOST" == \[*\]:* ]]; then
-                        CONTROLLER_HOST="''${CONTROLLER_HOST#\[}"
-                        CONTROLLER_HOST="''${CONTROLLER_HOST%%\]*}"
-                      elif [[ "$CONTROLLER_HOST" == *:* ]]; then
-                        CONTROLLER_HOST="''${CONTROLLER_HOST%%:*}"
-                      fi
-
-                      if [ "$CONTROLLER_HOST" = "127.0.0.1" ] || [ "$CONTROLLER_HOST" = "localhost" ]; then
-                        RUN_CONTROLLER="true"
-                      else
-                        for ip in $(ip -4 -o addr show scope global | awk '{print $4}' | cut -d/ -f1); do
-                          if [ "$CONTROLLER_HOST" = "$ip" ]; then
-                            RUN_CONTROLLER="true"
-                            break
-                          fi
-                        done
-                      fi
+                    # Controller is opt-in only. By default, install as node-agent that joins an existing controller.
+                    CONTROLLER_ADDR="$CONTROLLER_ENDPOINT"
+                    if [ "$RUN_CONTROLLER" = "true" ]; then
+                      CONTROLLER_ADDR="127.0.0.1:9090"
+                    elif [ -z "$CONTROLLER_ENDPOINT" ]; then
+                      echo "Error: provide --controller <host:9090> or pass --run-controller"
+                      exit 1
                     fi
 
                     GATEWAY_INTERFACE=$(ip -4 route show default 2>/dev/null | awk 'NR==1 {print $5}')
-                    GATEWAY_IP=$(ip -4 route show default 2>/dev/null | awk 'NR==1 {print $3}')
+                    INTERNAL_GATEWAY_IP="10.240.0.1"
                     EXTERNAL_IP=""
                     if [ -n "$GATEWAY_INTERFACE" ]; then
                       EXTERNAL_IP=$(ip -4 -o addr show dev "$GATEWAY_INTERFACE" scope global 2>/dev/null | awk 'NR==1 {print $4}' | cut -d/ -f1)
-                    fi
-                    if [ -z "$EXTERNAL_IP" ] && [ -n "$CONTROLLER_HOST" ]; then
-                      EXTERNAL_IP="$CONTROLLER_HOST"
                     fi
                     if [ -z "$EXTERNAL_IP" ]; then
                       EXTERNAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
@@ -414,8 +399,8 @@
                     if [ -z "$GATEWAY_INTERFACE" ]; then
                       GATEWAY_INTERFACE="eno1"
                     fi
-                    if [ -z "$GATEWAY_IP" ]; then
-                      GATEWAY_IP="0.0.0.0"
+                    if [[ "$EXTERNAL_IP" == 10.240.* ]]; then
+                      INTERNAL_GATEWAY_IP="10.241.0.1"
                     fi
                     if [ -z "$EXTERNAL_IP" ]; then
                       EXTERNAL_IP="127.0.0.1"
@@ -439,7 +424,7 @@ dbPath: /var/lib/kcore/controller.db
 defaultNetwork:
   gatewayInterface: $GATEWAY_INTERFACE
   externalIp: $EXTERNAL_IP
-  gatewayIp: $GATEWAY_IP
+  gatewayIp: $INTERNAL_GATEWAY_IP
 tls:
   caFile: /etc/kcore/certs/ca.crt
   certFile: /etc/kcore/certs/controller.crt
@@ -479,7 +464,7 @@ CTRLSVC
 {
   imports = [
     ./hardware-configuration.nix
-    ./modules/ctrl-os-vms
+    ./modules/ch-vm
     ./kcore-vms.nix
   ];
 
@@ -564,6 +549,7 @@ NIXEOF
 
                     echo "Installing NixOS (this will take 10-20 minutes)..."
                     export NIX_CONFIG="experimental-features = nix-command flakes"
+                    export NIX_PATH="nixos-config=/mnt/etc/nixos/configuration.nix:nixpkgs=${pkgs.path}"
                     nixos-install
 
                     echo ""
@@ -580,7 +566,7 @@ NIXEOF
                       echo "To add more nodes, use:"
                       echo "  kctl node install --node <new-node-ip>:9091 --os-disk /dev/sda --join-controller <this-ip>"
                     else
-                      echo "This node is configured to join controller at: $CONTROLLER_ENDPOINT"
+                      echo "This node is configured as an agent joining controller at: $CONTROLLER_ENDPOINT"
                     fi
                     echo ""
                     if [ "$REBOOT_AFTER_INSTALL" = "true" ]; then

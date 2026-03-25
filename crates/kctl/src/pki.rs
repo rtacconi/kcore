@@ -63,8 +63,7 @@ fn sign_cert(
     ca_key_pem: &str,
 ) -> Result<(String, String), String> {
     let mut params = if let Some(host) = host {
-        CertificateParams::new(vec![host.to_string()])
-            .map_err(|e| format!("invalid SAN: {e}"))?
+        CertificateParams::new(vec![host.to_string()]).map_err(|e| format!("invalid SAN: {e}"))?
     } else {
         CertificateParams::default()
     };
@@ -79,8 +78,7 @@ fn sign_cert(
     let issuer = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key)
         .map_err(|e| format!("loading CA cert: {e}"))?;
 
-    let cert_key =
-        KeyPair::generate().map_err(|e| format!("generating certificate key: {e}"))?;
+    let cert_key = KeyPair::generate().map_err(|e| format!("generating certificate key: {e}"))?;
     let cert = params
         .signed_by(&cert_key, &issuer)
         .map_err(|e| format!("signing cert: {e}"))?;
@@ -289,8 +287,7 @@ mod tests {
         let certs = tmp.path().join("certs");
         create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
 
-        let payload =
-            load_install_pki(&certs, "10.0.0.21", false).expect("load install pki");
+        let payload = load_install_pki(&certs, "10.0.0.21", false).expect("load install pki");
 
         assert!(!payload.ca_cert_pem.is_empty());
         assert!(!payload.node_cert_pem.is_empty());
@@ -311,8 +308,7 @@ mod tests {
         let certs = tmp.path().join("certs");
         create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
 
-        let payload =
-            load_install_pki(&certs, "127.0.0.1", true).expect("load install pki");
+        let payload = load_install_pki(&certs, "127.0.0.1", true).expect("load install pki");
 
         assert!(!payload.ca_cert_pem.is_empty());
         assert!(!payload.node_cert_pem.is_empty());

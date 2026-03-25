@@ -12,7 +12,7 @@ flowchart TB
 
   C -->|Read/Write desired state| DB[(SQLite DB)]
   C -->|Select node| S[Scheduler]
-  C -->|Generate Nix text<br/>ctrl-os.vms| NIXGEN[nixgen::generate_node_config]
+  C -->|Generate Nix text<br/>ch-vm.vms| NIXGEN[nixgen::generate_node_config]
 
   NIXGEN -->|ApplyNixConfig rebuild=true| A[kcore-node-agent<br/>NodeAdmin]
   A -->|write file| CFG["/etc/nixos/kcore-vms.nix"]
@@ -20,7 +20,7 @@ flowchart TB
   subgraph APPLY_PATH["Node apply + runtime (right lane)"]
     direction TB
     REBUILD[nixos-rebuild switch]
-    MOD[ctrl-os-vms Nix module]
+    MOD[ch-vm Nix module]
     NET[bridge/tap + NAT systemd services]
     VMUNIT[kcore-vm-*.service]
     CH[cloud-hypervisor]
@@ -41,9 +41,9 @@ flowchart TB
 
 - `kctl` sends user intent (create/delete/start/stop/get/list).
 - `kcore-controller` stores desired state, picks a target node, and renders declarative Nix VM config.
-- `nixgen::generate_node_config` produces the `ctrl-os.vms` block (networks + virtualMachines).
+- `nixgen::generate_node_config` produces the `ch-vm.vms` block (networks + virtualMachines).
 - `kcore-node-agent` writes the config file and applies it via `nixos-rebuild switch`.
-- `ctrl-os-vms` module realizes networking, TAP devices, seed ISOs, and VM systemd services.
+- `ch-vm` module realizes networking, TAP devices, seed ISOs, and VM systemd services.
 - `cloud-hypervisor` runs VMs; node-agent queries runtime state from API sockets.
 
 ## Create/Delete VM lifecycle
@@ -61,7 +61,7 @@ sequenceDiagram
   K->>C: CreateVm / DeleteVm
   C->>D: persist desired VM state
   C->>G: generate_node_config(vms, gateway, network)
-  G-->>C: configuration_nix (ctrl-os.vms)
+  G-->>C: configuration_nix (ch-vm.vms)
   C->>A: ApplyNixConfig(configuration_nix, rebuild=true)
   A->>A: write /etc/nixos/kcore-vms.nix
   A->>N: nixos-rebuild switch

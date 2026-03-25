@@ -31,10 +31,7 @@ impl NodeClients {
         }
     }
 
-    pub async fn connect(
-        &self,
-        address: &str,
-    ) -> Result<()> {
+    pub async fn connect(&self, address: &str) -> Result<()> {
         let channel = if let Some(tls_cfg) = &self.tls {
             let endpoint = format!("https://{address}");
             let ca_pem = std::fs::read_to_string(&tls_cfg.ca_file)?;

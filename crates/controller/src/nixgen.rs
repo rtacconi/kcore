@@ -41,7 +41,7 @@ pub fn generate_node_config(
     network: &NetworkConfig,
 ) -> String {
     let mut out = String::from("{ pkgs, ... }: {\n");
-    out.push_str("  ctrl-os.vms = {\n");
+    out.push_str("  ch-vm.vms = {\n");
     out.push_str("    enable = true;\n");
     out.push_str("    cloudHypervisorPackage = pkgs.cloud-hypervisor;\n");
     out.push_str(&format!(
@@ -106,6 +106,8 @@ mod tests {
             cpu: 2,
             memory_bytes: 4096 * 1024 * 1024,
             image_path: "/var/lib/kcore/images/debian.raw".into(),
+            image_url: "https://example.com/debian.raw".into(),
+            image_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".into(),
             image_size: 8192,
             network: "default".into(),
             auto_start,
@@ -126,7 +128,7 @@ mod tests {
     #[test]
     fn generates_valid_nix() {
         let config = generate_node_config(&[vm(true, "web-01")], "eno1", &default_net());
-        assert!(config.contains("ctrl-os.vms"));
+        assert!(config.contains("ch-vm.vms"));
         assert!(config.contains("web-01"));
         assert!(config.contains("cores = 2"));
         assert!(config.contains("memorySize = 4096"));
@@ -153,8 +155,7 @@ mod tests {
 
     #[test]
     fn sanitizes_special_chars_in_vm_name() {
-        let config =
-            generate_node_config(&[vm(true, "web\";inject")], "eno1", &default_net());
+        let config = generate_node_config(&[vm(true, "web\";inject")], "eno1", &default_net());
         assert!(config.contains("virtualMachines.\"web--inject\""));
         assert!(!config.contains("\";inject"));
     }

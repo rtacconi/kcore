@@ -40,6 +40,10 @@ service NodeAdmin {
   // provided content and (optionally) triggers a nixos-rebuild.
   rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
 
+  // EnsureImage verifies/downloads an image file at destination_path and
+  // enforces SHA256 integrity before VM activation.
+  rpc EnsureImage(EnsureImageRequest) returns (EnsureImageResponse);
+
   // ListDisks returns block devices available on the node.
   rpc ListDisks(ListDisksRequest) returns (ListDisksResponse);
 
@@ -252,6 +256,19 @@ message ApplyNixConfigResponse {
   string message = 2;
 }
 
+message EnsureImageRequest {
+  string image_url = 1;         // HTTPS source URL
+  string image_sha256 = 2;      // required lowercase/uppercase hex SHA256
+  string destination_path = 3;  // absolute target path on node
+}
+
+message EnsureImageResponse {
+  string path = 1;          // resolved local path
+  int64 size_bytes = 2;     // file size after ensure
+  bool cached = 3;          // true if existing validated file reused
+  bool downloaded = 4;      // true if downloaded in this call
+}
+
 message ListDisksRequest {}
 
 message DiskInfo {
@@ -285,6 +302,7 @@ message InstallToDiskRequest {
   string os_disk = 1;            // e.g. /dev/sda
   repeated string data_disks = 2; // e.g. /dev/nvme0n1
   string controller = 3;         // existing controller endpoint (IP/FQDN[:port])
+  bool run_controller = 11;      // install and run local controller on this node
   string ca_cert_pem = 4;        // Cluster CA certificate (PEM)
   string node_cert_pem = 5;      // Node mTLS certificate (PEM)
   string node_key_pem = 6;       // Node mTLS private key (PEM)

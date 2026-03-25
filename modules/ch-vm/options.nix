@@ -108,6 +108,12 @@ in {
       description = "Directory for Cloud Hypervisor API sockets.";
     };
 
+    firmwarePath = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      description = "Optional firmware path passed to Cloud Hypervisor. Defaults to OVMF from nixpkgs.";
+    };
+
     gatewayInterface = lib.mkOption {
       type = lib.types.str;
       description = "Host network interface used as the upstream gateway.";

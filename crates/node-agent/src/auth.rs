@@ -1,5 +1,5 @@
-use tonic::{Request, Status};
 use tonic::transport::server::{TcpConnectInfo, TlsConnectInfo};
+use tonic::{Request, Status};
 
 pub const CN_CONTROLLER: &str = "kcore-controller";
 pub const CN_KCTL: &str = "kcore-kctl";
@@ -14,8 +14,7 @@ pub fn peer_cn<T>(request: &Request<T>) -> Option<String> {
     let cert_der = certs.first()?;
 
     use x509_parser::prelude::FromDer;
-    let (_, cert) =
-        x509_parser::certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
     let cn = cert
         .subject()
         .iter_common_name()
@@ -30,14 +29,34 @@ pub fn peer_cn<T>(request: &Request<T>) -> Option<String> {
 ///
 /// Patterns ending with `-` are treated as prefixes (for node certs like
 /// `kcore-node-10.0.0.1`). All other patterns require an exact match.
-///
-/// When TLS is not in use (insecure mode), authorization is skipped — the
-/// startup-time `--allow-insecure` enforcement is the primary control.
 #[allow(clippy::result_large_err)]
 pub fn require_peer<T>(request: &Request<T>, allowed: &[&str]) -> Result<(), Status> {
+    require_peer_internal(request, allowed, false)
+}
+
+/// Same as `require_peer`, but permits requests without a TLS client cert.
+/// Use this only for explicitly allowlisted operations in live ISO mode.
+#[allow(clippy::result_large_err)]
+pub fn require_peer_insecure_ok<T>(request: &Request<T>, allowed: &[&str]) -> Result<(), Status> {
+    require_peer_internal(request, allowed, true)
+}
+
+#[allow(clippy::result_large_err)]
+fn require_peer_internal<T>(
+    request: &Request<T>,
+    allowed: &[&str],
+    insecure_ok: bool,
+) -> Result<(), Status> {
     let cn = match peer_cn(request) {
         Some(cn) => cn,
-        None => return Ok(()),
+        None => {
+            if insecure_ok {
+                return Ok(());
+            }
+            return Err(Status::permission_denied(
+                "operation requires mTLS client certificate",
+            ));
+        }
     };
 
     if is_authorized(&cn, allowed) {
@@ -86,6 +105,7 @@ mod tests {
     #[test]
     fn require_peer_allows_missing_tls_info() {
         let request = Request::new(());
-        assert!(require_peer(&request, &[CN_KCTL]).is_ok());
+        assert!(require_peer(&request, &[CN_KCTL]).is_err());
+        assert!(require_peer_insecure_ok(&request, &[CN_KCTL]).is_ok());
     }
 }

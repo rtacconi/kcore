@@ -27,6 +27,8 @@ pub struct VmRow {
     pub cpu: i32,
     pub memory_bytes: i64,
     pub image_path: String,
+    pub image_url: String,
+    pub image_sha256: String,
     pub image_size: i64,
     pub network: String,
     pub auto_start: bool,
@@ -77,6 +79,8 @@ impl Database {
                 cpu INTEGER NOT NULL,
                 memory_bytes INTEGER NOT NULL,
                 image_path TEXT NOT NULL,
+                image_url TEXT NOT NULL DEFAULT '',
+                image_sha256 TEXT NOT NULL DEFAULT '',
                 image_size INTEGER NOT NULL DEFAULT 8192,
                 network TEXT NOT NULL DEFAULT 'default',
                 auto_start INTEGER NOT NULL DEFAULT 1,
@@ -84,6 +88,14 @@ impl Database {
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
             );",
         )?;
+        let _ = conn.execute(
+            "ALTER TABLE vms ADD COLUMN image_url TEXT NOT NULL DEFAULT ''",
+            [],
+        );
+        let _ = conn.execute(
+            "ALTER TABLE vms ADD COLUMN image_sha256 TEXT NOT NULL DEFAULT ''",
+            [],
+        );
         Ok(())
     }
 
@@ -162,14 +174,16 @@ impl Database {
     pub fn insert_vm(&self, vm: &VmRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
+            "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_size, network, auto_start, node_id, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))",
             params![
                 vm.id,
                 vm.name,
                 vm.cpu,
                 vm.memory_bytes,
                 vm.image_path,
+                vm.image_url,
+                vm.image_sha256,
                 vm.image_size,
                 vm.network,
                 vm.auto_start as i32,
@@ -188,7 +202,7 @@ impl Database {
     pub fn get_vm(&self, vm_id: &str) -> Result<Option<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at FROM vms WHERE id = ?1",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_size, network, auto_start, node_id, created_at FROM vms WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![vm_id], row_to_vm)?;
         rows.next().transpose()
@@ -197,7 +211,7 @@ impl Database {
     pub fn list_vms(&self) -> Result<Vec<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at FROM vms",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_size, network, auto_start, node_id, created_at FROM vms",
         )?;
         let rows = stmt.query_map([], row_to_vm)?;
         rows.collect()
@@ -206,7 +220,7 @@ impl Database {
     pub fn list_vms_for_node(&self, node_id: &str) -> Result<Vec<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at FROM vms WHERE node_id = ?1",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_size, network, auto_start, node_id, created_at FROM vms WHERE node_id = ?1",
         )?;
         let rows = stmt.query_map(params![node_id], row_to_vm)?;
         rows.collect()
@@ -254,11 +268,13 @@ fn row_to_vm(row: &rusqlite::Row) -> Result<VmRow, rusqlite::Error> {
         cpu: row.get(2)?,
         memory_bytes: row.get(3)?,
         image_path: row.get(4)?,
-        image_size: row.get(5)?,
-        network: row.get(6)?,
-        auto_start: row.get::<_, i32>(7)? != 0,
-        node_id: row.get(8)?,
-        created_at: row.get(9)?,
+        image_url: row.get(5)?,
+        image_sha256: row.get(6)?,
+        image_size: row.get(7)?,
+        network: row.get(8)?,
+        auto_start: row.get::<_, i32>(9)? != 0,
+        node_id: row.get(10)?,
+        created_at: row.get(11)?,
     })
 }
 
@@ -286,6 +302,8 @@ mod tests {
             cpu: 2,
             memory_bytes: 2 * 1024 * 1024 * 1024,
             image_path: "/var/lib/kcore/images/web-1.raw".to_string(),
+            image_url: String::new(),
+            image_sha256: String::new(),
             image_size: 8192,
             network: "default".to_string(),
             auto_start: true,

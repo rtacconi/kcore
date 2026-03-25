@@ -104,9 +104,12 @@ enum CreateResource {
         /// Memory size (e.g. 2G, 4096M)
         #[arg(long, default_value = "2G")]
         memory: String,
-        /// OS image (URI or local path)
+        /// VM boot image HTTPS URL
         #[arg(long)]
         image: Option<String>,
+        /// Required SHA256 for --image URL
+        #[arg(long = "image-sha256")]
+        image_sha256: Option<String>,
         /// Network name
         #[arg(long)]
         network: Option<String>,
@@ -231,7 +234,10 @@ enum NodeAction {
         data_disk: Vec<String>,
         /// Controller to join after install
         #[arg(long)]
-        join_controller: String,
+        join_controller: Option<String>,
+        /// Install and run controller on this node
+        #[arg(long)]
+        run_controller: bool,
     },
     /// Apply a NixOS configuration to a node
     ApplyNix {
@@ -282,6 +288,7 @@ async fn main() {
                     cpu,
                     memory,
                     image,
+                    image_sha256,
                     network,
                     target_node,
                 },
@@ -295,6 +302,7 @@ async fn main() {
                     cpu: *cpu,
                     memory: memory.clone(),
                     image: image.clone(),
+                    image_sha256: image_sha256.clone(),
                     network: network.clone(),
                     target_node: target_node.clone(),
                 },
@@ -410,6 +418,7 @@ async fn main() {
                     os_disk,
                     data_disk,
                     join_controller,
+                    run_controller,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
@@ -424,7 +433,8 @@ async fn main() {
                 &info,
                 os_disk,
                 data_disk.clone(),
-                join_controller,
+                join_controller.as_deref(),
+                *run_controller,
                 &certs_dir,
             )
             .await

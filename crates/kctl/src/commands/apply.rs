@@ -1,14 +1,9 @@
-use anyhow::{Context, Result};
 use crate::client::{self, controller_proto};
 use crate::config::ConnectionInfo;
+use anyhow::{Context, Result};
 
-pub async fn apply(
-    info: &ConnectionInfo,
-    file: &str,
-    dry_run: bool,
-) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("reading {file}"))?;
+pub async fn apply(info: &ConnectionInfo, file: &str, dry_run: bool) -> Result<()> {
+    let content = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
 
     if dry_run {
         println!("--- dry run ---");

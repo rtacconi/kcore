@@ -68,6 +68,23 @@ impl ControllerService {
             Status::unavailable(format!("no connection to node {}", node.address))
         })?;
 
+        for vm in &vms {
+            if vm.image_url.is_empty() {
+                continue;
+            }
+            admin
+                .ensure_image(node_proto::EnsureImageRequest {
+                    image_url: vm.image_url.clone(),
+                    image_sha256: vm.image_sha256.clone(),
+                    destination_path: vm.image_path.clone(),
+                })
+                .await
+                .map_err(|e| {
+                    error!(node = %node.id, vm_id = %vm.id, error = %e, "failed to ensure vm image on node");
+                    Status::internal(format!("ensuring image for vm {} on node {}: {e}", vm.id, node.id))
+                })?;
+        }
+
         admin
             .apply_nix_config(node_proto::ApplyNixConfigRequest {
                 configuration_nix: nix_config,
@@ -134,6 +151,76 @@ fn short_vm_id_seed() -> String {
     let raw = uuid_v4();
     let start = raw.len().saturating_sub(8);
     raw[start..].to_string()
+}
+
+fn validate_image_sha256(sha: &str) -> Result<String, Status> {
+    let normalized = sha.trim().to_ascii_lowercase();
+    if normalized.len() != 64 || !normalized.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(Status::invalid_argument(
+            "image_sha256 must be exactly 64 hexadecimal characters",
+        ));
+    }
+    Ok(normalized)
+}
+
+fn validate_image_url(url: &str) -> Result<String, Status> {
+    let trimmed = url.trim();
+    if trimmed.is_empty() {
+        return Err(Status::invalid_argument("image_url is required"));
+    }
+    if !trimmed.starts_with("https://") {
+        return Err(Status::invalid_argument(
+            "image_url must use https:// scheme",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn sanitize_image_file_name(url: &str) -> String {
+    let raw_name = url.rsplit('/').next().unwrap_or("image.raw");
+    let cleaned: String = raw_name
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
+        .collect();
+    if cleaned.is_empty() {
+        "image.raw".to_string()
+    } else {
+        cleaned
+    }
+}
+
+fn derive_local_image_path(image_url: &str, image_sha256: &str) -> String {
+    let file_name = sanitize_image_file_name(image_url);
+    format!(
+        "/var/lib/kcore/images/{}-{}",
+        &image_sha256[..12],
+        file_name
+    )
+}
+
+fn controller_state_from_node_state(state: i32) -> i32 {
+    match crate::node_proto::VmState::try_from(state).unwrap_or(crate::node_proto::VmState::Unknown)
+    {
+        crate::node_proto::VmState::Unknown => controller_proto::VmState::Unknown as i32,
+        crate::node_proto::VmState::Stopped => controller_proto::VmState::Stopped as i32,
+        crate::node_proto::VmState::Running => controller_proto::VmState::Running as i32,
+        crate::node_proto::VmState::Paused => controller_proto::VmState::Paused as i32,
+        crate::node_proto::VmState::Error => controller_proto::VmState::Error as i32,
+    }
+}
+
+fn state_fallback_without_runtime(auto_start: bool) -> i32 {
+    if auto_start {
+        controller_proto::VmState::Unknown as i32
+    } else {
+        controller_proto::VmState::Stopped as i32
+    }
 }
 
 #[tonic::async_trait]
@@ -268,7 +355,10 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 .map_err(|e| Status::internal(format!("checking vm id: {e}")))?
                 .is_some()
             {
-                return Err(Status::already_exists(format!("vm {} already exists", spec.id)));
+                return Err(Status::already_exists(format!(
+                    "vm {} already exists",
+                    spec.id
+                )));
             }
             spec.id.clone()
         };
@@ -285,14 +375,14 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .map_err(|e| Status::internal(format!("checking vm name: {e}")))?
             .is_some()
         {
-            return Err(Status::already_exists(format!("vm name {vm_name} already exists")));
+            return Err(Status::already_exists(format!(
+                "vm name {vm_name} already exists"
+            )));
         }
 
-        let image_path = spec
-            .disks
-            .first()
-            .map(|d| d.backend_handle.clone())
-            .unwrap_or_else(|| format!("/var/lib/kcore/images/{vm_name}.raw"));
+        let image_url = validate_image_url(&req.image_url)?;
+        let image_sha256 = validate_image_sha256(&req.image_sha256)?;
+        let image_path = derive_local_image_path(&image_url, &image_sha256);
 
         let vm = VmRow {
             id: vm_id.clone(),
@@ -300,6 +390,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
             cpu: spec.cpu,
             memory_bytes: spec.memory_bytes,
             image_path,
+            image_url,
+            image_sha256,
             image_size: 8192,
             network: spec
                 .nics
@@ -380,16 +472,68 @@ impl controller_proto::controller_server::Controller for ControllerService {
         auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let node = self.resolve_node_for_vm(&req.vm_id, &req.target_node)?;
+        let db_vm = self
+            .db
+            .get_vm(&req.vm_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .or_else(|| {
+                self.db
+                    .list_vms_for_node(&node.id)
+                    .ok()
+                    .and_then(|rows| rows.into_iter().find(|vm| vm.name == req.vm_id))
+            })
+            .ok_or_else(|| Status::not_found(format!("VM {} not found", req.vm_id)))?;
 
         let mut client = self.clients.get_compute(&node.address).ok_or_else(|| {
             Status::unavailable(format!("no connection to node {}", node.address))
         })?;
 
         let resp = client
-            .get_vm(node_proto::GetVmRequest { vm_id: req.vm_id })
-            .await?;
+            .get_vm(node_proto::GetVmRequest {
+                vm_id: db_vm.name.clone(),
+            })
+            .await;
 
-        let inner = resp.into_inner();
+        let inner = match resp {
+            Ok(resp) => resp.into_inner(),
+            Err(err) => {
+                warn!(
+                    vm_id = %db_vm.id,
+                    vm_name = %db_vm.name,
+                    node_id = %node.id,
+                    error = %err,
+                    "runtime VM lookup failed; returning database-backed VM details"
+                );
+                let spec = Some(controller_proto::VmSpec {
+                    id: db_vm.id.clone(),
+                    name: db_vm.name.clone(),
+                    cpu: db_vm.cpu,
+                    memory_bytes: db_vm.memory_bytes,
+                    disks: vec![controller_proto::Disk {
+                        name: "boot".to_string(),
+                        backend_handle: db_vm.image_path.clone(),
+                        bus: String::new(),
+                        device: String::new(),
+                    }],
+                    nics: vec![controller_proto::Nic {
+                        network: db_vm.network.clone(),
+                        model: "virtio".to_string(),
+                        mac_address: String::new(),
+                    }],
+                });
+                let status = Some(controller_proto::VmStatus {
+                    id: db_vm.id.clone(),
+                    state: state_fallback_without_runtime(db_vm.auto_start),
+                    created_at: None,
+                    updated_at: None,
+                });
+                return Ok(Response::new(controller_proto::GetVmResponse {
+                    spec,
+                    status,
+                    node_id: node.id,
+                }));
+            }
+        };
 
         let spec = inner.spec.map(|s| controller_proto::VmSpec {
             id: s.id,
@@ -419,7 +563,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         let status = inner.status.map(|s| controller_proto::VmStatus {
             id: s.id,
-            state: s.state,
+            state: controller_state_from_node_state(s.state),
             created_at: s.created_at,
             updated_at: s.updated_at,
         });
@@ -454,20 +598,57 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
+        let node_address_by_id = self
+            .db
+            .list_nodes()
+            .map_err(|e| Status::internal(e.to_string()))?
+            .into_iter()
+            .map(|n| (n.id, n.address))
+            .collect::<std::collections::HashMap<_, _>>();
+
+        let mut runtime_state = std::collections::HashMap::<(String, String), i32>::new();
+        let mut queried_nodes = std::collections::HashSet::new();
+        for vm in &rows {
+            if !queried_nodes.insert(vm.node_id.clone()) {
+                continue;
+            }
+            let Some(node_address) = node_address_by_id.get(&vm.node_id) else {
+                continue;
+            };
+            let Some(mut compute) = self.clients.get_compute(node_address) else {
+                continue;
+            };
+            match compute.list_vms(node_proto::ListVmsRequest {}).await {
+                Ok(resp) => {
+                    for runtime_vm in resp.into_inner().vms {
+                        let mapped = controller_state_from_node_state(runtime_vm.state);
+                        runtime_state.insert((vm.node_id.clone(), runtime_vm.id.clone()), mapped);
+                        runtime_state.insert((vm.node_id.clone(), runtime_vm.name.clone()), mapped);
+                    }
+                }
+                Err(err) => {
+                    warn!(node_id = %vm.node_id, address = %node_address, error = %err, "failed to fetch runtime VM state");
+                }
+            }
+        }
+
         let infos = rows
             .into_iter()
-            .map(|vm| controller_proto::VmInfo {
-                id: vm.id,
-                name: vm.name,
-                state: if vm.auto_start {
-                    controller_proto::VmState::Running as i32
-                } else {
-                    controller_proto::VmState::Stopped as i32
-                },
-                cpu: vm.cpu,
-                memory_bytes: vm.memory_bytes,
-                node_id: vm.node_id,
-                created_at: None,
+            .map(|vm| {
+                let state = runtime_state
+                    .get(&(vm.node_id.clone(), vm.id.clone()))
+                    .or_else(|| runtime_state.get(&(vm.node_id.clone(), vm.name.clone())))
+                    .copied()
+                    .unwrap_or_else(|| state_fallback_without_runtime(vm.auto_start));
+                controller_proto::VmInfo {
+                    id: vm.id,
+                    name: vm.name,
+                    state,
+                    cpu: vm.cpu,
+                    memory_bytes: vm.memory_bytes,
+                    node_id: vm.node_id,
+                    created_at: None,
+                }
             })
             .collect();
 
@@ -577,6 +758,9 @@ mod tests {
             cpu: 2,
             memory_bytes: 2 * 1024 * 1024 * 1024,
             image_path: "/var/lib/kcore/images/web-1.raw".to_string(),
+            image_url: "https://example.com/web-1.raw".to_string(),
+            image_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
             image_size: 8192,
             network: "default".to_string(),
             auto_start: true,
@@ -674,5 +858,90 @@ mod tests {
             "invalid request should not mutate desired state"
         );
         assert_eq!(push_count.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn validate_image_url_requires_https() {
+        let err = validate_image_url("http://example.com/debian.raw").expect_err("must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn validate_image_sha256_requires_hex_len_64() {
+        let err = validate_image_sha256("1234").expect_err("must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn runtime_state_mapping_never_assumes_running() {
+        assert_eq!(
+            state_fallback_without_runtime(true),
+            controller_proto::VmState::Unknown as i32
+        );
+        assert_eq!(
+            state_fallback_without_runtime(false),
+            controller_proto::VmState::Stopped as i32
+        );
+        assert_eq!(
+            controller_state_from_node_state(crate::node_proto::VmState::Running as i32),
+            controller_proto::VmState::Running as i32
+        );
+        assert_eq!(
+            controller_state_from_node_state(crate::node_proto::VmState::Unknown as i32),
+            controller_proto::VmState::Unknown as i32
+        );
+    }
+
+    #[test]
+    fn derive_local_image_path_is_deterministic() {
+        let p1 = derive_local_image_path(
+            "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        let p2 = derive_local_image_path(
+            "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2",
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        );
+        assert_eq!(p1, p2);
+        assert!(p1.starts_with("/var/lib/kcore/images/aaaaaaaaaaaa-"));
+    }
+
+    #[tokio::test]
+    async fn create_vm_rejects_missing_image_url_and_sha() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db,
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: node.id,
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-a".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: String::new(),
+            image_sha256: String::new(),
+        };
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("missing image_url should be rejected");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        assert!(err.message().contains("image_url"));
     }
 }

@@ -39,7 +39,8 @@ See: [Security model](docs/security.md)
 
 - Initialize cluster PKI/context: `kctl create cluster --controller <host:9090>`
 - Install nodes from live ISO: `kctl --node <host:9091> node install ...`
-- Create VMs with an explicit boot image: `kctl create vm <name> --image /var/lib/kcore/images/<image>.raw`
+- Create VMs with a direct HTTPS image URL + checksum:
+  `kctl create vm <name> --image <https-url> --image-sha256 <sha256>`
 - Manage VM desired state declaratively: `kctl set vm <name> --state <running|stopped>`
 - Legacy compatibility aliases remain available: `kctl start vm ...`, `kctl stop vm ...`
 

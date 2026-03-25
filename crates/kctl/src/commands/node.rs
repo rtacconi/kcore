@@ -1,8 +1,8 @@
-use anyhow::{Context, Result};
 use crate::client::{self, controller_proto, node_proto};
 use crate::config::ConnectionInfo;
 use crate::output;
 use crate::pki;
+use anyhow::{Context, Result};
 use std::path::Path;
 
 pub async fn list_nodes(info: &ConnectionInfo) -> Result<()> {
@@ -21,10 +21,7 @@ pub async fn list_nodes(info: &ConnectionInfo) -> Result<()> {
     Ok(())
 }
 
-pub async fn get_node(
-    info: &ConnectionInfo,
-    node_id: &str,
-) -> Result<()> {
+pub async fn get_node(info: &ConnectionInfo, node_id: &str) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client
         .get_node(controller_proto::GetNodeRequest {
@@ -74,20 +71,16 @@ pub async fn install(
     info: &ConnectionInfo,
     os_disk: &str,
     data_disks: Vec<String>,
-    join_controller: &str,
+    join_controller: Option<&str>,
+    run_controller: bool,
     certs_dir: &Path,
 ) -> Result<()> {
-    let node_host = pki::host_from_address(&info.address)
-        .map_err(|e| anyhow::anyhow!("node address: {e}"))?;
+    let join_controller = validate_install_controller_mode(join_controller, run_controller)?;
 
-    // Include controller PKI only when the node will also run the controller
-    // (i.e., --join-controller points at the node itself or is empty/local).
-    let controller_host = if join_controller.is_empty() {
-        String::new()
-    } else {
-        pki::host_from_address(join_controller).unwrap_or_default()
-    };
-    let node_is_controller = !controller_host.is_empty() && controller_host == node_host;
+    let node_host =
+        pki::host_from_address(&info.address).map_err(|e| anyhow::anyhow!("node address: {e}"))?;
+
+    let node_is_controller = run_controller;
 
     let install_pki = pki::load_install_pki(certs_dir, &node_host, node_is_controller)
         .map_err(|e| anyhow::anyhow!("loading PKI: {e}"))?;
@@ -98,6 +91,7 @@ pub async fn install(
             os_disk: os_disk.to_string(),
             data_disks,
             controller: join_controller.to_string(),
+            run_controller,
             ca_cert_pem: install_pki.ca_cert_pem,
             node_cert_pem: install_pki.node_cert_pem,
             node_key_pem: install_pki.node_key_pem,
@@ -117,13 +111,20 @@ pub async fn install(
     Ok(())
 }
 
-pub async fn apply_nix(
-    info: &ConnectionInfo,
-    file: &str,
-    rebuild: bool,
-) -> Result<()> {
-    let content = std::fs::read_to_string(file)
-        .with_context(|| format!("reading {file}"))?;
+fn validate_install_controller_mode(
+    join_controller: Option<&str>,
+    run_controller: bool,
+) -> Result<String> {
+    let join = join_controller.map(str::trim).unwrap_or("");
+    let has_join = !join.is_empty();
+    if has_join == run_controller {
+        anyhow::bail!("provide exactly one of --join-controller <host:port> or --run-controller");
+    }
+    Ok(join.to_string())
+}
+
+pub async fn apply_nix(info: &ConnectionInfo, file: &str, rebuild: bool) -> Result<()> {
+    let content = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
 
     let mut client = client::node_admin_client(info).await?;
     let resp = client
@@ -140,4 +141,39 @@ pub async fn apply_nix(
         eprintln!("Failed: {}", resp.message);
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::validate_install_controller_mode;
+
+    #[test]
+    fn validate_install_mode_rejects_neither() {
+        let err = validate_install_controller_mode(None, false).expect_err("should fail");
+        assert!(err
+            .to_string()
+            .contains("provide exactly one of --join-controller"));
+    }
+
+    #[test]
+    fn validate_install_mode_rejects_both() {
+        let err = validate_install_controller_mode(Some("192.168.1.10:9090"), true)
+            .expect_err("should fail");
+        assert!(err
+            .to_string()
+            .contains("provide exactly one of --join-controller"));
+    }
+
+    #[test]
+    fn validate_install_mode_accepts_join_only() {
+        let join = validate_install_controller_mode(Some(" 192.168.1.10:9090 "), false)
+            .expect("should pass");
+        assert_eq!(join, "192.168.1.10:9090");
+    }
+
+    #[test]
+    fn validate_install_mode_accepts_run_controller_only() {
+        let join = validate_install_controller_mode(None, true).expect("should pass");
+        assert!(join.is_empty());
+    }
 }

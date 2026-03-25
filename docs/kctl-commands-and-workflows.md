@@ -39,10 +39,15 @@ Result:
 
 ## 3) Create and inspect resources
 
-Create a VM from flags:
+Create a VM from flags (direct URL + SHA256, no manual scp):
 
 ```bash
-kctl create vm web-01 --cpu 2 --memory 4G --network default
+kctl create vm web-01 \
+  --cpu 2 \
+  --memory 4G \
+  --network default \
+  --image https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2 \
+  --image-sha256 <sha256>
 ```
 
 Create from YAML:
@@ -130,17 +135,14 @@ kctl --node 10.0.0.21:9091 node apply-nix -f ./node-config.nix --no-rebuild
 
 ## 6) Image operations
 
-Pull image to node:
+VM image download is controller-managed through VM create (`--image` + `--image-sha256`).
 
-```bash
-kctl --node 10.0.0.21:9091 pull image https://example.com/debian.raw
-```
+Legacy direct node image commands remain in CLI for compatibility, but the recommended and reproducible flow is:
 
-Delete image from node:
-
-```bash
-kctl --node 10.0.0.21:9091 delete image debian.raw --force
-```
+1. `kctl create vm ... --image <https-url> --image-sha256 <sha256>`
+2. controller validates and persists image metadata
+3. node-agent downloads/verifies image to `/var/lib/kcore/images/...`
+4. controller applies rendered Nix config
 
 ## 7) Controller apply
 
@@ -181,7 +183,7 @@ Top-level commands:
 - `kctl node nics`
 - `kctl node install --os-disk ... --join-controller ... [--data-disk ...]`
 - `kctl node apply-nix -f ... [--no-rebuild]`
-- `kctl pull image <uri>`
+- `kctl pull image <uri>` (legacy/manual path)
 - `kctl apply -f ... [--dry-run]`
 - `kctl version`
 
@@ -191,7 +193,7 @@ New environment:
 
 1. `kctl create cluster --controller <controller:9090>`
 2. Install each node with `kctl --node ... node install ...`
-3. Create VMs with `kctl create vm ...`
+3. Create VMs with `kctl create vm ... --image <https-url> --image-sha256 <sha256>`
 
 Day-2 operations:
 

@@ -68,3 +68,20 @@ fn read_capacity() -> (i32, i64) {
 
     (cpu_cores, memory_bytes)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn insecure_mode_denies_node_info_endpoint() {
+        let svc = InfoService::new("node-1".to_string());
+        let res = <InfoService as proto::node_info_server::NodeInfo>::get_node_info(
+            &svc,
+            Request::new(proto::GetNodeInfoRequest {}),
+        )
+        .await;
+        let err = res.expect_err("expected permission denied without TLS");
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+}

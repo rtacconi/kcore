@@ -71,6 +71,8 @@ message NodeUsage {
 message CreateVmRequest {
   string target_node = 1;  // Node address (e.g., "192.168.1.10:9091") - optional, controller picks if empty
   VmSpec spec = 2;
+  string image_url = 3;     // HTTPS image URL to download on target node
+  string image_sha256 = 4;  // Required SHA256 checksum for image_url
 }
 
 message CreateVmResponse {

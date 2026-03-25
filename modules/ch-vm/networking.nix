@@ -5,9 +5,10 @@
   ...
 }: let
   cfg = config.ch-vm.vms;
+  helpers = import ./helpers.nix {inherit lib;};
 
   bridgeName = name: "kbr-${name}";
-  tapName = vmName: "tap-${vmName}";
+  tapName = helpers.tapName;
 
   netmaskToCidr = mask:
     {
@@ -65,6 +66,19 @@ in {
             script = ''
               bridge="${bridgeName netName}"
               ip link show "$bridge" >/dev/null 2>&1 && exit 0
+
+              # Safety guard: prevent bridge subnet from hijacking the host LAN.
+              ext_ip=$(ip -4 -o addr show dev "${cfg.gatewayInterface}" scope global 2>/dev/null | awk 'NR==1 {print $4}' | cut -d/ -f1)
+              if [ -n "$ext_ip" ]; then
+                gw_ip="${netCfg.gatewayIP}"
+                ext_prefix="''${ext_ip%.*}"
+                gw_prefix="''${gw_ip%.*}"
+                if [ "$ext_prefix" = "$gw_prefix" ]; then
+                  echo "Refusing ch-vm network '${netName}': gatewayIP ${netCfg.gatewayIP} overlaps external subnet on ${cfg.gatewayInterface} ($ext_ip)"
+                  exit 1
+                fi
+              fi
+
               ip link add "$bridge" type bridge
               ip addr add ${netCfg.gatewayIP}/${netmaskToCidr netCfg.internalNetmask} dev "$bridge"
               ip link set "$bridge" up
@@ -116,6 +130,6 @@ in {
     networking.firewall.trustedInterfaces =
       lib.optional (cfg.networks != {}) "kbr-+";
 
-    boot.kernel.sysctl."net.ipv4.ip_forward" = 1;
+    boot.kernel.sysctl."net.ipv4.ip_forward" = lib.mkDefault 1;
   };
 }

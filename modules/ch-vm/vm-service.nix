@@ -5,8 +5,8 @@
   ...
 }: let
   cfg = config.ch-vm.vms;
-
-  tapName = vmName: "tap-${vmName}";
+  helpers = import ./helpers.nix {inherit lib;};
+  tapName = helpers.tapName;
 
   generateMac = vmName: let
     hash = builtins.hashString "sha256" vmName;
@@ -21,15 +21,21 @@
       else generateMac vmName;
 
     socketPath = "${cfg.socketDir}/${vmName}.sock";
+    serialSocket = "${cfg.socketDir}/${vmName}.serial.sock";
     seedIso = "/etc/kcore/seeds/${vmName}.iso";
+    firmwarePath =
+      if cfg.firmwarePath != null
+      then cfg.firmwarePath
+      else "${pkgs.OVMF.fd}/FV/OVMF.fd";
     chBin = "${cfg.cloudHypervisorPackage}/bin/cloud-hypervisor";
 
     chArgs = lib.concatStringsSep " " ([
         "--api-socket ${socketPath}"
         "--cpus boot=${toString vmCfg.cores}"
         "--memory size=${toString vmCfg.memorySize}M"
-        "--disk path=${vmCfg.image}"
-        "--disk path=${seedIso},readonly=on"
+        "--firmware '${firmwarePath}'"
+        "--serial socket=${serialSocket}"
+        "--disk path='${toString vmCfg.image}' path='${seedIso}',readonly=on"
         "--net tap=${tapName vmName},mac=${mac}"
       ]
       ++ vmCfg.extraArgs);
@@ -41,7 +47,12 @@
 
     serviceConfig = {
       Type = "simple";
-      ExecStartPre = "${pkgs.coreutils}/bin/rm -f ${socketPath}";
+      ExecStartPre = [
+        "${pkgs.coreutils}/bin/rm -f ${socketPath} ${serialSocket}"
+        "${pkgs.bash}/bin/bash -euc 'test -f ${toString vmCfg.image} || { echo \"missing VM image: ${toString vmCfg.image}\"; exit 1; }'"
+        "${pkgs.bash}/bin/bash -euc 'test -f ${seedIso} || { echo \"missing cloud-init seed: ${seedIso}\"; exit 1; }'"
+        "${pkgs.bash}/bin/bash -euc 'test -f ${firmwarePath} || { echo \"missing firmware: ${firmwarePath}\"; exit 1; }'"
+      ];
       ExecStart = "${chBin} ${chArgs}";
       ExecStop = "${pkgs.curl}/bin/curl --unix-socket ${socketPath} -s -X PUT http://localhost/api/v1/vm.power-button";
       TimeoutStopSec = 30;

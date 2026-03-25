@@ -88,3 +88,22 @@ flowchart TD
   - `systemctl is-active kcore-node-agent` is `active`
   - if same-host controller mode, `systemctl is-active kcore-controller` is `active`
 
+## ISO-to-VM acceptance checklist (regression guard)
+
+Run this sequence on every new ISO candidate:
+
+1. Install first node from live ISO with controller mode:
+   - `kctl --node <host:9091> --insecure node install --os-disk <disk> --data-disk <disk> --run-controller`
+2. After reboot, verify first-node services:
+   - `systemctl is-active kcore-controller kcore-node-agent`
+3. Verify image contract:
+   - `kctl create vm smoke-no-image` must fail with URL/SHA-required error.
+4. Create VM with Debian 12 direct URL + SHA256:
+   - `kctl create vm smoke --image https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2 --image-sha256 <sha256>`
+5. Verify runtime realization (not just DB intent):
+   - `systemctl status kcore-vm-smoke`
+   - `ls /run/kcore/smoke.sock /run/kcore/smoke.serial.sock`
+   - `ls /var/lib/kcore/images/` contains controller-derived cached image path
+6. Verify console attach path:
+   - `socat -,raw,echo=0,icanon=0 UNIX-CONNECT:/run/kcore/smoke.serial.sock`
+

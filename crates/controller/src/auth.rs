@@ -1,5 +1,5 @@
-use tonic::{Request, Status};
 use tonic::transport::server::{TcpConnectInfo, TlsConnectInfo};
+use tonic::{Request, Status};
 
 pub const CN_KCTL: &str = "kcore-kctl";
 pub const CN_NODE_PREFIX: &str = "kcore-node-";
@@ -14,8 +14,7 @@ pub fn peer_cn<T>(request: &Request<T>) -> Option<String> {
     let cert_der = certs.first()?;
 
     use x509_parser::prelude::FromDer;
-    let (_, cert) =
-        x509_parser::certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(cert_der.as_ref()).ok()?;
     let cn = cert
         .subject()
         .iter_common_name()
