@@ -14,7 +14,7 @@ flowchart LR
   C -->|Generate Nix text<br/>ctrl-os.vms| NIXGEN[nixgen::generate_node_config]
 
   NIXGEN -->|ApplyNixConfig(configuration_nix, rebuild=true)| A[kcore-node-agent<br/>NodeAdmin]
-  A -->|write file| CFG[/etc/nixos/kcore-vms.nix]
+  A -->|write file| CFG["/etc/nixos/kcore-vms.nix"]
   A -->|trigger| REBUILD[nixos-rebuild switch]
 
   REBUILD --> MOD[ctrl-os-vms Nix module]
@@ -22,7 +22,7 @@ flowchart LR
   MOD --> VMUNIT[kcore-vm-*.service]
   VMUNIT --> CH[cloud-hypervisor]
 
-  CH --> SOCK[/run/kcore/*.sock]
+  CH --> SOCK["/run/kcore/*.sock"]
   A -->|NodeCompute reads VM status| SOCK
   A -->|heartbeat / VM info| C
 ```
