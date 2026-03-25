@@ -13,7 +13,7 @@ flowchart LR
   C -->|Select node| S[Scheduler]
   C -->|Generate Nix text<br/>ctrl-os.vms| NIXGEN[nixgen::generate_node_config]
 
-  NIXGEN -->|ApplyNixConfig(configuration_nix, rebuild=true)| A[kcore-node-agent<br/>NodeAdmin]
+  NIXGEN -->|ApplyNixConfig rebuild=true| A[kcore-node-agent<br/>NodeAdmin]
   A -->|write file| CFG["/etc/nixos/kcore-vms.nix"]
   A -->|trigger| REBUILD[nixos-rebuild switch]
 
