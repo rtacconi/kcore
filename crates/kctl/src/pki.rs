@@ -5,6 +5,10 @@ use rcgen::{
     BasicConstraints, Certificate, CertificateParams, DnType, ExtendedKeyUsagePurpose, IsCa,
     KeyPair,
 };
+use time::{Duration, OffsetDateTime};
+
+const CA_VALIDITY_DAYS: i64 = 3650; // ~10 years
+const CERT_VALIDITY_DAYS: i64 = 365; // 1 year
 
 #[derive(Debug, Clone)]
 pub struct ClusterPkiPaths {
@@ -21,10 +25,10 @@ pub struct InstallPkiPayload {
     pub ca_cert_pem: String,
     pub node_cert_pem: String,
     pub node_key_pem: String,
+    /// Only populated when the node will also run the controller.
     pub controller_cert_pem: String,
+    /// Only populated when the node will also run the controller.
     pub controller_key_pem: String,
-    pub kctl_cert_pem: String,
-    pub kctl_key_pem: String,
 }
 
 pub fn host_from_address(addr: &str) -> Result<String, String> {
@@ -68,6 +72,8 @@ fn sign_cert(
         .distinguished_name
         .push(DnType::CommonName, common_name.to_string());
     params.extended_key_usages = usages;
+    params.not_before = OffsetDateTime::now_utc();
+    params.not_after = OffsetDateTime::now_utc() + Duration::days(CERT_VALIDITY_DAYS);
 
     let ca_key = KeyPair::from_pem(ca_key_pem).map_err(|e| format!("loading CA key: {e}"))?;
     let ca_params = CertificateParams::from_ca_cert_pem(ca_cert_pem, ca_key)
@@ -142,6 +148,8 @@ pub fn create_cluster_pki(
     ca_params
         .distinguished_name
         .push(DnType::CommonName, "kcore-cluster-ca");
+    ca_params.not_before = OffsetDateTime::now_utc();
+    ca_params.not_after = OffsetDateTime::now_utc() + Duration::days(CA_VALIDITY_DAYS);
     let ca_cert = Certificate::from_params(ca_params).map_err(|e| format!("CA build: {e}"))?;
     let ca_cert_pem = ca_cert
         .serialize_pem()
@@ -177,23 +185,30 @@ pub fn create_cluster_pki(
     Ok(paths)
 }
 
-pub fn load_install_pki(certs_dir: &Path, node_host: &str) -> Result<InstallPkiPayload, String> {
+/// Load PKI material for a node install.
+///
+/// The CA key is read locally to sign the node certificate but is never sent
+/// over the wire. Controller cert/key are only included when
+/// `include_controller_pki` is true (the node will co-locate the controller).
+/// kctl credentials are never sent -- nodes have no use for CLI keys.
+pub fn load_install_pki(
+    certs_dir: &Path,
+    node_host: &str,
+    include_controller_pki: bool,
+) -> Result<InstallPkiPayload, String> {
     let ca_cert_path = certs_dir.join("ca.crt");
     let ca_key_path = certs_dir.join("ca.key");
+
+    let mut required: Vec<&Path> = vec![&ca_cert_path, &ca_key_path];
+
     let controller_cert_path = certs_dir.join("controller.crt");
     let controller_key_path = certs_dir.join("controller.key");
-    let kctl_cert_path = certs_dir.join("kctl.crt");
-    let kctl_key_path = certs_dir.join("kctl.key");
+    if include_controller_pki {
+        required.push(&controller_cert_path);
+        required.push(&controller_key_path);
+    }
 
-    let required_paths = [
-        &ca_cert_path,
-        &ca_key_path,
-        &controller_cert_path,
-        &controller_key_path,
-        &kctl_cert_path,
-        &kctl_key_path,
-    ];
-    let missing: Vec<String> = required_paths
+    let missing: Vec<String> = required
         .iter()
         .filter(|path| !path.exists())
         .map(|path| path.display().to_string())
@@ -211,14 +226,16 @@ run `kctl create cluster --context <cluster-name> --controller <host:9090>` and 
         .map_err(|e| format!("reading {}: {e}", ca_cert_path.display()))?;
     let ca_key_pem = std::fs::read_to_string(&ca_key_path)
         .map_err(|e| format!("reading {}: {e}", ca_key_path.display()))?;
-    let controller_cert_pem = std::fs::read_to_string(&controller_cert_path)
-        .map_err(|e| format!("reading {}: {e}", controller_cert_path.display()))?;
-    let controller_key_pem = std::fs::read_to_string(&controller_key_path)
-        .map_err(|e| format!("reading {}: {e}", controller_key_path.display()))?;
-    let kctl_cert_pem = std::fs::read_to_string(&kctl_cert_path)
-        .map_err(|e| format!("reading {}: {e}", kctl_cert_path.display()))?;
-    let kctl_key_pem = std::fs::read_to_string(&kctl_key_path)
-        .map_err(|e| format!("reading {}: {e}", kctl_key_path.display()))?;
+
+    let (controller_cert_pem, controller_key_pem) = if include_controller_pki {
+        let cert = std::fs::read_to_string(&controller_cert_path)
+            .map_err(|e| format!("reading {}: {e}", controller_cert_path.display()))?;
+        let key = std::fs::read_to_string(&controller_key_path)
+            .map_err(|e| format!("reading {}: {e}", controller_key_path.display()))?;
+        (cert, key)
+    } else {
+        (String::new(), String::new())
+    };
 
     let (node_cert_pem, node_key_pem) = sign_cert(
         Some(node_host),
@@ -237,8 +254,6 @@ run `kctl create cluster --context <cluster-name> --controller <host:9090>` and 
         node_key_pem,
         controller_cert_pem,
         controller_key_pem,
-        kctl_cert_pem,
-        kctl_key_pem,
     })
 }
 
@@ -265,5 +280,49 @@ mod tests {
         assert!(out.controller_key.exists());
         assert!(out.kctl_cert.exists());
         assert!(out.kctl_key.exists());
+    }
+
+    #[test]
+    fn load_install_pki_without_controller_omits_controller_keys() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let payload =
+            load_install_pki(&certs, "10.0.0.21", false).expect("load install pki");
+
+        assert!(!payload.ca_cert_pem.is_empty());
+        assert!(!payload.node_cert_pem.is_empty());
+        assert!(!payload.node_key_pem.is_empty());
+        assert!(
+            payload.controller_cert_pem.is_empty(),
+            "controller cert should not be sent to worker nodes"
+        );
+        assert!(
+            payload.controller_key_pem.is_empty(),
+            "controller key should not be sent to worker nodes"
+        );
+    }
+
+    #[test]
+    fn load_install_pki_with_controller_includes_controller_keys() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let payload =
+            load_install_pki(&certs, "127.0.0.1", true).expect("load install pki");
+
+        assert!(!payload.ca_cert_pem.is_empty());
+        assert!(!payload.node_cert_pem.is_empty());
+        assert!(!payload.node_key_pem.is_empty());
+        assert!(
+            !payload.controller_cert_pem.is_empty(),
+            "controller cert should be sent when node co-locates controller"
+        );
+        assert!(
+            !payload.controller_key_pem.is_empty(),
+            "controller key should be sent when node co-locates controller"
+        );
     }
 }

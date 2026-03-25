@@ -1,10 +1,11 @@
+use anyhow::{Context, Result};
 use crate::client::{self, controller_proto, node_proto};
 use crate::config::ConnectionInfo;
 use crate::output;
 use crate::pki;
 use std::path::Path;
 
-pub async fn list_nodes(info: &ConnectionInfo) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn list_nodes(info: &ConnectionInfo) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client
         .list_nodes(controller_proto::ListNodesRequest {})
@@ -23,7 +24,7 @@ pub async fn list_nodes(info: &ConnectionInfo) -> Result<(), Box<dyn std::error:
 pub async fn get_node(
     info: &ConnectionInfo,
     node_id: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client
         .get_node(controller_proto::GetNodeRequest {
@@ -32,12 +33,12 @@ pub async fn get_node(
         .await?
         .into_inner();
 
-    let node = resp.node.as_ref().ok_or("node not found")?;
+    let node = resp.node.as_ref().context("node not found")?;
     output::print_node_detail(node);
     Ok(())
 }
 
-pub async fn disks(info: &ConnectionInfo) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn disks(info: &ConnectionInfo) -> Result<()> {
     let mut client = client::node_admin_client(info).await?;
     let resp = client
         .list_disks(node_proto::ListDisksRequest {})
@@ -53,7 +54,7 @@ pub async fn disks(info: &ConnectionInfo) -> Result<(), Box<dyn std::error::Erro
     Ok(())
 }
 
-pub async fn nics(info: &ConnectionInfo) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn nics(info: &ConnectionInfo) -> Result<()> {
     let mut client = client::node_admin_client(info).await?;
     let resp = client
         .list_network_interfaces(node_proto::ListNetworkInterfacesRequest {})
@@ -75,11 +76,21 @@ pub async fn install(
     data_disks: Vec<String>,
     join_controller: &str,
     certs_dir: &Path,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let node_host =
-        pki::host_from_address(&info.address).map_err(|e| format!("node address: {e}"))?;
-    let install_pki =
-        pki::load_install_pki(certs_dir, &node_host).map_err(|e| format!("loading PKI: {e}"))?;
+) -> Result<()> {
+    let node_host = pki::host_from_address(&info.address)
+        .map_err(|e| anyhow::anyhow!("node address: {e}"))?;
+
+    // Include controller PKI only when the node will also run the controller
+    // (i.e., --join-controller points at the node itself or is empty/local).
+    let controller_host = if join_controller.is_empty() {
+        String::new()
+    } else {
+        pki::host_from_address(join_controller).unwrap_or_default()
+    };
+    let node_is_controller = !controller_host.is_empty() && controller_host == node_host;
+
+    let install_pki = pki::load_install_pki(certs_dir, &node_host, node_is_controller)
+        .map_err(|e| anyhow::anyhow!("loading PKI: {e}"))?;
 
     let mut client = client::node_admin_client(info).await?;
     let resp = client
@@ -92,8 +103,8 @@ pub async fn install(
             node_key_pem: install_pki.node_key_pem,
             controller_cert_pem: install_pki.controller_cert_pem,
             controller_key_pem: install_pki.controller_key_pem,
-            kctl_cert_pem: install_pki.kctl_cert_pem,
-            kctl_key_pem: install_pki.kctl_key_pem,
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
         })
         .await?
         .into_inner();
@@ -110,8 +121,9 @@ pub async fn apply_nix(
     info: &ConnectionInfo,
     file: &str,
     rebuild: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let content = std::fs::read_to_string(file).map_err(|e| format!("reading {file}: {e}"))?;
+) -> Result<()> {
+    let content = std::fs::read_to_string(file)
+        .with_context(|| format!("reading {file}"))?;
 
     let mut client = client::node_admin_client(info).await?;
     let resp = client

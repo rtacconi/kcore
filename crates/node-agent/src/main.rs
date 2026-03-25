@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod discovery;
 mod grpc;
@@ -5,7 +6,7 @@ mod vmm;
 
 use clap::Parser;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod proto {
     tonic::include_proto!("kcore.node");
@@ -17,10 +18,14 @@ struct Cli {
     /// Path to config file
     #[arg(short, long, default_value = "/etc/kcore/node-agent.yaml")]
     config: String,
+
+    /// Allow running without TLS (INSECURE: all RPCs are unauthenticated)
+    #[arg(long)]
+    allow_insecure: bool,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -29,6 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let cli = Cli::parse();
     let cfg = config::Config::load(&cli.config)?;
+
+    if cfg.tls.is_none() && !cli.allow_insecure {
+        anyhow::bail!(
+            "TLS is not configured. All gRPC traffic would be unauthenticated and unencrypted.\n\
+             Configure a [tls] section in the config file, or pass --allow-insecure to override."
+        );
+    }
 
     let addr = cfg.listen_addr.parse()?;
     let vm_client = vmm::Client::new(&cfg.vm_socket_dir);
@@ -44,8 +56,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage_svc =
         proto::node_storage_server::NodeStorageServer::new(grpc::StorageService::new());
 
-    info!(addr = %addr, node_id = %cfg.node_id, "starting node-agent");
-
     let mut server = Server::builder();
     if let Some(tls) = cfg.tls.as_ref() {
         let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
@@ -55,6 +65,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .identity(Identity::from_pem(cert_pem, key_pem))
             .client_ca_root(Certificate::from_pem(ca_pem));
         server = server.tls_config(server_tls)?;
+        info!(addr = %addr, node_id = %cfg.node_id, "starting node-agent with mTLS");
+    } else {
+        warn!(addr = %addr, node_id = %cfg.node_id, "starting node-agent WITHOUT TLS (--allow-insecure) — all RPCs are unauthenticated");
     }
 
     server

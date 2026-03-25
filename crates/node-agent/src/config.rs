@@ -1,3 +1,4 @@
+use anyhow::Context;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -7,8 +8,6 @@ pub struct Config {
     pub node_id: String,
     #[serde(default = "default_listen_addr")]
     pub listen_addr: String,
-    #[allow(dead_code)]
-    pub controller_addr: Option<String>,
     pub tls: Option<TlsConfig>,
     #[serde(default = "default_vm_socket_dir")]
     pub vm_socket_dir: String,
@@ -37,11 +36,10 @@ fn default_nix_config_path() -> String {
 }
 
 impl Config {
-    pub fn load(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load(path: &str) -> anyhow::Result<Self> {
         let contents = std::fs::read_to_string(Path::new(path))
-            .map_err(|e| format!("reading config {path}: {e}"))?;
-        let cfg: Config =
-            serde_yaml::from_str(&contents).map_err(|e| format!("parsing config: {e}"))?;
+            .with_context(|| format!("reading config {path}"))?;
+        let cfg: Config = serde_yaml::from_str(&contents).context("parsing config")?;
         Ok(cfg)
     }
 }

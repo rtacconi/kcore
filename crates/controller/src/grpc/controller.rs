@@ -1,6 +1,7 @@
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
 
+use crate::auth::{self, CN_KCTL, CN_NODE_PREFIX};
 use crate::config::NetworkConfig;
 use crate::controller_proto;
 use crate::db::{Database, NodeRow, VmRow};
@@ -139,6 +140,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::RegisterNodeRequest>,
     ) -> Result<Response<controller_proto::RegisterNodeResponse>, Status> {
+        auth::require_peer(&request, &[CN_NODE_PREFIX])?;
         let req = request.into_inner();
         let (cpu, mem) = req
             .capacity
@@ -176,6 +178,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::HeartbeatRequest>,
     ) -> Result<Response<controller_proto::HeartbeatResponse>, Status> {
+        auth::require_peer(&request, &[CN_NODE_PREFIX])?;
         let req = request.into_inner();
         let (cpu_used, mem_used) = req
             .usage
@@ -203,6 +206,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::SyncVmStateRequest>,
     ) -> Result<Response<controller_proto::SyncVmStateResponse>, Status> {
+        auth::require_peer(&request, &[CN_NODE_PREFIX])?;
         let req = request.into_inner();
         info!(
             node_id = %req.node_id,
@@ -218,6 +222,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::CreateVmRequest>,
     ) -> Result<Response<controller_proto::CreateVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let spec = req
             .spec
@@ -323,6 +328,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::DeleteVmRequest>,
     ) -> Result<Response<controller_proto::DeleteVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let node = self.resolve_node_for_vm(&req.vm_id, &req.target_node)?;
 
@@ -343,6 +349,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::SetVmDesiredStateRequest>,
     ) -> Result<Response<controller_proto::SetVmDesiredStateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let auto_start = match controller_proto::VmDesiredState::try_from(req.desired_state)
             .unwrap_or(controller_proto::VmDesiredState::Unspecified)
@@ -368,6 +375,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::GetVmRequest>,
     ) -> Result<Response<controller_proto::GetVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let node = self.resolve_node_for_vm(&req.vm_id, &req.target_node)?;
 
@@ -425,6 +433,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::ListVmsRequest>,
     ) -> Result<Response<controller_proto::ListVmsResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
 
         let rows = if !req.target_node.is_empty() {
@@ -467,8 +476,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
     async fn list_nodes(
         &self,
-        _request: Request<controller_proto::ListNodesRequest>,
+        request: Request<controller_proto::ListNodesRequest>,
     ) -> Result<Response<controller_proto::ListNodesResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let nodes = self
             .db
             .list_nodes()
@@ -499,6 +509,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         &self,
         request: Request<controller_proto::GetNodeRequest>,
     ) -> Result<Response<controller_proto::GetNodeResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let node = self
             .db
@@ -524,12 +535,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
 }
 
 fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let t = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-    format!("{t:032x}")
+    uuid::Uuid::new_v4().to_string()
 }
 
 #[cfg(test)]

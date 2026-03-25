@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use anyhow::Result;
 use crate::config::{self, Context};
 use crate::pki;
 
@@ -9,11 +10,11 @@ pub fn create(
     certs_dir: &Path,
     context_name: &str,
     force: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let controller_host =
-        pki::host_from_address(controller).map_err(|e| format!("invalid controller: {e}"))?;
+        pki::host_from_address(controller).map_err(|e| anyhow::anyhow!("invalid controller: {e}"))?;
     let pki_paths = pki::create_cluster_pki(certs_dir, &controller_host, force)
-        .map_err(|e| format!("creating cluster PKI: {e}"))?;
+        .map_err(|e| anyhow::anyhow!("creating cluster PKI: {e}"))?;
 
     let mut cfg = config::load_config(config_path).unwrap_or_default();
     cfg.contexts.insert(

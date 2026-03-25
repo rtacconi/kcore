@@ -1,5 +1,6 @@
 use tonic::{Request, Response, Status};
 
+use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
 use crate::proto;
 use crate::vmm;
 
@@ -31,6 +32,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::GetVmRequest>,
     ) -> Result<Response<proto::GetVmResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         let vm_id = &request.get_ref().vm_id;
         let info = self
             .client
@@ -61,8 +63,9 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
 
     async fn list_vms(
         &self,
-        _request: Request<proto::ListVmsRequest>,
+        request: Request<proto::ListVmsRequest>,
     ) -> Result<Response<proto::ListVmsResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
         let vms = self.client.list_vms().await;
 
         let vm_infos = vms

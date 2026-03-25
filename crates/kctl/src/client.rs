@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint, Identity};
 
 use crate::config::ConnectionInfo;
@@ -10,7 +11,7 @@ pub mod node_proto {
     tonic::include_proto!("kcore.node");
 }
 
-pub async fn connect(info: &ConnectionInfo) -> Result<Channel, Box<dyn std::error::Error>> {
+pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
     let scheme = if info.insecure { "http" } else { "https" };
     let uri = format!("{scheme}://{}", info.address);
 
@@ -20,26 +21,26 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel, Box<dyn std::erro
         let ca = info
             .ca
             .as_ref()
-            .ok_or("missing CA certificate path for TLS connection")?;
+            .context("missing CA certificate path for TLS connection")?;
         let cert = info
             .cert
             .as_ref()
-            .ok_or("missing client certificate path for mTLS connection")?;
+            .context("missing client certificate path for mTLS connection")?;
         let key = info
             .key
             .as_ref()
-            .ok_or("missing client key path for mTLS connection")?;
+            .context("missing client key path for mTLS connection")?;
 
         let mut tls = ClientTlsConfig::new();
 
-        let ca_pem =
-            std::fs::read_to_string(ca).map_err(|e| format!("reading CA cert {ca}: {e}"))?;
+        let ca_pem = std::fs::read_to_string(ca)
+            .with_context(|| format!("reading CA cert {ca}"))?;
         tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
 
         let cert_pem = std::fs::read_to_string(cert)
-            .map_err(|e| format!("reading client cert {cert}: {e}"))?;
-        let key_pem =
-            std::fs::read_to_string(key).map_err(|e| format!("reading client key {key}: {e}"))?;
+            .with_context(|| format!("reading client cert {cert}"))?;
+        let key_pem = std::fs::read_to_string(key)
+            .with_context(|| format!("reading client key {key}"))?;
         tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
 
         endpoint = endpoint.tls_config(tls)?;
@@ -51,10 +52,7 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel, Box<dyn std::erro
 
 pub async fn controller_client(
     info: &ConnectionInfo,
-) -> Result<
-    controller_proto::controller_client::ControllerClient<Channel>,
-    Box<dyn std::error::Error>,
-> {
+) -> Result<controller_proto::controller_client::ControllerClient<Channel>> {
     let channel = connect(info).await?;
     Ok(controller_proto::controller_client::ControllerClient::new(
         channel,
@@ -63,18 +61,14 @@ pub async fn controller_client(
 
 pub async fn controller_admin_client(
     info: &ConnectionInfo,
-) -> Result<
-    controller_proto::controller_admin_client::ControllerAdminClient<Channel>,
-    Box<dyn std::error::Error>,
-> {
+) -> Result<controller_proto::controller_admin_client::ControllerAdminClient<Channel>> {
     let channel = connect(info).await?;
     Ok(controller_proto::controller_admin_client::ControllerAdminClient::new(channel))
 }
 
 pub async fn node_compute_client(
     info: &ConnectionInfo,
-) -> Result<node_proto::node_compute_client::NodeComputeClient<Channel>, Box<dyn std::error::Error>>
-{
+) -> Result<node_proto::node_compute_client::NodeComputeClient<Channel>> {
     let channel = connect(info).await?;
     Ok(node_proto::node_compute_client::NodeComputeClient::new(
         channel,
@@ -83,7 +77,7 @@ pub async fn node_compute_client(
 
 pub async fn node_admin_client(
     info: &ConnectionInfo,
-) -> Result<node_proto::node_admin_client::NodeAdminClient<Channel>, Box<dyn std::error::Error>> {
+) -> Result<node_proto::node_admin_client::NodeAdminClient<Channel>> {
     let channel = connect(info).await?;
     Ok(node_proto::node_admin_client::NodeAdminClient::new(channel))
 }

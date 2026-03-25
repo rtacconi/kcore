@@ -1,3 +1,4 @@
+mod auth;
 mod config;
 mod db;
 mod grpc;
@@ -7,7 +8,7 @@ mod scheduler;
 
 use clap::Parser;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
-use tracing::info;
+use tracing::{info, warn};
 
 pub mod controller_proto {
     tonic::include_proto!("kcore.controller");
@@ -23,10 +24,14 @@ struct Cli {
     /// Path to config file
     #[arg(short, long, default_value = "/etc/kcore/controller.yaml")]
     config: String,
+
+    /// Allow running without TLS (INSECURE: all RPCs are unauthenticated)
+    #[arg(long)]
+    allow_insecure: bool,
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
@@ -36,6 +41,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     let cfg = config::Config::load(&cli.config)?;
     let addr = cfg.listen_addr.parse()?;
+
+    if cfg.tls.is_none() && !cli.allow_insecure {
+        anyhow::bail!(
+            "TLS is not configured. All gRPC traffic would be unauthenticated and unencrypted.\n\
+             Configure a [tls] section in the config file, or pass --allow-insecure to override."
+        );
+    }
 
     let database = db::Database::open(&cfg.db_path)?;
     let clients =
@@ -56,8 +68,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         grpc::ControllerAdminService::new(),
     );
 
-    info!(addr = %addr, "starting controller");
-
     let mut server = Server::builder();
     if let Some(tls) = cfg.tls.as_ref() {
         let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
@@ -67,6 +77,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .identity(Identity::from_pem(cert_pem, key_pem))
             .client_ca_root(Certificate::from_pem(ca_pem));
         server = server.tls_config(server_tls)?;
+        info!(addr = %addr, "starting controller with mTLS");
+    } else {
+        warn!(addr = %addr, "starting controller WITHOUT TLS (--allow-insecure) — all RPCs are unauthenticated");
     }
 
     server

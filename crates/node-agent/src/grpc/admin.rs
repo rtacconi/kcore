@@ -5,6 +5,7 @@ use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
+use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
 use crate::discovery;
 use crate::proto;
 
@@ -48,6 +49,25 @@ impl AdminService {
             nix_config_path: PathBuf::from(nix_config_path),
         }
     }
+}
+
+fn validate_disk_path(path: &str, field: &str) -> Result<(), Status> {
+    if !path.starts_with("/dev/") {
+        return Err(Status::invalid_argument(format!(
+            "{field}: must start with /dev/, got {path}"
+        )));
+    }
+    if path.contains("..") {
+        return Err(Status::invalid_argument(format!(
+            "{field}: path traversal not allowed in {path}"
+        )));
+    }
+    if path.contains(char::is_whitespace) {
+        return Err(Status::invalid_argument(format!(
+            "{field}: whitespace not allowed in {path}"
+        )));
+    }
+    Ok(())
 }
 
 fn write_bootstrap_pki(req: &proto::InstallToDiskRequest) -> Result<(), Status> {
@@ -117,6 +137,10 @@ async fn run_test_then_switch(path: PathBuf) {
     }
 }
 
+fn is_private_key(filename: &str) -> bool {
+    filename.ends_with(".key")
+}
+
 fn write_bootstrap_pki_at(
     req: &proto::InstallToDiskRequest,
     base_dir: &PathBuf,
@@ -146,6 +170,14 @@ fn write_bootstrap_pki_at(
         let path = base_dir.join(name);
         std::fs::write(&path, content)
             .map_err(|e| Status::internal(format!("writing {}: {e}", path.display())))?;
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = if is_private_key(name) { 0o600 } else { 0o644 };
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+                .map_err(|e| Status::internal(format!("chmod {}: {e}", path.display())))?;
+        }
     }
 
     Ok(())
@@ -171,17 +203,25 @@ fn prepare_install_log() -> Result<(std::fs::File, PathBuf), Status> {
 impl proto::node_admin_server::NodeAdmin for AdminService {
     async fn list_disks(
         &self,
-        _request: Request<proto::ListDisksRequest>,
+        request: Request<proto::ListDisksRequest>,
     ) -> Result<Response<proto::ListDisksResponse>, Status> {
-        let disks = discovery::list_disks().map_err(Status::internal)?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER])?;
+        let disks = tokio::task::spawn_blocking(discovery::list_disks)
+            .await
+            .map_err(|e| Status::internal(format!("task join: {e}")))?
+            .map_err(Status::internal)?;
         Ok(Response::new(proto::ListDisksResponse { disks }))
     }
 
     async fn list_network_interfaces(
         &self,
-        _request: Request<proto::ListNetworkInterfacesRequest>,
+        request: Request<proto::ListNetworkInterfacesRequest>,
     ) -> Result<Response<proto::ListNetworkInterfacesResponse>, Status> {
-        let interfaces = discovery::list_network_interfaces().map_err(Status::internal)?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER])?;
+        let interfaces = tokio::task::spawn_blocking(discovery::list_network_interfaces)
+            .await
+            .map_err(|e| Status::internal(format!("task join: {e}")))?
+            .map_err(Status::internal)?;
         Ok(Response::new(proto::ListNetworkInterfacesResponse {
             interfaces,
         }))
@@ -191,13 +231,19 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::ApplyNixConfigRequest>,
     ) -> Result<Response<proto::ApplyNixConfigResponse>, Status> {
+        auth::require_peer(&request, &[CN_CONTROLLER])?;
         let req = request.into_inner();
-        let path = &self.nix_config_path;
+        let path = self.nix_config_path.clone();
 
-        std::fs::write(path, &req.configuration_nix).map_err(|e| {
-            error!(path = %path.display(), error = %e, "failed to write nix config");
-            Status::internal(format!("writing {}: {e}", path.display()))
-        })?;
+        let write_path = path.clone();
+        let config_nix = req.configuration_nix.clone();
+        tokio::task::spawn_blocking(move || std::fs::write(&write_path, &config_nix))
+            .await
+            .map_err(|e| Status::internal(format!("task join: {e}")))?
+            .map_err(|e| {
+                error!(path = %path.display(), error = %e, "failed to write nix config");
+                Status::internal(format!("writing {}: {e}", path.display()))
+            })?;
 
         info!(path = %path.display(), "wrote nix config");
 
@@ -228,63 +274,71 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::InstallToDiskRequest>,
     ) -> Result<Response<proto::InstallToDiskResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         if req.os_disk.is_empty() {
             return Err(Status::invalid_argument("os_disk is required"));
         }
-        if !req.os_disk.starts_with("/dev/") || req.os_disk.contains("..") {
-            return Err(Status::invalid_argument("invalid os_disk path"));
+        validate_disk_path(&req.os_disk, "os_disk")?;
+        for (i, dd) in req.data_disks.iter().enumerate() {
+            validate_disk_path(dd, &format!("data_disks[{i}]"))?;
         }
 
-        write_bootstrap_pki(&req)?;
+        let resp = tokio::task::spawn_blocking(move || -> Result<proto::InstallToDiskResponse, Status> {
+            write_bootstrap_pki(&req)?;
 
-        let mut args = vec![
-            "--disk".to_string(),
-            req.os_disk,
-            "--yes".to_string(),
-            "--wipe".to_string(),
-            "--non-interactive".to_string(),
-            "--reboot".to_string(),
-        ];
-        for dd in &req.data_disks {
-            args.push("--data-disk".to_string());
-            args.push(dd.clone());
-        }
-        if !req.controller.is_empty() {
-            args.push("--controller".to_string());
-            args.push(req.controller);
-        }
-
-        let cmd_str = format!("install-to-disk {}", args.join(" "));
-        let (mut log_file, log_path) = prepare_install_log()?;
-        use std::io::Write as _;
-        writeln!(log_file, "Starting install command: {cmd_str}")
-            .map_err(|e| Status::internal(format!("writing {}: {e}", log_path.display())))?;
-        let stderr_log = log_file
-            .try_clone()
-            .map_err(|e| Status::internal(format!("cloning {}: {e}", log_path.display())))?;
-
-        let spawn_result = std::process::Command::new("install-to-disk")
-            .args(&args)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::from(log_file))
-            .stderr(std::process::Stdio::from(stderr_log))
-            .spawn();
-
-        match spawn_result {
-            Ok(child) => {
-                let pid = child.id();
-                info!(pid, log_path = %log_path.display(), "started install-to-disk");
-                Ok(Response::new(proto::InstallToDiskResponse {
-                accepted: true,
-                message: format!(
-                    "install started (pid {pid}): {cmd_str}; logs: {}",
-                    log_path.display()
-                ),
-                }))
+            let mut args = vec![
+                "--disk".to_string(),
+                req.os_disk,
+                "--yes".to_string(),
+                "--wipe".to_string(),
+                "--non-interactive".to_string(),
+                "--reboot".to_string(),
+            ];
+            for dd in &req.data_disks {
+                args.push("--data-disk".to_string());
+                args.push(dd.clone());
             }
-            Err(e) => Err(Status::internal(format!("failed to start install: {e}"))),
-        }
+            if !req.controller.is_empty() {
+                args.push("--controller".to_string());
+                args.push(req.controller);
+            }
+
+            let cmd_str = format!("install-to-disk {}", args.join(" "));
+            let (mut log_file, log_path) = prepare_install_log()?;
+            use std::io::Write as _;
+            writeln!(log_file, "Starting install command: {cmd_str}")
+                .map_err(|e| Status::internal(format!("writing {}: {e}", log_path.display())))?;
+            let stderr_log = log_file
+                .try_clone()
+                .map_err(|e| Status::internal(format!("cloning {}: {e}", log_path.display())))?;
+
+            let spawn_result = std::process::Command::new("install-to-disk")
+                .args(&args)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::from(log_file))
+                .stderr(std::process::Stdio::from(stderr_log))
+                .spawn();
+
+            match spawn_result {
+                Ok(child) => {
+                    let pid = child.id();
+                    info!(pid, log_path = %log_path.display(), "started install-to-disk");
+                    Ok(proto::InstallToDiskResponse {
+                        accepted: true,
+                        message: format!(
+                            "install started (pid {pid}): {cmd_str}; logs: {}",
+                            log_path.display()
+                        ),
+                    })
+                }
+                Err(e) => Err(Status::internal(format!("failed to start install: {e}"))),
+            }
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join: {e}")))?;
+
+        resp.map(Response::new)
     }
 }
 
@@ -294,7 +348,7 @@ mod tests {
     use tonic::Request;
 
     #[test]
-    fn bootstrap_pki_writes_supplied_materials() {
+    fn bootstrap_pki_writes_supplied_materials_with_correct_permissions() {
         let temp = tempfile::tempdir().expect("tempdir");
         let cert_dir = temp.path().join("certs");
         let req = proto::InstallToDiskRequest {
@@ -325,6 +379,31 @@ mod tests {
             "node-key"
         );
         assert!(!cert_dir.join("controller.crt").exists());
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let ca_mode = std::fs::metadata(cert_dir.join("ca.crt"))
+                .expect("ca meta")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(ca_mode, 0o644, "certs should be world-readable");
+
+            let key_mode = std::fs::metadata(cert_dir.join("node.key"))
+                .expect("key meta")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(key_mode, 0o600, "private keys should be owner-only");
+
+            let cert_mode = std::fs::metadata(cert_dir.join("node.crt"))
+                .expect("cert meta")
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(cert_mode, 0o644, "certs should be world-readable");
+        }
     }
 
     #[test]
@@ -348,6 +427,20 @@ mod tests {
             !cert_dir.exists(),
             "no certificate directory should be created when payload is empty"
         );
+    }
+
+    #[test]
+    fn validate_disk_path_accepts_valid_devices() {
+        validate_disk_path("/dev/sda", "os_disk").expect("sda");
+        validate_disk_path("/dev/nvme0n1", "os_disk").expect("nvme");
+        validate_disk_path("/dev/disk/by-id/scsi-0", "d").expect("by-id");
+    }
+
+    #[test]
+    fn validate_disk_path_rejects_invalid() {
+        validate_disk_path("/tmp/sda", "d").expect_err("not /dev/");
+        validate_disk_path("/dev/../etc/passwd", "d").expect_err("traversal");
+        validate_disk_path("/dev/sd a", "d").expect_err("whitespace");
     }
 
     #[test]

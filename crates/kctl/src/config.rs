@@ -1,3 +1,4 @@
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -101,7 +102,7 @@ pub fn resolve_install_certs_dir(config_path: &Path) -> Result<PathBuf, String> 
     ))
 }
 
-pub fn load_config(path: &Path) -> Result<Config, Box<dyn std::error::Error>> {
+pub fn load_config(path: &Path) -> Result<Config> {
     if !path.exists() {
         return Ok(Config::default());
     }
@@ -110,7 +111,7 @@ pub fn load_config(path: &Path) -> Result<Config, Box<dyn std::error::Error>> {
     Ok(config)
 }
 
-pub fn save_config(path: &Path, config: &Config) -> Result<(), Box<dyn std::error::Error>> {
+pub fn save_config(path: &Path, config: &Config) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }

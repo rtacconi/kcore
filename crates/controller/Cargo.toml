@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.102"
 clap = { version = "4", features = ["derive"] }
 prost = "0.13"
 prost-types = "0.13"
@@ -15,6 +16,8 @@ tokio = { version = "1", features = ["full"] }
 tonic = { version = "0.12", features = ["tls", "transport"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+uuid = { version = "1.22.0", features = ["v4"] }
+x509-parser = "0.15"
 
 [build-dependencies]
 tonic-build = "0.12"

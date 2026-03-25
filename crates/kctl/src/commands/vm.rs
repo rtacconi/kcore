@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use anyhow::{bail, Context, Result};
 use crate::client::{self, controller_proto as proto};
 use crate::config::ConnectionInfo;
 use crate::output;
@@ -17,7 +18,7 @@ pub struct CreateArgs {
 pub async fn create(
     info: &ConnectionInfo,
     args: CreateArgs,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let (vm_name, vm_cpu, mem_bytes, nics) = if let Some(path) = &args.filename {
         let manifest = parse_vm_manifest(path)?;
         let n = args.name.unwrap_or(manifest.name);
@@ -25,8 +26,9 @@ pub async fn create(
     } else {
         let n = args
             .name
-            .ok_or("NAME required (or use -f to create from a manifest)")?;
-        let mem = client::parse_size_bytes(&args.memory)?;
+            .context("NAME required (or use -f to create from a manifest)")?;
+        let mem = client::parse_size_bytes(&args.memory)
+            .map_err(|e| anyhow::anyhow!(e))?;
         let cpu = args.cpu;
         let nics = args
             .network
@@ -83,7 +85,7 @@ pub async fn delete(
     info: &ConnectionInfo,
     vm_id: &str,
     target_node: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     client
         .delete_vm(proto::DeleteVmRequest {
@@ -99,7 +101,7 @@ pub async fn start(
     info: &ConnectionInfo,
     vm_id: &str,
     target_node: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     // Legacy alias for set desired-state=running.
     set_desired_state(
         info,
@@ -115,7 +117,7 @@ pub async fn stop(
     info: &ConnectionInfo,
     vm_id: &str,
     target_node: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     // Legacy alias for set desired-state=stopped.
     set_desired_state(
         info,
@@ -133,7 +135,7 @@ pub async fn set_desired_state(
     desired_state: proto::VmDesiredState,
     target_node: Option<String>,
     state_label: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let req = build_set_vm_desired_state_request(vm_id, desired_state, target_node);
     client.set_vm_desired_state(req).await?;
@@ -157,7 +159,7 @@ pub async fn get(
     info: &ConnectionInfo,
     vm_id: &str,
     target_node: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client
         .get_vm(proto::GetVmRequest {
@@ -167,8 +169,8 @@ pub async fn get(
         .await?
         .into_inner();
 
-    let spec = resp.spec.as_ref().ok_or("no spec in response")?;
-    let status = resp.status.as_ref().ok_or("no status in response")?;
+    let spec = resp.spec.as_ref().context("no spec in response")?;
+    let status = resp.status.as_ref().context("no status in response")?;
     output::print_vm_detail(spec, status, &resp.node_id);
 
     Ok(())
@@ -177,7 +179,7 @@ pub async fn get(
 pub async fn list(
     info: &ConnectionInfo,
     target_node: Option<String>,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client
         .list_vms(proto::ListVmsRequest {
@@ -202,13 +204,13 @@ struct VmManifest {
     nics: Vec<proto::Nic>,
 }
 
-fn parse_vm_manifest(path: &str) -> Result<VmManifest, Box<dyn std::error::Error>> {
+fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
     let data = std::fs::read_to_string(Path::new(path))?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&data)?;
 
     let kind = doc["kind"].as_str().unwrap_or("");
     if kind != "VM" {
-        return Err(format!("expected kind=VM, got {kind}").into());
+        bail!("expected kind=VM, got {kind}");
     }
 
     let name = doc["metadata"]["name"]
@@ -219,7 +221,8 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest, Box<dyn std::error::Error
     let cpu = doc["spec"]["cpu"].as_i64().unwrap_or(2) as i32;
 
     let mem_str = doc["spec"]["memoryBytes"].as_str().unwrap_or("2G");
-    let memory_bytes = client::parse_size_bytes(mem_str)?;
+    let memory_bytes = client::parse_size_bytes(mem_str)
+        .map_err(|e| anyhow::anyhow!(e))?;
 
     let nics = doc["spec"]["nics"]
         .as_sequence()

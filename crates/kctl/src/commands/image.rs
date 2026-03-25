@@ -1,7 +1,8 @@
+use anyhow::Result;
 use crate::client::{self, node_proto};
 use crate::config::ConnectionInfo;
 
-pub async fn pull(info: &ConnectionInfo, uri: &str) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn pull(info: &ConnectionInfo, uri: &str) -> Result<()> {
     println!("Pulling image from {uri}...");
 
     let mut client = client::node_compute_client(info).await?;
@@ -29,7 +30,7 @@ pub async fn delete(
     info: &ConnectionInfo,
     name: &str,
     force: bool,
-) -> Result<(), Box<dyn std::error::Error>> {
+) -> Result<()> {
     let mut client = client::node_compute_client(info).await?;
     let resp = client
         .delete_image(node_proto::DeleteImageRequest {

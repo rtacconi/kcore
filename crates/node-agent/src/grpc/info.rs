@@ -1,5 +1,6 @@
 use tonic::{Request, Response, Status};
 
+use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
 use crate::proto;
 
 pub struct InfoService {
@@ -16,13 +17,19 @@ impl InfoService {
 impl proto::node_info_server::NodeInfo for InfoService {
     async fn get_node_info(
         &self,
-        _request: Request<proto::GetNodeInfoRequest>,
+        request: Request<proto::GetNodeInfoRequest>,
     ) -> Result<Response<proto::GetNodeInfoResponse>, Status> {
-        let hostname = hostname::get()
-            .map(|h| h.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| "unknown".into());
+        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
 
-        let (cpu_cores, memory_bytes) = read_capacity();
+        let (hostname, cpu_cores, memory_bytes) = tokio::task::spawn_blocking(|| {
+            let hostname = hostname::get()
+                .map(|h| h.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| "unknown".into());
+            let (cpu, mem) = read_capacity();
+            (hostname, cpu, mem)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join: {e}")))?;
 
         Ok(Response::new(proto::GetNodeInfoResponse {
             node_id: self.node_id.clone(),

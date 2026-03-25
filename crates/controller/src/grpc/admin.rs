@@ -2,6 +2,7 @@ use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
+use crate::auth::{self, CN_KCTL};
 use crate::controller_proto;
 
 pub struct ControllerAdminService;
@@ -18,13 +19,18 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::ApplyNixConfigRequest>,
     ) -> Result<Response<controller_proto::ApplyNixConfigResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
         let req = request.into_inner();
         let path = "/etc/nixos/configuration.nix";
 
-        std::fs::write(path, &req.configuration_nix).map_err(|e| {
-            error!(error = %e, "failed to write controller nix config");
-            Status::internal(format!("writing {path}: {e}"))
-        })?;
+        let config_nix = req.configuration_nix.clone();
+        tokio::task::spawn_blocking(move || std::fs::write(path, &config_nix))
+            .await
+            .map_err(|e| Status::internal(format!("task join: {e}")))?
+            .map_err(|e| {
+                error!(error = %e, "failed to write controller nix config");
+                Status::internal(format!("writing {path}: {e}"))
+            })?;
 
         info!("wrote controller nix config");
 

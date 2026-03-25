@@ -1,5 +1,6 @@
 use std::sync::{Arc, Mutex};
 
+use anyhow::Result;
 use rusqlite::{params, Connection};
 
 #[derive(Clone)]
@@ -35,7 +36,7 @@ pub struct VmRow {
 }
 
 impl Database {
-    pub fn open(path: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
             std::fs::create_dir_all(parent).ok();
         }
@@ -48,8 +49,17 @@ impl Database {
         Ok(db)
     }
 
-    fn migrate(&self) -> Result<(), Box<dyn std::error::Error>> {
-        let conn = self.conn.lock().unwrap();
+    fn lock_conn(&self) -> Result<std::sync::MutexGuard<'_, Connection>, rusqlite::Error> {
+        self.conn.lock().map_err(|_| {
+            rusqlite::Error::SqliteFailure(
+                rusqlite::ffi::Error::new(1),
+                Some("database mutex poisoned".to_string()),
+            )
+        })
+    }
+
+    fn migrate(&self) -> Result<()> {
+        let conn = self.lock_conn()?;
         conn.execute_batch(
             "CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY,
@@ -78,7 +88,7 @@ impl Database {
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
@@ -110,7 +120,7 @@ impl Database {
         cpu_used: i32,
         mem_used: i64,
     ) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let rows = conn.execute(
             "UPDATE nodes SET last_heartbeat = datetime('now'), status = 'ready' WHERE id = ?1",
             params![node_id],
@@ -123,7 +133,7 @@ impl Database {
     }
 
     pub fn get_node(&self, node_id: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface FROM nodes WHERE id = ?1",
         )?;
@@ -132,7 +142,7 @@ impl Database {
     }
 
     pub fn list_nodes(&self) -> Result<Vec<NodeRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface FROM nodes",
         )?;
@@ -141,7 +151,7 @@ impl Database {
     }
 
     pub fn get_node_by_address(&self, address: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface FROM nodes WHERE address = ?1",
         )?;
@@ -150,7 +160,7 @@ impl Database {
     }
 
     pub fn insert_vm(&self, vm: &VmRow) -> Result<(), rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'))",
@@ -170,14 +180,13 @@ impl Database {
     }
 
     pub fn delete_vm(&self, vm_id: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let rows = conn.execute("DELETE FROM vms WHERE id = ?1", params![vm_id])?;
         Ok(rows > 0)
     }
 
-    #[allow(dead_code)]
     pub fn get_vm(&self, vm_id: &str) -> Result<Option<VmRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at FROM vms WHERE id = ?1",
         )?;
@@ -185,9 +194,8 @@ impl Database {
         rows.next().transpose()
     }
 
-    #[allow(dead_code)]
     pub fn list_vms(&self) -> Result<Vec<VmRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at FROM vms",
         )?;
@@ -196,7 +204,7 @@ impl Database {
     }
 
     pub fn list_vms_for_node(&self, node_id: &str) -> Result<Vec<VmRow>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, name, cpu, memory_bytes, image_path, image_size, network, auto_start, node_id, created_at FROM vms WHERE node_id = ?1",
         )?;
@@ -205,7 +213,7 @@ impl Database {
     }
 
     pub fn find_node_for_vm(&self, vm_id: &str) -> Result<Option<String>, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let mut stmt =
             conn.prepare("SELECT node_id FROM vms WHERE id = ?1 OR name = ?1 LIMIT 1")?;
         let mut rows = stmt.query_map(params![vm_id], |row| row.get::<_, String>(0))?;
@@ -217,7 +225,7 @@ impl Database {
         vm_id_or_name: &str,
         auto_start: bool,
     ) -> Result<bool, rusqlite::Error> {
-        let conn = self.conn.lock().unwrap();
+        let conn = self.lock_conn()?;
         let rows = conn.execute(
             "UPDATE vms SET auto_start = ?1 WHERE id = ?2 OR name = ?2",
             params![auto_start as i32, vm_id_or_name],
