@@ -102,6 +102,30 @@ Blocking I/O (filesystem reads/writes, subprocess execution, `/proc` reads) is o
 
 The SQLite database uses `std::sync::Mutex<Connection>` with a safe `lock_conn()` helper that returns a proper error on mutex poisoning instead of panicking the server.
 
+## Dependency Auditing
+
+`cargo audit` is included in the `nix develop` shell and is part of the `make check` target. It scans `Cargo.lock` against the [RustSec Advisory Database](https://rustsec.org/) for known vulnerabilities.
+
+### Fixed advisories
+
+| Advisory | Crate | Issue | Resolution |
+|---|---|---|---|
+| RUSTSEC-2025-0009 | `ring 0.16.20` | AES functions may panic with overflow checking | Upgraded `rcgen` 0.12→0.14 and `x509-parser` 0.15→0.18 (both now use `ring 0.17`) |
+| RUSTSEC-2026-0049 | `rustls-webpki 0.103.9` | CRL distribution point matching logic flaw | Updated `rustls-webpki` to 0.103.10 via `cargo update` |
+
+### Accepted warnings
+
+| Advisory | Crate | Status | Reason |
+|---|---|---|---|
+| RUSTSEC-2025-0134 | `rustls-pemfile 2.2.0` | Unmaintained | Transitive dependency of `tonic 0.12`; cannot be removed without a tonic major version upgrade |
+
+### Makefile targets
+
+```bash
+make audit    # Run cargo audit standalone
+make check    # Run clippy + fmt + audit together
+```
+
 ## Known Limitations
 
 - **No certificate rotation workflow** -- certs must be manually regenerated and redistributed before expiry
@@ -119,7 +143,7 @@ The project uses a Nix flake for reproducible builds. All Rust toolchain command
 nix develop
 ```
 
-This provides `cargo`, `rustc`, `clippy`, `rustfmt`, and all native dependencies (e.g., SQLite, protobuf compiler).
+This provides `cargo`, `rustc`, `clippy`, `rustfmt`, `cargo-audit`, and all native dependencies (e.g., SQLite, protobuf compiler).
 
 ### Running checks
 
