@@ -14,6 +14,33 @@ pub struct AdminService {
 
 const BOOTSTRAP_CERT_DIR: &str = "/etc/kcore/certs";
 const INSTALL_LOG_DIR: &str = "/var/log/kcore";
+const NIXOS_CONFIG_PATH: &str = "/etc/nixos/configuration.nix";
+
+async fn resolve_nixpkgs_path() -> Option<String> {
+    for candidate in [
+        "/nix/var/nix/profiles/per-user/root/channels/nixos",
+        "/run/current-system/sw/share/nixpkgs",
+    ] {
+        if std::path::Path::new(candidate).exists() {
+            return Some(candidate.to_string());
+        }
+    }
+
+    let out = Command::new("nix")
+        .args(["eval", "--raw", "nixpkgs#path"])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let p = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    if p.is_empty() {
+        None
+    } else {
+        Some(p)
+    }
+}
 
 impl AdminService {
     pub fn new(nix_config_path: String) -> Self {
@@ -40,10 +67,15 @@ fn rebuild_sequence(test_success: bool) -> Vec<&'static str> {
 }
 
 async fn run_rebuild_mode(mode: &'static str) -> Result<std::process::Output, std::io::Error> {
-    Command::new("nixos-rebuild")
-        .args(rebuild_args(mode))
-        .output()
-        .await
+    let mut cmd = Command::new("nixos-rebuild");
+    cmd.args(rebuild_args(mode));
+    if let Some(nixpkgs_path) = resolve_nixpkgs_path().await {
+        cmd.env(
+            "NIX_PATH",
+            format!("nixos-config={NIXOS_CONFIG_PATH}:nixpkgs={nixpkgs_path}"),
+        );
+    }
+    cmd.output().await
 }
 
 async fn run_test_then_switch(path: PathBuf) {

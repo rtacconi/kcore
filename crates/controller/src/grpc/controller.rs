@@ -272,6 +272,15 @@ impl controller_proto::controller_server::Controller for ControllerService {
             spec.name.clone()
         };
 
+        if self
+            .db
+            .find_node_for_vm(&vm_name)
+            .map_err(|e| Status::internal(format!("checking vm name: {e}")))?
+            .is_some()
+        {
+            return Err(Status::already_exists(format!("vm name {vm_name} already exists")));
+        }
+
         let image_path = spec
             .disks
             .first()
@@ -418,49 +427,41 @@ impl controller_proto::controller_server::Controller for ControllerService {
     ) -> Result<Response<controller_proto::ListVmsResponse>, Status> {
         let req = request.into_inner();
 
-        let nodes = if !req.target_node.is_empty() {
-            let n = self
+        let rows = if !req.target_node.is_empty() {
+            let node = self
                 .db
                 .get_node_by_address(&req.target_node)
                 .map_err(|e| Status::internal(e.to_string()))?
                 .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
                 .ok_or_else(|| Status::not_found(format!("node {} not found", req.target_node)))?;
-            vec![n]
+            self.db
+                .list_vms_for_node(&node.id)
+                .map_err(|e| Status::internal(e.to_string()))?
         } else {
             self.db
-                .list_nodes()
+                .list_vms()
                 .map_err(|e| Status::internal(e.to_string()))?
         };
 
-        let mut all_vms = Vec::new();
-        for node in &nodes {
-            let Some(mut client) = self.clients.get_compute(&node.address) else {
-                warn!(node = %node.id, "skipping node without connection");
-                continue;
-            };
-
-            match client.list_vms(node_proto::ListVmsRequest {}).await {
-                Ok(resp) => {
-                    for vm in resp.into_inner().vms {
-                        all_vms.push(controller_proto::VmInfo {
-                            id: vm.id,
-                            name: vm.name,
-                            state: vm.state,
-                            cpu: vm.cpu,
-                            memory_bytes: vm.memory_bytes,
-                            node_id: node.id.clone(),
-                            created_at: vm.created_at,
-                        });
-                    }
-                }
-                Err(e) => {
-                    warn!(node = %node.id, error = %e, "failed to list vms from node");
-                }
-            }
-        }
+        let infos = rows
+            .into_iter()
+            .map(|vm| controller_proto::VmInfo {
+                id: vm.id,
+                name: vm.name,
+                state: if vm.auto_start {
+                    controller_proto::VmState::Running as i32
+                } else {
+                    controller_proto::VmState::Stopped as i32
+                },
+                cpu: vm.cpu,
+                memory_bytes: vm.memory_bytes,
+                node_id: vm.node_id,
+                created_at: None,
+            })
+            .collect();
 
         Ok(Response::new(controller_proto::ListVmsResponse {
-            vms: all_vms,
+            vms: infos,
         }))
     }
 
