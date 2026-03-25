@@ -127,6 +127,12 @@ impl ControllerService {
     }
 }
 
+fn short_vm_id_seed() -> String {
+    let raw = uuid_v4();
+    let start = raw.len().saturating_sub(8);
+    raw[start..].to_string()
+}
+
 #[tonic::async_trait]
 impl controller_proto::controller_server::Controller for ControllerService {
     async fn register_node(
@@ -234,8 +240,29 @@ impl controller_proto::controller_server::Controller for ControllerService {
         };
 
         let vm_id = if spec.id.is_empty() {
-            format!("vm-{}", &uuid_v4()[..8])
+            let mut selected: Option<String> = None;
+            for _ in 0..8 {
+                let candidate = format!("vm-{}", short_vm_id_seed());
+                let exists = self
+                    .db
+                    .get_vm(&candidate)
+                    .map_err(|e| Status::internal(format!("checking vm id: {e}")))?
+                    .is_some();
+                if !exists {
+                    selected = Some(candidate);
+                    break;
+                }
+            }
+            selected.ok_or_else(|| Status::internal("failed to allocate unique vm id"))?
         } else {
+            if self
+                .db
+                .get_vm(&spec.id)
+                .map_err(|e| Status::internal(format!("checking vm id: {e}")))?
+                .is_some()
+            {
+                return Err(Status::already_exists(format!("vm {} already exists", spec.id)));
+            }
             spec.id.clone()
         };
 
