@@ -34,6 +34,36 @@
         default = 0;
         description = "802.1Q VLAN tag. When > 0, a VLAN sub-interface is created on gatewayInterface and the bridge is placed on top of it instead of the physical NIC.";
       };
+
+      networkType = lib.mkOption {
+        type = lib.types.enum ["nat" "bridge" "vxlan"];
+        default = "nat";
+        description = "Network mode: nat (default, masquerade+DNAT), bridge (passthrough to physical NIC), or vxlan (overlay).";
+      };
+
+      vni = lib.mkOption {
+        type = lib.types.int;
+        default = 0;
+        description = "VXLAN Network Identifier (used when networkType = vxlan).";
+      };
+
+      vxlanPeers = lib.mkOption {
+        type = lib.types.listOf lib.types.str;
+        default = [];
+        description = "IP addresses of peer hosts for VXLAN FDB flooding.";
+      };
+
+      vxlanLocalIp = lib.mkOption {
+        type = lib.types.str;
+        default = "";
+        description = "This node's IP address used as VXLAN tunnel source.";
+      };
+
+      enableOutboundNat = lib.mkOption {
+        type = lib.types.bool;
+        default = true;
+        description = "Whether to add masquerade rules for outbound internet access. Set to false for fully isolated overlays.";
+      };
     };
   };
 

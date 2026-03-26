@@ -362,6 +362,7 @@ message InstallToDiskRequest {
   string lvm_lv_prefix = 15;     // optional LVM LV prefix for install automation
   string zfs_pool_name = 16;     // optional ZFS pool name for install automation
   string zfs_dataset_prefix = 17; // optional ZFS dataset prefix for install automation
+  bool disable_vxlan = 18;       // when true, node rejects VXLAN network creation
 }
 
 enum StorageBackendType {

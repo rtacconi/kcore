@@ -45,6 +45,7 @@ message RegisterNodeRequest {
   NodeCapacity capacity = 4;
   repeated string labels = 5; // e.g., "dc=dc-a", "rack=rack-1"
   StorageBackendType storage_backend = 6; // Node storage backend capability (filesystem/lvm/zfs)
+  bool disable_vxlan = 7; // When true, node does not support VXLAN overlay networking
 }
 
 message RegisterNodeResponse {
@@ -173,6 +174,8 @@ message CreateNetworkRequest {
   repeated int32 allowed_tcp_ports = 6;  // TCP ports to DNAT-forward from external IP
   repeated int32 allowed_udp_ports = 7;  // UDP ports to DNAT-forward from external IP
   int32 vlan_id = 8;  // Optional VLAN tag (0 = no VLAN, bridges directly on gatewayInterface)
+  string network_type = 9;  // "nat" (default), "bridge", or "vxlan"
+  bool enable_outbound_nat = 10;  // For vxlan: whether VMs can reach the internet (default true)
 }
 
 message CreateNetworkResponse {
@@ -207,6 +210,8 @@ message NetworkInfo {
   repeated int32 allowed_tcp_ports = 6;
   repeated int32 allowed_udp_ports = 7;
   int32 vlan_id = 8;
+  string network_type = 9;  // "nat", "bridge", or "vxlan"
+  bool enable_outbound_nat = 10;
 }
 
 message VmInfo {
@@ -237,6 +242,7 @@ message NodeInfo {
   google.protobuf.Timestamp last_heartbeat = 7;
   repeated string labels = 8;  // e.g., "dc=dc-a", "rack=rack-1"
   StorageBackendType storage_backend = 9;
+  bool disable_vxlan = 10; // When true, VXLAN overlay networking is disabled
 }
 
 message GetNodeRequest {

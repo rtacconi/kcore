@@ -718,6 +718,7 @@ mod tests {
                 last_heartbeat: None,
                 labels: vec![],
                 storage_backend: proto::StorageBackendType::Filesystem as i32,
+                disable_vxlan: false,
             },
             proto::NodeInfo {
                 node_id: "node-b".to_string(),
@@ -729,6 +730,7 @@ mod tests {
                 last_heartbeat: None,
                 labels: vec![],
                 storage_backend: proto::StorageBackendType::Filesystem as i32,
+                disable_vxlan: false,
             },
         ];
         let addr = node_address_for_vm_node_id(&nodes, "node-b");

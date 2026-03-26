@@ -2,12 +2,14 @@ use anyhow::Context;
 use serde::Deserialize;
 use std::path::Path;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Config {
     pub node_id: String,
     #[serde(default = "default_listen_addr")]
     pub listen_addr: String,
+    #[serde(default)]
+    pub controller_addr: String,
     pub tls: Option<TlsConfig>,
     #[serde(default = "default_vm_socket_dir")]
     pub vm_socket_dir: String,
@@ -17,7 +19,7 @@ pub struct Config {
     pub storage: StorageConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TlsConfig {
     pub ca_file: String,

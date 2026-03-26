@@ -1,6 +1,20 @@
 use crate::config::NetworkConfig;
 use crate::db::{NetworkRow, VmRow};
 
+#[derive(Debug, Clone)]
+pub struct VxlanMeta {
+    pub vni: i32,
+    pub peers: Vec<String>,
+    pub local_ip: String,
+}
+
+fn netmask_to_cidr(mask: &str) -> u8 {
+    mask.split('.')
+        .filter_map(|o| o.parse::<u8>().ok())
+        .map(|o| o.count_ones() as u8)
+        .sum()
+}
+
 /// Escape a string for use inside a Nix double-quoted string literal.
 /// Handles `\` → `\\`, `"` → `\"`, and `${` → `\${` (prevents interpolation).
 fn nix_escape(s: &str) -> String {
@@ -41,6 +55,7 @@ pub fn generate_node_config(
     network: &NetworkConfig,
     networks: &[NetworkRow],
     vm_ssh_keys: &std::collections::HashMap<String, Vec<String>>,
+    vxlan_peers: &std::collections::HashMap<String, VxlanMeta>,
 ) -> String {
     let mut out = String::from("{ pkgs, ... }: {\n");
     out.push_str("  ch-vm.vms = {\n");
@@ -124,6 +139,24 @@ pub fn generate_node_config(
                 net.vlan_id
             ));
         }
+        if net.network_type != "nat" {
+            out.push_str(&format!(
+                "      networkType = \"{}\";\n",
+                nix_escape(&net.network_type)
+            ));
+        }
+        if !net.enable_outbound_nat {
+            out.push_str("      enableOutboundNat = false;\n");
+        }
+        if let Some(vxlan) = vxlan_peers.get(&net.name) {
+            out.push_str(&format!("      vni = {};\n", vxlan.vni));
+            let peer_list: Vec<String> = vxlan.peers.iter().map(|p| format!("\"{}\"", nix_escape(p))).collect();
+            out.push_str(&format!("      vxlanPeers = [ {} ];\n", peer_list.join(" ")));
+            out.push_str(&format!(
+                "      vxlanLocalIp = \"{}\";\n",
+                nix_escape(&vxlan.local_ip)
+            ));
+        }
         out.push_str("    };\n");
     }
 
@@ -189,6 +222,24 @@ pub fn generate_node_config(
                 "      cloudInitUserConfigFile = pkgs.writeText \"{nix_name}-cloud-init.yaml\" \"{escaped}\";\n"
             ));
         }
+
+        if !vm.vm_ip.is_empty() {
+            let vm_net = networks.iter().find(|n| n.name == vm.network);
+            if let Some(net) = vm_net {
+                if net.network_type == "vxlan" {
+                    let cidr = netmask_to_cidr(&net.internal_netmask);
+                    let mut net_cfg = String::from("version: 2\nethernets:\n  eth0:\n");
+                    net_cfg.push_str(&format!("    addresses: [\"{}/{}\"]\n", vm.vm_ip, cidr));
+                    net_cfg.push_str(&format!("    gateway4: \"{}\"\n", net.gateway_ip));
+                    net_cfg.push_str("    nameservers:\n      addresses: [1.1.1.1, 8.8.8.8]\n");
+                    let escaped = nix_escape(&net_cfg);
+                    out.push_str(&format!(
+                        "      cloudInitNetworkConfigFile = pkgs.writeText \"{nix_name}-network-config.yaml\" \"{escaped}\";\n"
+                    ));
+                }
+            }
+        }
+
         out.push_str("    };\n");
     }
 
@@ -220,6 +271,7 @@ mod tests {
             cloud_init_user_data: String::new(),
             storage_backend: "filesystem".into(),
             storage_size_bytes: 10 * 1024 * 1024 * 1024,
+            vm_ip: String::new(),
         }
     }
 
@@ -239,6 +291,7 @@ mod tests {
             "eno1",
             &default_net(),
             &[],
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
         assert!(config.contains("ch-vm.vms"));
@@ -264,6 +317,7 @@ mod tests {
             &net,
             &[],
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
         assert!(config.contains("internalNetmask = \"255.255.255.128\""));
         assert!(config.contains("autoStart = false;"));
@@ -277,6 +331,7 @@ mod tests {
             &default_net(),
             &[],
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
         assert!(config.contains("virtualMachines.\"db-node-01\""));
     }
@@ -288,6 +343,7 @@ mod tests {
             "eno1",
             &default_net(),
             &[],
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
         assert!(config.contains("virtualMachines.\"web--inject\""));
@@ -311,6 +367,7 @@ mod tests {
             &default_net(),
             &[],
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
         assert!(config.contains(r#"image = "/images/foo\"\${bar}.raw";"#));
         // The raw `${` is escaped to `\${`, preventing Nix interpolation.
@@ -327,6 +384,7 @@ mod tests {
             &default_net(),
             &[],
             &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
         );
         assert!(config.contains("imageFormat = \"qcow2\";"));
     }
@@ -339,8 +397,14 @@ mod tests {
             gateway_ip: "10.0.0.1\\".into(),
             internal_netmask: "255.255.255.0".into(),
         };
-        let config =
-            generate_node_config(&[], "eno1\"", &net, &[], &std::collections::HashMap::new());
+        let config = generate_node_config(
+            &[],
+            "eno1\"",
+            &net,
+            &[],
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
         assert!(config.contains(r#"gatewayInterface = "eno1\"";"#));
         assert!(config.contains(r#"externalIP = "1.2.3.4\"";"#));
         assert!(config.contains(r#"gatewayIP = "10.0.0.1\\";"#));
@@ -357,12 +421,17 @@ mod tests {
             allowed_tcp_ports: String::new(),
             allowed_udp_ports: String::new(),
             vlan_id: 0,
+            network_type: "nat".into(),
+            enable_outbound_nat: true,
+            vni: 0,
+            next_ip: 2,
         }];
         let config = generate_node_config(
             &[],
             "eno1",
             &default_net(),
             &networks,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
         assert!(config.contains("networks.\"frontend\""));
@@ -380,12 +449,17 @@ mod tests {
             allowed_tcp_ports: "80,443,8080".into(),
             allowed_udp_ports: "53".into(),
             vlan_id: 0,
+            network_type: "nat".into(),
+            enable_outbound_nat: true,
+            vni: 0,
+            next_ip: 2,
         }];
         let config = generate_node_config(
             &[],
             "eno1",
             &default_net(),
             &networks,
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
         assert!(config.contains("allowedTCPPorts = [ 80 443 8080 ];"));
@@ -404,12 +478,17 @@ mod tests {
             allowed_tcp_ports: String::new(),
             allowed_udp_ports: String::new(),
             vlan_id: 100,
+            network_type: "nat".into(),
+            enable_outbound_nat: true,
+            vni: 0,
+            next_ip: 2,
         };
         let config = generate_node_config(
             &[v],
             "eno1",
             &default_net(),
             &[net],
+            &std::collections::HashMap::new(),
             &std::collections::HashMap::new(),
         );
         assert!(config.contains("vlanId = 100"), "should contain vlanId");
@@ -424,10 +503,138 @@ mod tests {
             "vm-1".to_string(),
             vec!["ssh-rsa AAAAB3... user@host".to_string()],
         );
-        let config = generate_node_config(&[v], "eno1", &default_net(), &[], &keys);
+        let config = generate_node_config(
+            &[v],
+            "eno1",
+            &default_net(),
+            &[],
+            &keys,
+            &std::collections::HashMap::new(),
+        );
         assert!(config.contains("cloudInitUserConfigFile"));
         assert!(config.contains("ssh_authorized_keys"));
         assert!(config.contains("lock_passwd: true"));
         assert!(config.contains("ssh_pwauth: false"));
+    }
+
+    #[test]
+    fn renders_bridge_network_without_masquerade() {
+        let networks = vec![NetworkRow {
+            name: "bridged".into(),
+            external_ip: "0.0.0.0".into(),
+            gateway_ip: "0.0.0.0".into(),
+            internal_netmask: "255.255.255.0".into(),
+            node_id: "node-1".into(),
+            allowed_tcp_ports: String::new(),
+            allowed_udp_ports: String::new(),
+            vlan_id: 0,
+            network_type: "bridge".into(),
+            enable_outbound_nat: false,
+            vni: 0,
+            next_ip: 2,
+        }];
+        let config = generate_node_config(
+            &[],
+            "eno1",
+            &default_net(),
+            &networks,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert!(config.contains("networkType = \"bridge\""));
+        assert!(config.contains("enableOutboundNat = false"));
+        assert!(!config.contains("vni ="));
+    }
+
+    #[test]
+    fn renders_vxlan_network_with_peers() {
+        let networks = vec![NetworkRow {
+            name: "overlay".into(),
+            external_ip: "0.0.0.0".into(),
+            gateway_ip: "10.200.0.1".into(),
+            internal_netmask: "255.255.255.0".into(),
+            node_id: "node-1".into(),
+            allowed_tcp_ports: String::new(),
+            allowed_udp_ports: String::new(),
+            vlan_id: 0,
+            network_type: "vxlan".into(),
+            enable_outbound_nat: true,
+            vni: 10042,
+            next_ip: 2,
+        }];
+        let mut vxlan = std::collections::HashMap::new();
+        vxlan.insert(
+            "overlay".to_string(),
+            VxlanMeta {
+                vni: 10042,
+                peers: vec!["192.168.1.20".into(), "192.168.1.30".into()],
+                local_ip: "192.168.1.10".into(),
+            },
+        );
+        let config = generate_node_config(
+            &[],
+            "eno1",
+            &default_net(),
+            &networks,
+            &std::collections::HashMap::new(),
+            &vxlan,
+        );
+        assert!(config.contains("networkType = \"vxlan\""));
+        assert!(config.contains("vni = 10042"));
+        assert!(config.contains("\"192.168.1.20\""));
+        assert!(config.contains("\"192.168.1.30\""));
+        assert!(config.contains("vxlanLocalIp = \"192.168.1.10\""));
+    }
+
+    #[test]
+    fn renders_vxlan_vm_with_static_ip() {
+        let mut v = vm(true, "vxvm");
+        v.network = "overlay".into();
+        v.vm_ip = "10.200.0.5".into();
+
+        let networks = vec![NetworkRow {
+            name: "overlay".into(),
+            external_ip: "0.0.0.0".into(),
+            gateway_ip: "10.200.0.1".into(),
+            internal_netmask: "255.255.255.0".into(),
+            node_id: "node-1".into(),
+            allowed_tcp_ports: String::new(),
+            allowed_udp_ports: String::new(),
+            vlan_id: 0,
+            network_type: "vxlan".into(),
+            enable_outbound_nat: true,
+            vni: 10042,
+            next_ip: 6,
+        }];
+        let mut vxlan = std::collections::HashMap::new();
+        vxlan.insert(
+            "overlay".to_string(),
+            VxlanMeta {
+                vni: 10042,
+                peers: vec![],
+                local_ip: "192.168.1.10".into(),
+            },
+        );
+        let config = generate_node_config(
+            &[v],
+            "eno1",
+            &default_net(),
+            &networks,
+            &std::collections::HashMap::new(),
+            &vxlan,
+        );
+        assert!(
+            config.contains("cloudInitNetworkConfigFile"),
+            "should have static network config"
+        );
+        assert!(config.contains("10.200.0.5/24"));
+        assert!(config.contains("gateway4"));
+    }
+
+    #[test]
+    fn netmask_to_cidr_converts_common_masks() {
+        assert_eq!(netmask_to_cidr("255.255.255.0"), 24);
+        assert_eq!(netmask_to_cidr("255.255.0.0"), 16);
+        assert_eq!(netmask_to_cidr("255.255.255.128"), 25);
     }
 }

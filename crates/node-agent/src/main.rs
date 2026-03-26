@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod discovery;
 mod grpc;
+mod registration;
 mod storage;
 mod vmm;
 
@@ -12,6 +13,10 @@ use tracing::{info, warn};
 
 pub mod proto {
     tonic::include_proto!("kcore.node");
+}
+
+pub mod controller_proto {
+    tonic::include_proto!("kcore.controller");
 }
 
 #[derive(Parser)]
@@ -69,6 +74,13 @@ async fn main() -> anyhow::Result<()> {
     health_reporter
         .set_serving::<proto::node_compute_server::NodeComputeServer<grpc::ComputeService>>()
         .await;
+
+    if !cfg.controller_addr.is_empty() {
+        let reg_cfg = cfg.clone();
+        tokio::spawn(async move {
+            registration::register_with_controller(&reg_cfg).await;
+        });
+    }
 
     let mut server = Server::builder();
     if let Some(tls) = cfg.tls.as_ref() {

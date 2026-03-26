@@ -97,6 +97,19 @@ pub fn derive_image_format_from_path(path: &str) -> String {
     }
 }
 
+pub fn validate_network_type(network_type: &str) -> Result<String, Status> {
+    let trimmed = network_type.trim();
+    if trimmed.is_empty() {
+        return Ok("nat".to_string());
+    }
+    match trimmed {
+        "nat" | "bridge" | "vxlan" => Ok(trimmed.to_string()),
+        _ => Err(Status::invalid_argument(
+            "network_type must be 'nat', 'bridge', or 'vxlan'",
+        )),
+    }
+}
+
 pub fn validate_network_name(name: &str) -> Result<String, Status> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
@@ -238,5 +251,15 @@ mod tests {
             validate_storage_size_bytes(1024 * 1024).expect("positive"),
             1024 * 1024
         );
+    }
+
+    #[test]
+    fn validate_network_type_accepts_valid_and_rejects_invalid() {
+        assert_eq!(validate_network_type("").expect("empty -> nat"), "nat");
+        assert_eq!(validate_network_type("nat").expect("nat"), "nat");
+        assert_eq!(validate_network_type("bridge").expect("bridge"), "bridge");
+        assert_eq!(validate_network_type("vxlan").expect("vxlan"), "vxlan");
+        assert!(validate_network_type("invalid").is_err());
+        assert!(validate_network_type("vlan").is_err());
     }
 }

@@ -1,8 +1,18 @@
 # Networking
 
-This document covers the complete VM networking model in kcore: how
-networks are created, how VMs connect, how traffic flows, and every
-available option.
+This document covers the complete VM networking model in kcore: the three
+network types, how VMs connect, how traffic flows, and every available
+option.
+
+## Network types
+
+kcore supports three network types, each suited to different use cases:
+
+| Type | Use case | How VMs get IPs | Internet access | Cross-host |
+|------|----------|-----------------|-----------------|------------|
+| **nat** (default) | Isolated VMs with outbound internet | DHCP from dnsmasq | Masquerade NAT | No |
+| **bridge** | VMs on the physical LAN | DHCP from upstream network | Direct | No |
+| **vxlan** | Overlay network across hosts | Controller-assigned static IPs | Optional masquerade | Yes |
 
 ## Architecture overview
 
@@ -12,75 +22,182 @@ graph TD
 
     subgraph Host["Host (NixOS)"]
         GW["eno1 — gateway interface"]
-        VLAN["eno1.100 — VLAN sub-interface\n(only when vlanId > 0)"]
-        NFT["nftables\nmasquerade + DNAT per network"]
 
-        subgraph NetDefault["Network: default (10.240.0.1/24)"]
-            BrDefault["kbr-default\nLinux bridge"]
-            DHCPDefault["dnsmasq\nDHCP .100–.199"]
-            TapWeb["tap-a1b2c3d4"]
-            TapApi["tap-e5f6a7b8"]
-            VMWeb["VM: web"]
-            VMApi["VM: api"]
+        subgraph NATMode["NAT network (type: nat)"]
+            NFT_NAT["nftables\nmasquerade + DNAT"]
+            BrNAT["kbr-frontend\nLinux bridge\ngatewayIP on bridge"]
+            DHCP_NAT["dnsmasq\nDHCP .100–.199"]
+            VM_NAT1["VM: web"]
+            VM_NAT2["VM: api"]
         end
 
-        subgraph NetBackend["Network: backend (10.240.20.1/24)"]
-            BrBackend["kbr-backend\nLinux bridge"]
-            DHCPBackend["dnsmasq\nDHCP .100–.199"]
-            TapDb["tap-c9d0e1f2"]
-            VMDb["VM: db"]
+        subgraph BridgeMode["Bridge network (type: bridge)"]
+            BrBridge["kbr-lan\nLinux bridge\nNIC attached directly"]
+            VM_BR1["VM: bare-1"]
+            VM_BR2["VM: bare-2"]
+        end
+
+        subgraph VXLANMode["VXLAN overlay (type: vxlan)"]
+            VXLAN_IF["vxlan10234\nVXLAN interface\nVNI auto-assigned"]
+            BrVXLAN["kbr-cluster\nLinux bridge"]
+            NFT_VXLAN["nftables masquerade\n(if outbound NAT enabled)"]
+            VM_VX1["VM: app-1\nstatic IP 10.x.x.2"]
+            VM_VX2["VM: app-2\nstatic IP 10.x.x.3"]
         end
     end
 
+    subgraph RemoteHost["Remote Host"]
+        VXLAN_REMOTE["vxlan10234\nVXLAN peer"]
+        BrRemote["kbr-cluster"]
+        VM_REMOTE["VM: app-3\nstatic IP 10.x.x.4"]
+    end
+
     Internet --> GW
-    GW --> VLAN
-    GW --> NFT
-    VLAN --> NFT
-    NFT --> BrDefault
-    NFT --> BrBackend
-    BrDefault --- DHCPDefault
-    BrBackend --- DHCPBackend
-    BrDefault --> TapWeb --> VMWeb
-    BrDefault --> TapApi --> VMApi
-    BrBackend --> TapDb --> VMDb
+    GW --> NFT_NAT --> BrNAT
+    BrNAT --- DHCP_NAT
+    BrNAT --> VM_NAT1
+    BrNAT --> VM_NAT2
+
+    GW --- BrBridge
+    BrBridge --> VM_BR1
+    BrBridge --> VM_BR2
+
+    VXLAN_IF --> BrVXLAN
+    BrVXLAN --> NFT_VXLAN
+    NFT_VXLAN --> GW
+    BrVXLAN --> VM_VX1
+    BrVXLAN --> VM_VX2
+
+    VXLAN_IF -.-|"UDP 4789"| VXLAN_REMOTE
+    VXLAN_REMOTE --> BrRemote --> VM_REMOTE
 ```
 
-Each **network** creates:
+## NAT network (default)
+
+The default and most common mode. Each VM receives an IP via DHCP from a
+local dnsmasq instance. Outbound traffic is masqueraded through the host's
+gateway interface. Inbound traffic uses DNAT for port forwarding.
+
+**What gets created:**
 
 | Component | Name | Purpose |
 |-----------|------|---------|
-| Linux bridge | `kbr-<name>` | L2 switch connecting all VMs on this network |
-| DHCP server | dnsmasq on `kbr-<name>` | Assigns IPs to VMs (`.100`–`.199` range) |
-| nftables table | `ip kcore-<name>` | Masquerade (outbound NAT) + DNAT (port forwarding) |
-| VLAN sub-interface | `eno1.<id>` | Only when `vlanId > 0`; upstream tagged trunk |
+| Linux bridge | `kbr-<name>` | L2 switch connecting all VMs |
+| Gateway IP | assigned to bridge | Default route for guests |
+| DHCP server | dnsmasq on `kbr-<name>` | Assigns IPs in `.100`–`.199` range |
+| nftables table | `ip kcore-<name>` | Masquerade + DNAT rules |
+| VLAN sub-interface | `eno1.<id>` | Only when `vlanId > 0` |
 
-Each **VM** creates:
+**Traffic flow:**
+
+```
+Outbound:  VM → TAP → kbr-<net> → nftables masquerade → eno1 → internet
+Inbound:   internet → eno1 → nftables DNAT → kbr-<net> → VM
+VM↔VM:     same bridge = direct L2, different bridge = no path
+```
+
+## Bridge network
+
+The bridge attaches the host's physical NIC (or VLAN sub-interface)
+directly to the Linux bridge. VMs appear on the physical LAN and receive
+IPs from the upstream DHCP server. No local DHCP, no masquerade, no DNAT.
+
+**What gets created:**
 
 | Component | Name | Purpose |
 |-----------|------|---------|
-| TAP interface | `tap-<8-hex-chars>` | Virtual ethernet port for the VM |
-| Cloud Hypervisor | `kcore-vm-<name>` | VM process using `--net tap=...,mac=...` |
-| Cloud-init seed ISO | `/etc/kcore/seeds/<name>.iso` | Hostname, users, DHCP network config |
+| Linux bridge | `kbr-<name>` | L2 switch connecting VMs + physical NIC |
+| Physical NIC enslaved | `eno1` (or `eno1.<vlanId>`) | Attached to bridge as port |
+
+**What is NOT created:**
+
+- No dnsmasq (VMs use upstream DHCP)
+- No nftables rules (no NAT, no DNAT)
+- No gateway IP on bridge (bridge is a transparent L2 device)
+
+**Traffic flow:**
+
+```
+Outbound:  VM → TAP → kbr-<net> → eno1 → upstream network
+Inbound:   upstream → eno1 → kbr-<net> → VM (VM has real LAN IP)
+VM↔VM:     direct L2 through bridge
+```
+
+**Warning:** Enslaving the host's primary NIC to a bridge may disrupt the
+host's own connectivity if not planned carefully (e.g., if the host's IP
+is on that NIC). Use a dedicated NIC or VLAN sub-interface.
+
+## VXLAN overlay network
+
+VXLAN creates a Layer 2 overlay across multiple hosts using UDP
+encapsulation (port 4789). The controller acts as the control plane:
+it auto-assigns a VNI (VXLAN Network Identifier) from the network name,
+manages static IP allocation for VMs, and configures FDB entries for
+peer discovery.
+
+**What gets created:**
+
+| Component | Name | Purpose |
+|-----------|------|---------|
+| Linux bridge | `kbr-<name>` | L2 switch for local VMs |
+| VXLAN interface | `vxlan<VNI>` | UDP tunnel endpoint |
+| FDB entries | per peer node | Static flooding to peer hosts |
+| nftables masquerade | (optional) | Only if outbound NAT enabled |
+| Static IP | via cloud-init | Controller-assigned, no DHCP |
+
+**What is NOT created:**
+
+- No dnsmasq (IPs are static, assigned by controller)
+- No DNAT rules
+
+**Traffic flow:**
+
+```
+VM↔VM (same host):   VM → TAP → kbr-<net> → TAP → VM  (local L2)
+VM↔VM (cross-host):  VM → TAP → kbr-<net> → vxlan<VNI> → UDP 4789 → remote host
+Outbound (optional): VM → TAP → kbr-<net> → nftables masquerade → eno1 → internet
+```
+
+**VNI assignment:** The controller computes a deterministic VNI from the
+network name using a hash function (range 10000–15999). Networks with the
+same name on different nodes get the same VNI, enabling cross-host L2
+connectivity.
+
+**Static IP allocation:** The controller maintains a `next_ip` counter
+per network. When a VM is created on a VXLAN network, the controller
+allocates the next available IP (starting at `.2`) and injects it into
+the VM's cloud-init network config. IPs are currently not reclaimed on
+VM deletion (monotonic allocation).
+
+**Peer discovery:** When the controller pushes config to a node, it
+identifies all other nodes hosting the same VXLAN network (by name) and
+generates FDB entries so each node knows where to send unknown-destination
+frames.
 
 ## Network options (Nix)
 
 Defined in `modules/ch-vm/options.nix` under `ch-vm.vms.networks.<name>`:
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `externalIP` | string | *required* | Public-facing IP used in NAT and DNAT rules |
-| `gatewayIP` | string | *required* | IP assigned to the bridge on the host (default route for guests) |
-| `internalNetmask` | string | `255.255.255.0` | Subnet mask for the bridge network |
-| `allowedTCPPorts` | list of port | `[]` | TCP ports to DNAT from `externalIP` to `gatewayIP` |
-| `allowedUDPPorts` | list of port | `[]` | UDP ports to DNAT from `externalIP` to `gatewayIP` |
-| `vlanId` | int | `0` | 802.1Q VLAN tag; when > 0, bridge sits on a VLAN sub-interface |
+| Option | Type | Default | Applies to | Description |
+|--------|------|---------|-----------|-------------|
+| `externalIP` | string | *required* | all | Public-facing IP (NAT/DNAT for nat; informational for others) |
+| `gatewayIP` | string | *required* | all | IP assigned to the bridge (nat) or subnet base (vxlan) |
+| `internalNetmask` | string | `255.255.255.0` | all | Subnet mask |
+| `networkType` | enum | `"nat"` | all | `"nat"`, `"bridge"`, or `"vxlan"` |
+| `enableOutboundNat` | bool | `true` | vxlan | Whether to add masquerade rules for internet access |
+| `vni` | int | `0` | vxlan | VXLAN Network Identifier (auto-assigned by controller) |
+| `vxlanPeers` | list of string | `[]` | vxlan | IP addresses of peer hosts |
+| `vxlanLocalIp` | string | `""` | vxlan | This host's IP for VXLAN endpoint |
+| `allowedTCPPorts` | list of port | `[]` | nat | TCP ports to DNAT from `externalIP` |
+| `allowedUDPPorts` | list of port | `[]` | nat | UDP ports to DNAT from `externalIP` |
+| `vlanId` | int | `0` | nat, bridge | 802.1Q VLAN tag (0 = no VLAN) |
 
 Global options under `ch-vm.vms`:
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `gatewayInterface` | string | *required* | Host NIC used as upstream (e.g. `eno1`) |
-| `networks` | attrset | `{}` | Named networks, each backed by a bridge with NAT |
+| `networks` | attrset | `{}` | Named networks |
 
 ## VM network options (Nix)
 
@@ -90,7 +207,7 @@ Per-VM options under `ch-vm.vms.virtualMachines.<name>`:
 |--------|------|---------|-------------|
 | `network` | string | `"default"` | Network name (must match a key in `networks`) |
 | `macAddress` | null or string | `null` | Manual MAC; auto-generated from VM name if null |
-| `cloudInitNetworkConfigFile` | null or path | `null` | Custom cloud-init network config (overrides default DHCP) |
+| `cloudInitNetworkConfigFile` | null or path | `null` | Custom cloud-init network config (overrides default) |
 
 ## How VMs get network connectivity
 
@@ -116,8 +233,7 @@ stable across rebuilds.
 
 ### Cloud-init network config
 
-Unless overridden by `cloudInitNetworkConfigFile`, each VM gets a default
-cloud-init network config:
+For **nat** and **bridge** networks (DHCP-based), each VM gets:
 
 ```yaml
 version: 2
@@ -129,9 +245,25 @@ ethernets:
     dhcp4: true
 ```
 
-This matches the auto-generated MAC, renames the interface to `eth0`, and
-enables DHCPv4. The DHCP server on the bridge hands out an IP, default
-route (= `gatewayIP`), and DNS servers (`1.1.1.1`, `8.8.8.8`).
+For **vxlan** networks (static IP), the controller generates:
+
+```yaml
+version: 2
+ethernets:
+  vmnic0:
+    match:
+      macaddress: "52:54:00:xx:xx:xx"
+    set-name: eth0
+    addresses:
+      - 10.240.0.2/24
+    routes:
+      - to: 0.0.0.0/0
+        via: 10.240.0.1
+    nameservers:
+      addresses:
+        - 1.1.1.1
+        - 8.8.8.8
+```
 
 ### Cloud-init user config
 
@@ -143,70 +275,18 @@ auth enabled. When SSH keys are attached to the VM (via `kctl create vm
 ### Boot sequence (systemd ordering)
 
 ```
-kcore-bridge-<net>  →  kcore-dhcp-<net>
+kcore-bridge-<net>  →  kcore-dhcp-<net>  (nat only)
                     →  kcore-tap-<vm>  →  kcore-vm-<vm>
 ```
 
-1. Bridge service creates the bridge, assigns the gateway IP, sets up nftables
-2. DHCP service starts dnsmasq on the bridge
+1. Bridge service creates the bridge and configures it based on network type
+2. DHCP service starts dnsmasq on the bridge (nat only; skipped for bridge/vxlan)
 3. TAP service creates the TAP device and attaches it to the bridge
 4. VM service starts Cloud Hypervisor with `--net tap=<tap>,mac=<mac>`
 
-## Traffic flow
+## DHCP configuration (nat only)
 
-### Outbound (VM → internet)
-
-```
-VM eth0 → TAP → kbr-<net> → nftables masquerade → eno1 (or eno1.<vlan>) → internet
-```
-
-nftables rule:
-```
-table ip kcore-<net> {
-  chain postrouting {
-    type nat hook postrouting priority srcnat;
-    oifname "eno1" masquerade
-  }
-}
-```
-
-When `vlanId > 0`, `oifname` is `eno1.<vlanId>` instead of `eno1`.
-
-### Inbound (internet → VM via DNAT)
-
-Only ports listed in `allowedTCPPorts` / `allowedUDPPorts` are forwarded.
-Traffic arriving on `externalIP:port` is DNAT'd to `gatewayIP:port`:
-
-```
-internet → eno1 → nftables DNAT → kbr-<net> (gatewayIP) → VM
-```
-
-nftables rules (for each port):
-```
-chain prerouting {
-  type nat hook prerouting priority dstnat;
-  ip daddr <externalIP> tcp dport <port> dnat to <gatewayIP>
-}
-chain forward {
-  type filter hook forward priority 0;
-  iifname "eno1" tcp dport <port> accept
-}
-```
-
-### VM ↔ VM (same network)
-
-VMs on the same bridge communicate directly at L2 — no NAT involved.
-The bridge acts as a virtual switch.
-
-### VM ↔ VM (different networks)
-
-VMs on different bridges have no direct path. Traffic would need to be
-routed through the host (if the host has routes) or through an external
-router. By default, there is no inter-network routing configured.
-
-## DHCP configuration
-
-Each network runs its own dnsmasq instance:
+Each NAT network runs its own dnsmasq instance:
 
 | Setting | Value |
 |---------|-------|
@@ -221,34 +301,42 @@ The DHCP range is derived from the first three octets of `gatewayIP`.
 For example, if `gatewayIP = 10.240.0.1`, the range is `10.240.0.100` to
 `10.240.0.199`, supporting up to 100 VMs per network.
 
+Bridge and VXLAN networks do not run dnsmasq.
+
 ## VLAN support (802.1Q)
 
-When a network has `vlanId > 0`, kcore creates a VLAN sub-interface on
-the host's `gatewayInterface` before setting up the bridge:
+When a network (nat or bridge type) has `vlanId > 0`, kcore creates a
+VLAN sub-interface on the host's `gatewayInterface`:
 
 ```
-eno1  ──┬── eno1.100  ── (masquerade/DNAT for network "prod")
-        ├── eno1.200  ── (masquerade/DNAT for network "staging")
+eno1  ──┬── eno1.100  ── (network "prod", VLAN 100)
+        ├── eno1.200  ── (network "staging", VLAN 200)
         └── (untagged traffic for non-VLAN networks)
 ```
 
-This is "Use Case A" VLAN tagging — the host handles the tags, and VMs
-see plain untagged ethernet. The VLAN sub-interface is created and
+VMs see plain untagged ethernet. The VLAN sub-interface is created and
 destroyed with the bridge service.
 
 VLANs are fully optional. When `vlanId = 0` (the default), the bridge
-uses `gatewayInterface` directly — identical to pre-VLAN behavior.
+uses `gatewayInterface` directly.
 
-### VLAN setup sequence
+## Disabling VXLAN
 
-1. `ip link add link eno1 name eno1.100 type vlan id 100`
-2. `ip link set eno1.100 up`
-3. Bridge `kbr-prod` is created normally
-4. Masquerade: `oifname "eno1.100" masquerade`
-5. DNAT forward: `iifname "eno1.100" ... accept`
+Nodes can be installed with `--disable-vxlan` to prevent VXLAN network
+creation. This is useful for simple deployments that only need NAT or
+bridged networking.
 
-On stop, the VLAN sub-interface is cleaned up:
-`ip link delete eno1.100`
+When `--disable-vxlan` is passed during `kctl node install`:
+
+1. The install script creates a `/etc/kcore/disable-vxlan` marker file
+2. On startup, the node-agent reads this marker and reports
+   `disable_vxlan = true` in its registration with the controller
+3. The controller stores this flag in the `nodes` table
+4. Any attempt to create a VXLAN network targeting that node returns
+   `FailedPrecondition: VXLAN is disabled on node '<id>'`
+
+NAT and bridge networks remain fully functional on nodes with VXLAN
+disabled.
 
 ## Safety guards
 
@@ -267,12 +355,17 @@ The controller validates all network parameters before storing them:
 - `externalIP` and `gatewayIP` must be valid IPv4 addresses
 - `internalNetmask` must be a supported CIDR-equivalent mask
 - `vlanId` must be 0–4094
+- `networkType` must be `nat`, `bridge`, or `vxlan` (defaults to `nat`)
+- VXLAN networks cannot be created on nodes with `disable_vxlan = true`
 
 ### Firewall
 
 All `kbr-*` interfaces are added to NixOS `trustedInterfaces`, meaning
 traffic on bridges is not filtered by the NixOS firewall. East-west
 traffic between VMs on the same network is unrestricted.
+
+UDP port 4789 is opened in the firewall when any VXLAN network is
+configured on the node.
 
 ## kctl commands
 
@@ -283,7 +376,9 @@ kctl create network <name> \
   --external-ip <ip> \
   --gateway-ip <ip> \
   [--internal-netmask <mask>] \
+  [--type <nat|bridge|vxlan>] \
   [--vlan-id <id>] \
+  [--no-outbound-nat] \
   [--target-node <node-addr-or-id>]
 ```
 
@@ -293,34 +388,52 @@ kctl create network <name> \
 | `--external-ip` | yes | — | Public IP for NAT/DNAT |
 | `--gateway-ip` | yes | — | Bridge gateway IP (host-side) |
 | `--internal-netmask` | no | `255.255.255.0` | Subnet mask |
+| `--type` | no | `nat` | Network type: `nat`, `bridge`, or `vxlan` |
 | `--vlan-id` | no | `0` | 802.1Q VLAN tag (0 = no VLAN) |
+| `--no-outbound-nat` | no | `false` | Disable masquerade (only meaningful for vxlan) |
 | `--target-node` | no | auto-selected | Node address or ID |
 
-Examples:
+**Examples:**
 
 ```bash
-# Simple network (no VLAN)
+# NAT network (default type)
 kctl create network frontend \
   --external-ip 203.0.113.10 \
   --gateway-ip 10.240.10.1
 
-# Network on VLAN 100
-kctl create network production \
-  --external-ip 198.51.100.5 \
+# Bridge network — VMs get IPs from upstream DHCP
+kctl create network lan \
+  --type bridge \
+  --external-ip 192.168.1.100 \
+  --gateway-ip 192.168.1.1
+
+# Bridge network on VLAN 100
+kctl create network prod-lan \
+  --type bridge \
+  --external-ip 10.100.0.1 \
   --gateway-ip 10.100.0.1 \
-  --vlan-id 100 \
-  --target-node node-1
+  --vlan-id 100
 
-# Network with smaller subnet
-kctl create network mgmt \
+# VXLAN overlay with outbound NAT (default)
+kctl create network cluster \
+  --type vxlan \
   --external-ip 203.0.113.10 \
-  --gateway-ip 10.240.30.1 \
-  --internal-netmask 255.255.255.128
-```
+  --gateway-ip 10.250.0.1
 
-The controller stores the network in the database and pushes a
-`nixos-rebuild` to the target node, which brings up the bridge, DHCP,
-and nftables rules.
+# VXLAN overlay without outbound NAT (isolated)
+kctl create network internal \
+  --type vxlan \
+  --external-ip 203.0.113.10 \
+  --gateway-ip 10.251.0.1 \
+  --no-outbound-nat
+
+# NAT network on VLAN 200
+kctl create network staging \
+  --external-ip 198.51.100.5 \
+  --gateway-ip 10.200.0.1 \
+  --vlan-id 200 \
+  --target-node node-1
+```
 
 ### List networks
 
@@ -331,9 +444,11 @@ kctl get networks [--target-node <node-addr-or-id>]
 Output:
 
 ```
-NAME                  GATEWAY           NETMASK           EXTERNAL_IP      VLAN  NODE
-frontend              10.240.10.1       255.255.255.0     203.0.113.10        -  node-1
-production            10.100.0.1        255.255.255.0     198.51.100.5      100  node-1
+NAME          TYPE    GATEWAY         NETMASK           EXTERNAL_IP      VLAN  NODE
+frontend      nat     10.240.10.1     255.255.255.0     203.0.113.10        -  node-1
+lan           bridge  192.168.1.1     255.255.255.0     192.168.1.100       -  node-1
+cluster       vxlan   10.250.0.1      255.255.255.0     203.0.113.10        -  node-1
+cluster       vxlan   10.250.0.1      255.255.255.0     203.0.113.11        -  node-2
 ```
 
 Without `--target-node`, lists networks from all nodes.
@@ -349,6 +464,20 @@ kctl delete network <name> [--target-node <node-addr-or-id>]
   multiple nodes
 - Cannot delete the `default` network
 
+### Install a node with VXLAN disabled
+
+```bash
+kctl node install \
+  --os-disk /dev/sda \
+  --join-controller 192.168.1.10:9090 \
+  --disable-vxlan \
+  --certs-dir ./certs
+```
+
+The `--disable-vxlan` flag is passed to the install-to-disk script, which
+writes a marker file. The node-agent reads this on startup and reports it
+during registration.
+
 ### Create a VM on a specific network
 
 ```bash
@@ -362,8 +491,11 @@ kctl create vm web-01 \
 ```
 
 The `--network` flag references a network by name. If omitted, the VM
-is placed on the `default` network. Non-default networks must exist on
-the target node before the VM is created.
+is placed on the `default` network.
+
+For VXLAN networks, the controller automatically allocates a static IP
+and generates a cloud-init network config with that IP. The allocated IP
+is visible in `kctl get vm <name>`.
 
 ## The default network
 
@@ -371,7 +503,7 @@ The `default` network is special:
 
 - It is **not** stored in the `networks` database table
 - It comes from the controller's configuration file (`defaultNetwork`)
-- It is always rendered in the generated Nix config
+- It is always rendered in the generated Nix config as type `nat`
 - It cannot be created, deleted, or modified via `kctl create network`
 - Port forwarding is not available on the default network through the API
 
@@ -387,8 +519,8 @@ defaultNetwork:
 
 ## Generated Nix configuration
 
-When the controller pushes config to a node, `nixgen` produces a complete
-NixOS configuration. Here is an example with two networks and two VMs:
+When the controller pushes config to a node, `nixgen` produces a NixOS
+configuration. Here is an example with all three network types:
 
 ```nix
 { pkgs, ... }: {
@@ -402,42 +534,69 @@ NixOS configuration. Here is an example with two networks and two VMs:
       gatewayIP = "10.240.0.1";
     };
 
-    networks."production" = {
-      externalIP = "198.51.100.5";
-      gatewayIP = "10.100.0.1";
+    networks."frontend" = {
+      externalIP = "203.0.113.10";
+      gatewayIP = "10.240.10.1";
       allowedTCPPorts = [ 80 443 ];
-      vlanId = 100;
+    };
+
+    networks."lan" = {
+      externalIP = "192.168.1.100";
+      gatewayIP = "192.168.1.1";
+      networkType = "bridge";
+    };
+
+    networks."cluster" = {
+      externalIP = "203.0.113.10";
+      gatewayIP = "10.250.0.1";
+      networkType = "vxlan";
+      vni = 10234;
+      vxlanPeers = [ "192.168.40.106" ];
+      vxlanLocalIp = "192.168.40.105";
     };
 
     virtualMachines."web-01" = {
-      image = "/var/lib/kcore/images/aaa...-debian.raw";
+      image = "/var/lib/kcore/images/debian.raw";
       imageFormat = "raw";
       cores = 2;
       memorySize = 2048;
-      network = "production";
+      network = "frontend";
       autoStart = true;
-      cloudInitUserConfigFile = pkgs.writeText "web-01-cloud-init.yaml" "#cloud-config
-hostname: web-01
-users:
-  - default
-  - name: kcore
-    gecos: kcore default user
-    groups: [sudo]
-    shell: /bin/bash
-    lock_passwd: true
-    ssh_authorized_keys:
-      - \"ssh-rsa AAAA... user@host\"
-ssh_pwauth: false
-";
     };
 
-    virtualMachines."db-01" = {
-      image = "/var/lib/kcore/images/bbb...-debian.raw";
+    virtualMachines."bare-1" = {
+      image = "/var/lib/kcore/images/debian.raw";
       imageFormat = "raw";
-      cores = 4;
-      memorySize = 4096;
-      network = "default";
+      cores = 2;
+      memorySize = 2048;
+      network = "lan";
       autoStart = true;
+    };
+
+    virtualMachines."app-1" = {
+      image = "/var/lib/kcore/images/debian.raw";
+      imageFormat = "raw";
+      cores = 2;
+      memorySize = 2048;
+      network = "cluster";
+      autoStart = true;
+      cloudInitNetworkConfigFile = pkgs.writeText "app-1-net.yaml" ''
+        version: 2
+        ethernets:
+          vmnic0:
+            match:
+              macaddress: "52:54:00:ab:cd:ef"
+            set-name: eth0
+            addresses:
+              - 10.250.0.2/24
+            routes:
+              - to: 0.0.0.0/0
+                via: 10.250.0.1
+            nameservers:
+              addresses:
+                - 1.1.1.1
+                - 8.8.8.8
+      '';
     };
   };
 }
@@ -446,48 +605,73 @@ ssh_pwauth: false
 This results in the following systemd services on the node:
 
 ```
-kcore-bridge-default.service     # Bridge kbr-default (10.240.0.1/24)
+kcore-bridge-default.service     # NAT bridge (10.240.0.1/24) + masquerade
 kcore-dhcp-default.service       # DHCP on kbr-default
-kcore-bridge-production.service  # VLAN eno1.100 + bridge kbr-production (10.100.0.1/24)
-kcore-dhcp-production.service    # DHCP on kbr-production
-kcore-tap-web-01.service         # TAP → kbr-production
+kcore-bridge-frontend.service    # NAT bridge (10.240.10.1/24) + masquerade + DNAT 80,443
+kcore-dhcp-frontend.service      # DHCP on kbr-frontend
+kcore-bridge-lan.service         # Bridge mode — eno1 enslaved to kbr-lan
+kcore-bridge-cluster.service     # VXLAN: creates vxlan10234, FDB entries, kbr-cluster
+kcore-tap-web-01.service         # TAP → kbr-frontend
 kcore-vm-web-01.service          # Cloud Hypervisor for web-01
-kcore-tap-db-01.service          # TAP → kbr-default
-kcore-vm-db-01.service           # Cloud Hypervisor for db-01
+kcore-tap-bare-1.service         # TAP → kbr-lan
+kcore-vm-bare-1.service          # Cloud Hypervisor for bare-1
+kcore-tap-app-1.service          # TAP → kbr-cluster
+kcore-vm-app-1.service           # Cloud Hypervisor for app-1 (static IP)
 ```
 
 ## Database schema
 
-Networks are stored in the `networks` table:
+### `networks` table
 
 | Column | Type | Default | Description |
 |--------|------|---------|-------------|
 | `name` | TEXT | PK (with node_id) | Network name |
-| `external_ip` | TEXT | — | Public-facing IP for NAT/DNAT |
+| `external_ip` | TEXT | — | Public-facing IP |
 | `gateway_ip` | TEXT | — | Bridge gateway address |
 | `internal_netmask` | TEXT | `255.255.255.0` | Subnet mask |
 | `allowed_tcp_ports` | TEXT | `''` | Comma-separated TCP ports for DNAT |
 | `allowed_udp_ports` | TEXT | `''` | Comma-separated UDP ports for DNAT |
 | `vlan_id` | INTEGER | `0` | 802.1Q VLAN tag |
+| `network_type` | TEXT | `'nat'` | `nat`, `bridge`, or `vxlan` |
+| `enable_outbound_nat` | INTEGER | `1` | Whether masquerade is enabled (0/1) |
+| `vni` | INTEGER | `0` | VXLAN Network Identifier |
+| `next_ip` | INTEGER | `2` | Next IP to allocate for VXLAN VMs |
 | `node_id` | TEXT | PK (with name), FK → nodes | |
 
+### `vms` table (network-related columns)
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `vm_ip` | TEXT | `''` | Controller-assigned static IP (VXLAN only) |
+
+### `nodes` table (network-related columns)
+
+| Column | Type | Default | Description |
+|--------|------|---------|-------------|
+| `disable_vxlan` | INTEGER | `0` | When non-zero, VXLAN networks cannot be created on this node |
+
 Networks are scoped per-node. The same network name on two different
-nodes creates two independent bridges.
+nodes creates two independent bridges — but for VXLAN, same-name
+networks share a VNI, enabling cross-host connectivity.
 
 ## Limitations
 
 - **Single NIC per VM**: Cloud Hypervisor is invoked with one `--net`
   argument. Multi-homed VMs are not supported through the kcore API.
 - **IPv4 only**: All validation and configuration is IPv4. No IPv6 support.
-- **DNAT targets the bridge gateway**: Port forwarding sends traffic to
-  `gatewayIP` (the host bridge address), not to a specific VM IP. For
-  single-VM-per-network setups this works; for multi-VM networks, the
-  guest receiving the traffic depends on host routing.
+- **DNAT targets the bridge gateway**: Port forwarding (nat only) sends
+  traffic to `gatewayIP`, not to a specific VM IP.
 - **No east-west firewall**: VMs on the same bridge can freely
   communicate. There is no micro-segmentation within a network.
-- **Fixed DNS**: All VMs get `1.1.1.1` and `8.8.8.8`. No cluster-internal
-  DNS is configured.
-- **DHCP range**: Fixed `.100`–`.199` range (100 VMs per network).
+- **Fixed DNS**: All VMs get `1.1.1.1` and `8.8.8.8`.
+- **DHCP range**: Fixed `.100`–`.199` range (100 VMs per NAT network).
+- **VXLAN IP allocation is monotonic**: IPs allocated for VXLAN VMs are
+  not reclaimed when VMs are deleted. The `next_ip` counter only
+  increments.
+- **VXLAN peer discovery is push-based**: Peer FDB entries are updated
+  during `push_config_to_node`. Adding a new node to an existing VXLAN
+  network requires the controller to re-push configs to all participating
+  nodes.
 - **Port forwarding not exposed in kctl**: The `--allowed-tcp-ports` and
   `--allowed-udp-ports` fields exist in the proto API but are not yet
   wired to kctl flags.

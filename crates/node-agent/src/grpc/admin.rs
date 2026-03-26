@@ -550,6 +550,9 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
             args.push(req.zfs_dataset_prefix.trim().to_string());
         }
     }
+    if req.disable_vxlan {
+        args.push("--disable-vxlan".to_string());
+    }
     Ok(args)
 }
 
@@ -988,6 +991,7 @@ mod tests {
             lvm_lv_prefix: String::new(),
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
+            disable_vxlan: false,
         };
 
         write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
@@ -1054,6 +1058,7 @@ mod tests {
             lvm_lv_prefix: String::new(),
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
+            disable_vxlan: false,
         };
         write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
         assert!(
@@ -1198,6 +1203,7 @@ mod tests {
                 lvm_lv_prefix: String::new(),
                 zfs_pool_name: String::new(),
                 zfs_dataset_prefix: String::new(),
+                disable_vxlan: false,
             }),
         )
         .await
@@ -1231,6 +1237,7 @@ mod tests {
                 lvm_lv_prefix: String::new(),
                 zfs_pool_name: String::new(),
                 zfs_dataset_prefix: String::new(),
+                disable_vxlan: false,
             }),
         )
         .await
@@ -1257,6 +1264,7 @@ mod tests {
                 lvm_lv_prefix: String::new(),
                 zfs_pool_name: String::new(),
                 zfs_dataset_prefix: String::new(),
+                disable_vxlan: false,
             }),
         )
         .await
@@ -1284,6 +1292,7 @@ mod tests {
             lvm_lv_prefix: String::new(),
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
+            disable_vxlan: false,
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--controller".to_string()));
@@ -1313,6 +1322,7 @@ mod tests {
             lvm_lv_prefix: String::new(),
             zfs_pool_name: "tank0".to_string(),
             zfs_dataset_prefix: "kcore-".to_string(),
+            disable_vxlan: false,
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--run-controller".to_string()));
@@ -1323,6 +1333,33 @@ mod tests {
         assert!(args.contains(&"tank0".to_string()));
         assert!(args.contains(&"--zfs-dataset-prefix".to_string()));
         assert!(args.contains(&"kcore-".to_string()));
+        assert!(!args.contains(&"--disable-vxlan".to_string()));
+    }
+
+    #[test]
+    fn build_install_command_args_disable_vxlan_flag() {
+        let req = proto::InstallToDiskRequest {
+            os_disk: "/dev/sda".to_string(),
+            data_disks: Vec::new(),
+            controller: "192.168.1.10:9090".to_string(),
+            run_controller: false,
+            ca_cert_pem: String::new(),
+            node_cert_pem: String::new(),
+            node_key_pem: String::new(),
+            controller_cert_pem: String::new(),
+            controller_key_pem: String::new(),
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
+            data_disk_mode: String::new(),
+            storage_backend: proto::StorageBackendType::Filesystem as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
+            disable_vxlan: true,
+        };
+        let args = build_install_command_args(&req).expect("args");
+        assert!(args.contains(&"--disable-vxlan".to_string()));
     }
 
     #[test]

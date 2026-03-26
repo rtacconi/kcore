@@ -13,11 +13,12 @@ use super::helpers::{
     controller_state_from_node_state, parse_datetime_to_timestamp, parse_port_list,
     short_vm_id_seed, state_fallback_without_runtime,
 };
+use super::helpers::compute_vni;
 use super::validation::{
     derive_image_format, derive_image_format_from_path, derive_local_image_path,
     normalize_image_format, normalize_storage_backend, storage_backend_to_proto,
     validate_image_path, validate_image_sha256, validate_image_url, validate_ipv4,
-    validate_netmask, validate_network_name, validate_storage_size_bytes,
+    validate_netmask, validate_network_name, validate_network_type, validate_storage_size_bytes,
 };
 
 #[cfg(test)]
@@ -89,12 +90,46 @@ impl ControllerService {
             }
         }
 
+        let node_ip = node.address.split(':').next().unwrap_or("").to_string();
+
+        let mut vxlan_peers: std::collections::HashMap<String, nixgen::VxlanMeta> =
+            std::collections::HashMap::new();
+        for net in &networks {
+            if net.network_type == "vxlan" {
+                let all_with_name = self
+                    .db
+                    .list_networks_by_name(&net.name)
+                    .map_err(|e| Status::internal(format!("listing vxlan peers: {e}")))?;
+                let peers: Vec<String> = all_with_name
+                    .iter()
+                    .filter(|n| n.node_id != node.id)
+                    .filter_map(|n| {
+                        self.db
+                            .get_node(&n.node_id)
+                            .ok()
+                            .flatten()
+                            .map(|nd| nd.address.split(':').next().unwrap_or("").to_string())
+                    })
+                    .filter(|ip| !ip.is_empty())
+                    .collect();
+                vxlan_peers.insert(
+                    net.name.clone(),
+                    nixgen::VxlanMeta {
+                        vni: net.vni,
+                        peers,
+                        local_ip: node_ip.clone(),
+                    },
+                );
+            }
+        }
+
         let nix_config = nixgen::generate_node_config(
             &vms,
             iface,
             &self.default_network,
             &networks,
             &vm_ssh_keys,
+            &vxlan_peers,
         );
 
         let mut admin = self.ensure_admin_client_for_node(node).await?;
@@ -265,6 +300,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             cpu_used: 0,
             memory_used: 0,
             storage_backend,
+            disable_vxlan: req.disable_vxlan,
         };
 
         self.db
@@ -514,6 +550,26 @@ impl controller_proto::controller_server::Controller for ControllerService {
             )));
         }
 
+        let vm_ip = if vm_network != "default" {
+            if let Some(net) = self
+                .db
+                .get_network_for_node(&node.id, &vm_network)
+                .map_err(|e| Status::internal(format!("fetching network: {e}")))?
+            {
+                if net.network_type == "vxlan" {
+                    self.db
+                        .allocate_vm_ip(&vm_network, &node.id)
+                        .map_err(|e| Status::internal(format!("allocating VM IP: {e}")))?
+                } else {
+                    String::new()
+                }
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         let vm = VmRow {
             id: vm_id.clone(),
             name: vm_name,
@@ -532,6 +588,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             cloud_init_user_data: req.cloud_init_user_data,
             storage_backend: requested_storage_backend,
             storage_size_bytes: requested_storage_size_bytes,
+            vm_ip,
         };
 
         self.db
@@ -946,6 +1003,28 @@ impl controller_proto::controller_server::Controller for ControllerService {
             )));
         }
 
+        let network_type = validate_network_type(&req.network_type)?;
+
+        if network_type == "vxlan" && node.disable_vxlan {
+            return Err(Status::failed_precondition(format!(
+                "VXLAN is disabled on node '{}'; cannot create vxlan network",
+                node.id
+            )));
+        }
+
+        let enable_outbound_nat = match network_type.as_str() {
+            "bridge" => false,
+            "nat" => true,
+            "vxlan" => req.enable_outbound_nat,
+            _ => true,
+        };
+
+        let vni = if network_type == "vxlan" {
+            compute_vni(&name)
+        } else {
+            0
+        };
+
         self.db
             .insert_network(&NetworkRow {
                 name: name.clone(),
@@ -966,6 +1045,10 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     .collect::<Vec<_>>()
                     .join(","),
                 vlan_id: req.vlan_id,
+                network_type: network_type.clone(),
+                enable_outbound_nat,
+                vni,
+                next_ip: 2,
             })
             .map_err(|e| Status::internal(format!("storing network: {e}")))?;
 
@@ -1088,6 +1171,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     allowed_tcp_ports: parse_port_list(&n.allowed_tcp_ports),
                     allowed_udp_ports: parse_port_list(&n.allowed_udp_ports),
                     vlan_id: n.vlan_id,
+                    network_type: n.network_type,
+                    enable_outbound_nat: n.enable_outbound_nat,
                 })
                 .collect(),
         }))
@@ -1134,6 +1219,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     last_heartbeat: hb,
                     labels,
                     storage_backend: storage_backend_to_proto(&n.storage_backend),
+                    disable_vxlan: n.disable_vxlan,
                 }
             })
             .collect();
@@ -1164,7 +1250,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         Ok(Response::new(controller_proto::GetNodeResponse {
             node: Some(controller_proto::NodeInfo {
-                node_id: node.id,
+                node_id: node.id.clone(),
                 hostname: node.hostname,
                 address: node.address,
                 capacity: Some(controller_proto::NodeCapacity {
@@ -1179,6 +1265,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 last_heartbeat: hb,
                 labels,
                 storage_backend: storage_backend_to_proto(&node.storage_backend),
+                disable_vxlan: node.disable_vxlan,
             }),
         }))
     }
@@ -1461,6 +1548,7 @@ mod tests {
             cpu_used: 0,
             memory_used: 0,
             storage_backend: "filesystem".to_string(),
+            disable_vxlan: false,
         }
     }
 
@@ -1484,6 +1572,7 @@ mod tests {
             cloud_init_user_data: String::new(),
             storage_backend: "filesystem".to_string(),
             storage_size_bytes: 10 * 1024 * 1024 * 1024,
+            vm_ip: String::new(),
         }
     }
 
@@ -1913,5 +2002,226 @@ mod tests {
             .expect("get node-a")
             .expect("node-a exists");
         assert_eq!(node_a_status.status, "drained");
+    }
+
+    #[tokio::test]
+    async fn create_network_stores_vxlan_type_and_vni() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::create_network(
+            &svc,
+            Request::new(controller_proto::CreateNetworkRequest {
+                name: "overlay-1".to_string(),
+                external_ip: "203.0.113.10".to_string(),
+                gateway_ip: "10.250.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+                target_node: node.id.clone(),
+                allowed_tcp_ports: vec![],
+                allowed_udp_ports: vec![],
+                vlan_id: 0,
+                network_type: "vxlan".to_string(),
+                enable_outbound_nat: true,
+            }),
+        )
+        .await
+        .expect("create vxlan network")
+        .into_inner();
+
+        assert!(resp.success);
+
+        let net = db
+            .get_network_for_node(&node.id, "overlay-1")
+            .expect("get network")
+            .expect("network exists");
+        assert_eq!(net.network_type, "vxlan");
+        assert!(net.vni >= 10000 && net.vni <= 15999, "vni={}", net.vni);
+        assert!(net.enable_outbound_nat);
+        assert_eq!(net.next_ip, 2);
+    }
+
+    #[tokio::test]
+    async fn create_network_rejects_invalid_type() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let err = <ControllerService as controller_proto::controller_server::Controller>::create_network(
+            &svc,
+            Request::new(controller_proto::CreateNetworkRequest {
+                name: "bad-net".to_string(),
+                external_ip: "203.0.113.10".to_string(),
+                gateway_ip: "10.250.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+                target_node: node.id.clone(),
+                allowed_tcp_ports: vec![],
+                allowed_udp_ports: vec![],
+                vlan_id: 0,
+                network_type: "wireguard".to_string(),
+                enable_outbound_nat: false,
+            }),
+        )
+        .await
+        .expect_err("invalid type should be rejected");
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn create_vm_allocates_ip_for_vxlan_network() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        <ControllerService as controller_proto::controller_server::Controller>::create_network(
+            &svc,
+            Request::new(controller_proto::CreateNetworkRequest {
+                name: "vx-net".to_string(),
+                external_ip: "203.0.113.10".to_string(),
+                gateway_ip: "10.250.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+                target_node: node.id.clone(),
+                allowed_tcp_ports: vec![],
+                allowed_udp_ports: vec![],
+                vlan_id: 0,
+                network_type: "vxlan".to_string(),
+                enable_outbound_nat: true,
+            }),
+        )
+        .await
+        .expect("create vxlan network");
+
+        let create_resp = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+            &svc,
+            Request::new(controller_proto::CreateVmRequest {
+                spec: Some(controller_proto::VmSpec {
+                    id: String::new(),
+                    name: "app-1".to_string(),
+                    cpu: 1,
+                    memory_bytes: 512 * 1024 * 1024,
+                    disks: vec![],
+                    nics: vec![controller_proto::Nic {
+                        network: "vx-net".to_string(),
+                        model: String::new(),
+                        mac_address: String::new(),
+                    }],
+                }),
+                image_url: "https://example.com/img.raw".to_string(),
+                image_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
+                cloud_init_user_data: String::new(),
+                target_node: node.id.clone(),
+                ssh_key_names: vec![],
+                storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+                storage_size_bytes: 10 * 1024 * 1024 * 1024,
+                image_path: String::new(),
+                image_format: String::new(),
+            }),
+        )
+        .await
+        .expect("create vm on vxlan network")
+        .into_inner();
+
+        let vm_id = create_resp.vm_id;
+        let vm = db.get_vm(&vm_id).expect("get vm").expect("vm exists");
+        assert_eq!(vm.vm_ip, "10.250.0.2");
+    }
+
+    #[tokio::test]
+    async fn create_network_rejects_vxlan_on_disabled_node() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.disable_vxlan = true;
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let err = <ControllerService as controller_proto::controller_server::Controller>::create_network(
+            &svc,
+            Request::new(controller_proto::CreateNetworkRequest {
+                name: "overlay-blocked".to_string(),
+                external_ip: "203.0.113.10".to_string(),
+                gateway_ip: "10.250.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+                target_node: node.id.clone(),
+                allowed_tcp_ports: vec![],
+                allowed_udp_ports: vec![],
+                vlan_id: 0,
+                network_type: "vxlan".to_string(),
+                enable_outbound_nat: false,
+            }),
+        )
+        .await
+        .expect_err("vxlan should be rejected on disabled node");
+
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("VXLAN is disabled"));
+    }
+
+    #[tokio::test]
+    async fn create_network_allows_nat_on_vxlan_disabled_node() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.disable_vxlan = true;
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::create_network(
+            &svc,
+            Request::new(controller_proto::CreateNetworkRequest {
+                name: "nat-allowed".to_string(),
+                external_ip: "203.0.113.10".to_string(),
+                gateway_ip: "10.250.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+                target_node: node.id.clone(),
+                allowed_tcp_ports: vec![],
+                allowed_udp_ports: vec![],
+                vlan_id: 0,
+                network_type: "nat".to_string(),
+                enable_outbound_nat: false,
+            }),
+        )
+        .await
+        .expect("nat should succeed on vxlan-disabled node")
+        .into_inner();
+
+        assert!(resp.success);
     }
 }

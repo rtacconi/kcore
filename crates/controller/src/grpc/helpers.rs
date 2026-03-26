@@ -65,3 +65,31 @@ pub fn parse_port_list(s: &str) -> Vec<i32> {
     }
     s.split(',').filter_map(|p| p.trim().parse().ok()).collect()
 }
+
+/// Deterministic VNI from network name. Range 10000–15999.
+pub fn compute_vni(name: &str) -> i32 {
+    let mut hash: u32 = 5381;
+    for b in name.bytes() {
+        hash = hash.wrapping_mul(33).wrapping_add(b as u32);
+    }
+    10000 + (hash % 6000) as i32
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_vni_stays_in_range() {
+        for name in ["overlay", "prod", "test-vxlan", "a", "zzzzz"] {
+            let vni = compute_vni(name);
+            assert!(vni >= 10000, "vni {vni} below 10000 for '{name}'");
+            assert!(vni < 16000, "vni {vni} above 15999 for '{name}'");
+        }
+    }
+
+    #[test]
+    fn compute_vni_is_deterministic() {
+        assert_eq!(compute_vni("overlay"), compute_vni("overlay"));
+    }
+}

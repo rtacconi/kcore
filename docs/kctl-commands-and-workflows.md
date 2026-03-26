@@ -155,6 +155,16 @@ kctl --node 10.0.0.21:9091 node install \
   --storage-backend filesystem
 ```
 
+Install with VXLAN disabled (simple networking only):
+
+```bash
+kctl --node 10.0.0.21:9091 node install \
+  --os-disk /dev/sda \
+  --join-controller 10.0.0.10:9090 \
+  --storage-backend filesystem \
+  --disable-vxlan
+```
+
 Apply Nix to a node:
 
 ```bash
@@ -207,7 +217,72 @@ For a full image-centric guide (including large raw upload and wait-for-ssh flow
 
 - `docs/images.md`
 
-## 7) Controller apply
+## 7) Network operations
+
+### Create a network
+
+```bash
+kctl create network <name> \
+  --external-ip <ip> \
+  --gateway-ip <ip> \
+  [--type <nat|bridge|vxlan>] \
+  [--internal-netmask <mask>] \
+  [--vlan-id <id>] \
+  [--no-outbound-nat] \
+  [--target-node <node-addr-or-id>]
+```
+
+| Flag | Required | Default | Description |
+|------|----------|---------|-------------|
+| `<name>` | yes | — | Network name |
+| `--external-ip` | yes | — | Public IP for NAT/DNAT |
+| `--gateway-ip` | yes | — | Bridge gateway IP |
+| `--type` | no | `nat` | Network type: `nat`, `bridge`, or `vxlan` |
+| `--internal-netmask` | no | `255.255.255.0` | Subnet mask |
+| `--vlan-id` | no | `0` | 802.1Q VLAN tag |
+| `--no-outbound-nat` | no | `false` | Disable masquerade (vxlan only) |
+| `--target-node` | no | auto | Target node |
+
+Examples:
+
+```bash
+# NAT network (default)
+kctl create network frontend \
+  --external-ip 203.0.113.10 \
+  --gateway-ip 10.240.10.1
+
+# Bridge network (VMs on physical LAN)
+kctl create network lan \
+  --type bridge \
+  --external-ip 192.168.1.100 \
+  --gateway-ip 192.168.1.1
+
+# VXLAN overlay (cross-host L2)
+kctl create network cluster \
+  --type vxlan \
+  --external-ip 203.0.113.10 \
+  --gateway-ip 10.250.0.1
+
+# VXLAN without outbound NAT
+kctl create network internal \
+  --type vxlan \
+  --external-ip 203.0.113.10 \
+  --gateway-ip 10.251.0.1 \
+  --no-outbound-nat
+```
+
+### List and delete networks
+
+```bash
+kctl get networks [--target-node <node>]
+kctl delete network <name> [--target-node <node>]
+```
+
+The list output includes a `TYPE` column showing the network type.
+
+For detailed networking documentation, see `docs/networking.md`.
+
+## 8) Controller apply
 
 Apply a NixOS configuration to the controller:
 
@@ -229,28 +304,35 @@ Preview only:
 kctl apply -f ./controller-config.nix --dry-run
 ```
 
-## 8) Complete command reference
+## 9) Complete command reference
 
 Top-level commands:
 
 - `kctl create vm ... --storage-backend <filesystem|lvm|zfs> --storage-size-bytes <bytes>`
 - `kctl create cluster ...`
+- `kctl create network <name> --external-ip ... --gateway-ip ... [--type nat|bridge|vxlan] [--no-outbound-nat] [--vlan-id ...] [--target-node ...]`
+- `kctl create ssh-key <name> --public-key "ssh-rsa ..."`
 - `kctl delete vm ...`
+- `kctl delete network <name> [--target-node ...]`
 - `kctl delete image ...`
+- `kctl delete ssh-key <name>`
 - `kctl set vm ... --state <running|stopped>`
 - `kctl start vm ...`
 - `kctl stop vm ...`
 - `kctl get vms [name]`
 - `kctl get nodes [name]`
+- `kctl get networks [--target-node ...]`
+- `kctl get ssh-keys`
 - `kctl node disks`
 - `kctl node nics`
-- `kctl node install --os-disk ... --join-controller ... [--data-disk ...] [--storage-backend filesystem|lvm|zfs]`
+- `kctl node install --os-disk ... --join-controller ... [--data-disk ...] [--storage-backend filesystem|lvm|zfs] [--disable-vxlan]`
 - `kctl node apply-nix -f ... [--no-rebuild]`
 - `kctl pull image <uri>` (legacy/manual path)
 - `kctl apply -f ... [--dry-run]`
 - `kctl version`
 
-## 9) Common operator patterns
+## 10) Common operator patterns
+
 
 New environment:
 
@@ -264,7 +346,7 @@ Day-2 operations:
 2. adjust desired VM running state with `kctl set vm ... --state ...` (or `kctl start/stop vm ...`)
 3. update configs with `kctl node apply-nix ...` or `kctl apply ...`
 
-## 10) Storage backend examples
+## 11) Storage backend examples
 
 Install node with LVM data disk mode:
 

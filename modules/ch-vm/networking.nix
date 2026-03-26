@@ -50,7 +50,7 @@ in {
       })
       cfg.virtualMachines;
 
-    boot.kernelModules = ["tun" "tap" "br_netfilter"];
+    boot.kernelModules = ["tun" "tap" "br_netfilter" "vxlan"];
 
     networking.nftables.enable = true;
 
@@ -73,10 +73,15 @@ in {
 
             path = [pkgs.iproute2 pkgs.nftables];
 
-            script = ''
+            script = let
+              isNat = netCfg.networkType == "nat";
+              isBridge = netCfg.networkType == "bridge";
+              isVxlan = netCfg.networkType == "vxlan";
+            in ''
               bridge="${bridgeName netName}"
               ip link show "$bridge" >/dev/null 2>&1 && exit 0
 
+              ${lib.optionalString isNat ''
               # Safety guard: prevent bridge subnet from hijacking the host LAN.
               ext_ip=$(ip -4 -o addr show dev "${cfg.gatewayInterface}" scope global 2>/dev/null | awk 'NR==1 {print $4}' | cut -d/ -f1)
               if [ -n "$ext_ip" ]; then
@@ -88,6 +93,7 @@ in {
                   exit 1
                 fi
               fi
+              ''}
 
               ${lib.optionalString (netCfg.vlanId > 0) ''
               vlan_if="${cfg.gatewayInterface}.${toString netCfg.vlanId}"
@@ -96,9 +102,18 @@ in {
                 ip link set "$vlan_if" up
               fi
               ''}
+
               ip link add "$bridge" type bridge
-              ip addr add ${netCfg.gatewayIP}/${netmaskToCidr netCfg.internalNetmask} dev "$bridge"
               ip link set "$bridge" up
+
+              ${lib.optionalString isBridge ''
+              # Bridge mode: attach physical NIC (or VLAN sub-if) directly to bridge.
+              # VMs obtain IPs from the upstream DHCP server.
+              ip link set "${upstreamIface netName netCfg}" master "$bridge"
+              ''}
+
+              ${lib.optionalString isNat ''
+              ip addr add ${netCfg.gatewayIP}/${netmaskToCidr netCfg.internalNetmask} dev "$bridge"
 
               nft add table ip kcore-${netName} 2>/dev/null || true
               nft add chain ip kcore-${netName} postrouting '{ type nat hook postrouting priority srcnat; }'
@@ -109,11 +124,39 @@ in {
               nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" tcp dport ${toString port} accept'') netCfg.allowedTCPPorts}
               ${lib.concatMapStringsSep "\n              " (port: ''nft add rule ip kcore-${netName} prerouting ip daddr ${netCfg.externalIP} udp dport ${toString port} dnat to ${netCfg.gatewayIP}
               nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" udp dport ${toString port} accept'') netCfg.allowedUDPPorts}
+              ''}
+
+              ${lib.optionalString isVxlan ''
+              # VXLAN overlay: create VXLAN interface, add FDB entries, attach to bridge.
+              ip addr add ${netCfg.gatewayIP}/${netmaskToCidr netCfg.internalNetmask} dev "$bridge"
+
+              ip link add vxlan${toString netCfg.vni} type vxlan id ${toString netCfg.vni} dstport 4789 local ${netCfg.vxlanLocalIp}
+              ${lib.concatMapStringsSep "\n              " (peer: ''
+              bridge fdb append 00:00:00:00:00:00 dev vxlan${toString netCfg.vni} dst ${peer}
+              '') netCfg.vxlanPeers}
+              ip link set vxlan${toString netCfg.vni} master "$bridge"
+              ip link set vxlan${toString netCfg.vni} up
+
+              ${lib.optionalString netCfg.enableOutboundNat ''
+              nft add table ip kcore-${netName} 2>/dev/null || true
+              nft add chain ip kcore-${netName} postrouting '{ type nat hook postrouting priority srcnat; }'
+              nft add rule ip kcore-${netName} postrouting oifname "${cfg.gatewayInterface}" masquerade
+              ''}
+              ''}
             '';
 
-            preStop = ''
+            preStop = let
+              isVxlan = netCfg.networkType == "vxlan";
+              isBridge = netCfg.networkType == "bridge";
+            in ''
               bridge="${bridgeName netName}"
               nft delete table ip kcore-${netName} 2>/dev/null || true
+              ${lib.optionalString isVxlan ''
+              ip link delete vxlan${toString netCfg.vni} 2>/dev/null || true
+              ''}
+              ${lib.optionalString isBridge ''
+              ip link set "${upstreamIface netName netCfg}" nomaster 2>/dev/null || true
+              ''}
               ip link set "$bridge" down 2>/dev/null || true
               ip link delete "$bridge" 2>/dev/null || true
               ${lib.optionalString (netCfg.vlanId > 0) ''
@@ -139,7 +182,7 @@ in {
             };
           }
       )
-      cfg.networks
+      (lib.filterAttrs (_: netCfg: netCfg.networkType == "nat") cfg.networks)
       // lib.mapAttrs' (
         vmName: vmCfg:
           lib.nameValuePair "kcore-tap-${vmName}" {
@@ -172,6 +215,9 @@ in {
 
     networking.firewall.trustedInterfaces =
       lib.optional (cfg.networks != {}) "kbr-+";
+
+    networking.firewall.allowedUDPPorts =
+      lib.optional (lib.any (n: n.networkType == "vxlan") (lib.attrValues cfg.networks)) 4789;
 
     boot.kernel.sysctl."net.ipv4.ip_forward" = lib.mkDefault 1;
   };

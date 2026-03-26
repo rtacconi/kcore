@@ -207,6 +207,7 @@
                     REBOOT_AFTER_INSTALL="false"
                     CONTROLLER_ENDPOINT=""
                     RUN_CONTROLLER="false"
+                    DISABLE_VXLAN="false"
                     DATA_DISKS=()
 
                     while [[ $# -gt 0 ]]; do
@@ -243,9 +244,13 @@
                           DATA_DISKS+=("''${2:-}")
                           shift 2
                           ;;
+                        --disable-vxlan)
+                          DISABLE_VXLAN="true"
+                          shift
+                          ;;
                         *)
                           echo "Unknown argument: $1"
-                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--controller 192.168.40.135[:9090]] [--run-controller] [--yes --wipe --non-interactive --reboot]"
+                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--controller 192.168.40.135[:9090]] [--run-controller] [--disable-vxlan] [--yes --wipe --non-interactive --reboot]"
                           exit 1
                           ;;
                       esac
@@ -371,6 +376,10 @@
                     fi
                     if [ "''${#DATA_DISKS[@]}" -gt 0 ]; then
                       printf "%s\n" "''${DATA_DISKS[@]}" > /mnt/etc/kcore/data-disks
+                    fi
+
+                    if [ "$DISABLE_VXLAN" = "true" ]; then
+                      touch /mnt/etc/kcore/disable-vxlan
                     fi
 
                     SSH_KEYS=""

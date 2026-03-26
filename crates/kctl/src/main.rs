@@ -182,6 +182,12 @@ enum CreateResource {
         /// 802.1Q VLAN tag (0 = no VLAN)
         #[arg(long = "vlan-id", default_value_t = 0)]
         vlan_id: i32,
+        /// Network type: nat, bridge, or vxlan (default: nat)
+        #[arg(long = "type", default_value = "nat")]
+        network_type: String,
+        /// Disable outbound NAT (for vxlan networks; makes overlay fully isolated)
+        #[arg(long = "no-outbound-nat")]
+        no_outbound_nat: bool,
     },
     /// Create cluster PKI and local context for mTLS
     Cluster {
@@ -355,6 +361,9 @@ enum NodeAction {
         /// Optional ZFS dataset prefix (used when backend is zfs)
         #[arg(long = "zfs-dataset-prefix")]
         zfs_dataset_prefix: Option<String>,
+        /// Disable VXLAN overlay networking on this node
+        #[arg(long = "disable-vxlan")]
+        disable_vxlan: bool,
     },
     /// Apply a NixOS configuration to a node
     ApplyNix {
@@ -526,6 +535,8 @@ async fn main() {
                     internal_netmask,
                     target_node,
                     vlan_id,
+                    network_type,
+                    no_outbound_nat,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
@@ -538,6 +549,8 @@ async fn main() {
                     internal_netmask: internal_netmask.clone(),
                     target_node: target_node.clone(),
                     vlan_id: *vlan_id,
+                    network_type: network_type.clone(),
+                    enable_outbound_nat: !*no_outbound_nat,
                 },
             )
             .await
@@ -683,6 +696,7 @@ async fn main() {
                     lvm_lv_prefix,
                     zfs_pool_name,
                     zfs_dataset_prefix,
+                    disable_vxlan,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
@@ -710,6 +724,7 @@ async fn main() {
                 zfs_pool_name.as_deref(),
                 zfs_dataset_prefix.as_deref(),
                 &certs_dir,
+                *disable_vxlan,
             )
             .await
         }

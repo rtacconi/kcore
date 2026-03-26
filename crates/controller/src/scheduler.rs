@@ -52,6 +52,7 @@ mod tests {
             cpu_used,
             memory_used: mem_used,
             storage_backend: "filesystem".into(),
+            disable_vxlan: false,
         }
     }
 
