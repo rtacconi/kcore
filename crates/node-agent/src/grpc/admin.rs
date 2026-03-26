@@ -316,6 +316,114 @@ fn validate_timeout_ms_or_default(timeout_ms: i32) -> u64 {
     }
 }
 
+#[derive(Debug, Default, Clone)]
+struct VmUnitState {
+    active_state: String,
+    sub_state: String,
+    result: String,
+    n_restarts: u32,
+}
+
+fn vm_unit_name(vm_name: &str) -> String {
+    format!("kcore-vm-{vm_name}.service")
+}
+
+async fn read_vm_unit_state(vm_name: &str) -> Option<VmUnitState> {
+    let unit = vm_unit_name(vm_name);
+    let out = Command::new("systemctl")
+        .args([
+            "show",
+            "--property=ActiveState,SubState,Result,NRestarts",
+            &unit,
+        ])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut state = VmUnitState::default();
+    for line in stdout.lines() {
+        if let Some(v) = line.strip_prefix("ActiveState=") {
+            state.active_state = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("SubState=") {
+            state.sub_state = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("Result=") {
+            state.result = v.trim().to_string();
+        } else if let Some(v) = line.strip_prefix("NRestarts=") {
+            state.n_restarts = v.trim().parse::<u32>().unwrap_or(0);
+        }
+    }
+    Some(state)
+}
+
+async fn vm_recent_failure_hint(vm_name: &str) -> Option<String> {
+    let unit = vm_unit_name(vm_name);
+    let out = Command::new("journalctl")
+        .args(["-u", &unit, "-n", "12", "--no-pager"])
+        .output()
+        .await
+        .ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    stdout
+        .lines()
+        .rev()
+        .find(|line| !line.trim().is_empty())
+        .map(|s| s.trim().to_string())
+}
+
+fn vm_unit_is_fatal(state: &VmUnitState) -> bool {
+    if state.active_state == "failed" {
+        return true;
+    }
+    // auto-restart flapping with repeated exit failures is effectively fatal for readiness.
+    state.result == "exit-code"
+        && (state.active_state == "activating" || state.sub_state == "auto-restart")
+        && state.n_restarts >= 3
+}
+
+fn parse_neigh_line(line: &str) -> Option<(&str, &str)> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 5 {
+        return None;
+    }
+    let ip = fields[0];
+    let lladdr_idx = fields.iter().position(|f| *f == "lladdr")?;
+    if lladdr_idx + 1 >= fields.len() {
+        return None;
+    }
+    let mac = fields[lladdr_idx + 1];
+    Some((ip, mac))
+}
+
+async fn find_vm_ip_in_neigh(vm_mac: &str, network: &str) -> Option<String> {
+    let mut args = vec!["neigh".to_string(), "show".to_string()];
+    let net = network.trim();
+    if !net.is_empty() {
+        args.push("dev".to_string());
+        args.push(format!("kbr-{net}"));
+    }
+    let out = Command::new("ip").args(args).output().await.ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    let mut last_match: Option<String> = None;
+    for line in stdout.lines() {
+        let Some((ip, mac)) = parse_neigh_line(line) else {
+            continue;
+        };
+        if mac.eq_ignore_ascii_case(vm_mac) {
+            last_match = Some(ip.to_string());
+        }
+    }
+    last_match
+}
+
 fn is_private_key(filename: &str) -> bool {
     filename.ends_with(".key")
 }
@@ -637,6 +745,28 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         }
         let port = validate_port_or_default(req.port);
         let timeout_ms = validate_timeout_ms_or_default(req.timeout_ms);
+        if let Some(unit_state) = read_vm_unit_state(vm_name).await {
+            if vm_unit_is_fatal(&unit_state) {
+                let hint = vm_recent_failure_hint(vm_name)
+                    .await
+                    .unwrap_or_else(|| "see journalctl for VM unit details".to_string());
+                return Ok(Response::new(proto::CheckVmSshReadyResponse {
+                    ready: false,
+                    ip: String::new(),
+                    port: port as i32,
+                    reason: format!(
+                        "VM unit {} is failing (active={}, sub={}, result={}, restarts={}): {}",
+                        vm_unit_name(vm_name),
+                        unit_state.active_state,
+                        unit_state.sub_state,
+                        unit_state.result,
+                        unit_state.n_restarts,
+                        hint
+                    ),
+                    fatal: true,
+                }));
+            }
+        }
         let vmm = crate::vmm::Client::new(&self.vm_socket_dir.display().to_string());
         let vm_info = vmm.get_vm_info(vm_name).await;
         let vm_mac = vm_info.as_ref().and_then(vm_primary_mac);
@@ -650,6 +780,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
                     "no dnsmasq lease files found in {}",
                     self.vm_socket_dir.display()
                 ),
+                fatal: false,
             }));
         }
 
@@ -661,11 +792,50 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
             }
         }
         let Some(ip) = vm_ip else {
+            if let Some(mac) = vm_mac.as_deref() {
+                if let Some(ip) = find_vm_ip_in_neigh(mac, &req.network).await {
+                    let connect = tokio::time::timeout(
+                        std::time::Duration::from_millis(timeout_ms),
+                        tokio::net::TcpStream::connect((ip.as_str(), port)),
+                    )
+                    .await;
+                    return match connect {
+                        Ok(Ok(_stream)) => Ok(Response::new(proto::CheckVmSshReadyResponse {
+                            ready: true,
+                            ip,
+                            port: port as i32,
+                            reason: "ssh port reachable (ip discovered via arp/neigh)".to_string(),
+                            fatal: false,
+                        })),
+                        Ok(Err(e)) => Ok(Response::new(proto::CheckVmSshReadyResponse {
+                            ready: false,
+                            ip,
+                            port: port as i32,
+                            reason: format!("arp/neigh found IP but tcp connect failed: {e}"),
+                            fatal: false,
+                        })),
+                        Err(_) => Ok(Response::new(proto::CheckVmSshReadyResponse {
+                            ready: false,
+                            ip,
+                            port: port as i32,
+                            reason: format!(
+                                "arp/neigh found IP but tcp connect timed out after {timeout_ms}ms"
+                            ),
+                            fatal: false,
+                        })),
+                    };
+                }
+            }
             return Ok(Response::new(proto::CheckVmSshReadyResponse {
                 ready: false,
                 ip: String::new(),
                 port: port as i32,
-                reason: "no DHCP lease found for VM yet".to_string(),
+                reason: if vm_mac.is_some() {
+                    "no DHCP lease found for VM yet (and no arp/neigh match for VM MAC)".to_string()
+                } else {
+                    "no DHCP lease found for VM yet (VM MAC unavailable)".to_string()
+                },
+                fatal: false,
             }));
         };
 
@@ -680,18 +850,21 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
                 ip,
                 port: port as i32,
                 reason: "ssh port reachable".to_string(),
+                fatal: false,
             })),
             Ok(Err(e)) => Ok(Response::new(proto::CheckVmSshReadyResponse {
                 ready: false,
                 ip,
                 port: port as i32,
                 reason: format!("tcp connect failed: {e}"),
+                fatal: false,
             })),
             Err(_) => Ok(Response::new(proto::CheckVmSshReadyResponse {
                 ready: false,
                 ip,
                 port: port as i32,
                 reason: format!("tcp connect timed out after {timeout_ms}ms"),
+                fatal: false,
             })),
         }
     }
@@ -1115,5 +1288,40 @@ mod tests {
         assert_eq!(validate_timeout_ms_or_default(0), 1500);
         assert_eq!(validate_timeout_ms_or_default(-1), 1500);
         assert_eq!(validate_timeout_ms_or_default(3000), 3000);
+    }
+
+    #[test]
+    fn parse_neigh_line_extracts_ip_and_mac() {
+        let line = "10.240.0.113 dev kbr-default lladdr 52:54:00:4b:13:d6 REACHABLE";
+        let parsed = parse_neigh_line(line).expect("parse neigh");
+        assert_eq!(parsed.0, "10.240.0.113");
+        assert_eq!(parsed.1, "52:54:00:4b:13:d6");
+    }
+
+    #[test]
+    fn vm_unit_is_fatal_detects_failed_and_flapping() {
+        let failed = VmUnitState {
+            active_state: "failed".to_string(),
+            sub_state: "failed".to_string(),
+            result: "exit-code".to_string(),
+            n_restarts: 1,
+        };
+        assert!(vm_unit_is_fatal(&failed));
+
+        let flapping = VmUnitState {
+            active_state: "activating".to_string(),
+            sub_state: "auto-restart".to_string(),
+            result: "exit-code".to_string(),
+            n_restarts: 5,
+        };
+        assert!(vm_unit_is_fatal(&flapping));
+
+        let transient = VmUnitState {
+            active_state: "activating".to_string(),
+            sub_state: "start".to_string(),
+            result: "success".to_string(),
+            n_restarts: 0,
+        };
+        assert!(!vm_unit_is_fatal(&transient));
     }
 }

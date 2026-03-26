@@ -312,6 +312,7 @@ message CheckVmSshReadyResponse {
   string ip = 2;
   int32 port = 3;
   string reason = 4;
+  bool fatal = 5;
 }
 
 message ListDisksRequest {}

@@ -166,58 +166,60 @@ async fn wait_for_vm_readiness(
         let spec = get.spec.as_ref().context("get_vm missing spec")?;
         let status = get.status.as_ref().context("get_vm missing status")?;
         let current_state = proto::VmState::try_from(status.state).unwrap_or(proto::VmState::Unknown);
-        if current_state != proto::VmState::Running {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            continue;
-        }
-        if mode == WaitMode::RunningOnly {
+
+        if mode == WaitMode::RunningAndSsh {
+            if node_address_cache.is_none() {
+                let mut controller = client::controller_client(info).await?;
+                let nodes = controller
+                    .list_nodes(proto::ListNodesRequest {})
+                    .await?
+                    .into_inner()
+                    .nodes;
+                node_address_cache = node_address_for_vm_node_id(&nodes, &get.node_id);
+            }
+            if let Some(node_address) = node_address_cache.clone() {
+                let node_info = ConnectionInfo {
+                    address: node_address,
+                    insecure: info.insecure,
+                    cert: info.cert.clone(),
+                    key: info.key.clone(),
+                    ca: info.ca.clone(),
+                };
+                let ssh = node::check_vm_ssh_ready(
+                    &node_info,
+                    &spec.name,
+                    None,
+                    ssh_port,
+                    ssh_probe_timeout_ms,
+                )
+                .await?;
+                if ssh.fatal {
+                    bail!(
+                        "VM '{}' reached fatal readiness state: {}",
+                        spec.name,
+                        ssh.reason
+                    );
+                }
+                if current_state == proto::VmState::Running && ssh.ready {
+                    println!("VM '{}' SSH is ready at {}:{}", spec.name, ssh.ip, ssh.port);
+                    return Ok(());
+                }
+                if current_state == proto::VmState::Running && !ssh.reason.is_empty() {
+                    println!(
+                        "waiting for SSH on VM '{}': {}{}",
+                        spec.name,
+                        ssh.reason,
+                        if ssh.ip.is_empty() {
+                            String::new()
+                        } else {
+                            format!(" (candidate ip: {})", ssh.ip)
+                        }
+                    );
+                }
+            }
+        } else if current_state == proto::VmState::Running {
             println!("VM '{}' is running", spec.name);
             return Ok(());
-        }
-
-        if node_address_cache.is_none() {
-            let mut controller = client::controller_client(info).await?;
-            let nodes = controller
-                .list_nodes(proto::ListNodesRequest {})
-                .await?
-                .into_inner()
-                .nodes;
-            node_address_cache = node_address_for_vm_node_id(&nodes, &get.node_id);
-        }
-        let Some(node_address) = node_address_cache.clone() else {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            continue;
-        };
-        let node_info = ConnectionInfo {
-            address: node_address,
-            insecure: info.insecure,
-            cert: info.cert.clone(),
-            key: info.key.clone(),
-            ca: info.ca.clone(),
-        };
-        let ssh = node::check_vm_ssh_ready(
-            &node_info,
-            &spec.name,
-            None,
-            ssh_port,
-            ssh_probe_timeout_ms,
-        )
-        .await?;
-        if ssh.ready {
-            println!("VM '{}' SSH is ready at {}:{}", spec.name, ssh.ip, ssh.port);
-            return Ok(());
-        }
-        if !ssh.reason.is_empty() {
-            println!(
-                "waiting for SSH on VM '{}': {}{}",
-                spec.name,
-                ssh.reason,
-                if ssh.ip.is_empty() {
-                    String::new()
-                } else {
-                    format!(" (candidate ip: {})", ssh.ip)
-                }
-            );
         }
         tokio::time::sleep(Duration::from_secs(2)).await;
     }

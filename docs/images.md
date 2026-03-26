@@ -96,7 +96,9 @@ kcore-kctl create vm app-ssh-01 \
 
 - VM reaches `Running`
 - node-agent resolves VM IP from DHCP lease file(s)
+- if lease is missing, node-agent falls back to ARP/neighbor lookup by VM MAC
 - node-agent probes TCP SSH port from node host
+- if VM service is in a fatal crash/restart state, wait exits early with the VM unit error hint
 
 ## Important constraints
 
