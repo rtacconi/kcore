@@ -159,6 +159,14 @@ kcore-kctl create network backend \
   --target-node 192.168.40.105:9091
 ```
 
+`kcore-kctl create network` options:
+- required positional: `<name>`
+- `--external-ip`: host-side/NAT egress IP for that network
+- `--gateway-ip`: bridge gateway IP handed out to guests as default route
+- `--internal-netmask`: guest subnet mask (default `255.255.255.0`)
+- `--target-node`: optional node selector (node address `host:port` or node ID)
+  - if omitted, controller chooses a ready node
+
 Inspect controller-managed custom networks:
 
 ```bash
@@ -166,16 +174,30 @@ kcore-kctl get networks
 kcore-kctl get networks --target-node 192.168.40.105:9091
 ```
 
+`--target-node` meaning:
+- It scopes the request to one node in the cluster.
+- You can pass either:
+  - node address (for example `192.168.40.105:9091`), or
+  - node ID.
+- If omitted, `kcore-kctl get networks` returns custom networks from all nodes.
+
 Delete a network (only when no VM is attached to it):
 
 ```bash
 kcore-kctl delete network backend --target-node 192.168.40.105:9091
 ```
 
+`kcore-kctl delete network` options:
+- required positional: `<name>`
+- `--target-node`: optional node selector
+  - required when the same network name exists on multiple nodes
+  - optional when the network name is unique cluster-wide
+
 Behavior:
 - `kcore-kctl create network` stores desired network state in controller DB and triggers reconcile on the target node.
 - The node apply path renders and activates matching `ch-vm.vms.networks.<name>` entries.
 - `default` is reserved and is driven by controller `defaultNetwork` config.
+- VM creation validates referenced non-default networks on the selected target node.
 
 ## Alternative: create networks via static Nix apply
 
@@ -213,6 +235,18 @@ Apply it to the node via controller:
 ```bash
 kcore-kctl apply --filename ./networks.nix
 ```
+
+Important: there are two "apply Nix" paths:
+- `kcore-kctl apply --filename ...`
+  - sends the file contents to the **controller admin API**
+  - writes `/etc/nixos/configuration.nix` on the controller
+  - triggers `nixos-rebuild` on the controller
+- `kcore-kctl node apply-nix --filename ... --node <host:port>`
+  - sends the file contents to the **node admin API**
+  - writes the node's configured Nix file path
+  - triggers `nixos-rebuild` on that node
+
+For day-to-day VM/network lifecycle, prefer the programmatic API (`create network`, `create vm`) so controller state remains the source of truth.
 
 After apply succeeds, the node should have:
 - `kcore-bridge-default.service`, `kcore-dhcp-default.service`
