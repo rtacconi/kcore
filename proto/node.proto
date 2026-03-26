@@ -44,6 +44,10 @@ service NodeAdmin {
   // enforces SHA256 integrity before VM activation.
   rpc EnsureImage(EnsureImageRequest) returns (EnsureImageResponse);
 
+  // UploadImage writes a local image blob to the node image cache.
+  // Accepted formats are qcow2 and raw.
+  rpc UploadImage(UploadImageRequest) returns (UploadImageResponse);
+
   // ListDisks returns block devices available on the node.
   rpc ListDisks(ListDisksRequest) returns (ListDisksResponse);
 
@@ -267,6 +271,21 @@ message EnsureImageResponse {
   int64 size_bytes = 2;     // file size after ensure
   bool cached = 3;          // true if existing validated file reused
   bool downloaded = 4;      // true if downloaded in this call
+}
+
+message UploadImageRequest {
+  bytes image_bytes = 1;       // image payload uploaded by client
+  string source_name = 2;      // optional source filename from client
+  string destination_name = 3; // optional desired filename on node
+  string image_format = 4;     // required: qcow2 or raw
+  string image_sha256 = 5;     // optional expected SHA256
+}
+
+message UploadImageResponse {
+  string path = 1;          // resolved local path
+  int64 size_bytes = 2;     // file size after write
+  string image_format = 3;  // qcow2 or raw
+  string image_sha256 = 4;  // computed SHA256
 }
 
 message ListDisksRequest {}

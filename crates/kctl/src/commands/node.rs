@@ -143,6 +143,53 @@ pub async fn apply_nix(info: &ConnectionInfo, file: &str, rebuild: bool) -> Resu
     }
 }
 
+pub async fn upload_image(
+    info: &ConnectionInfo,
+    file: &str,
+    destination_name: Option<&str>,
+    format: Option<&str>,
+    image_sha256: Option<&str>,
+) -> Result<()> {
+    let data = std::fs::read(file).with_context(|| format!("reading {file}"))?;
+    let source_name = Path::new(file)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("image")
+        .to_string();
+    let detected = format
+        .map(|f| f.to_string())
+        .unwrap_or_else(|| infer_image_format_from_name(&source_name));
+    if detected != "raw" && detected != "qcow2" {
+        anyhow::bail!("image format must be raw or qcow2");
+    }
+
+    let mut client = client::node_admin_client(info).await?;
+    let resp = client
+        .upload_image(node_proto::UploadImageRequest {
+            image_bytes: data,
+            source_name,
+            destination_name: destination_name.unwrap_or("").to_string(),
+            image_format: detected,
+            image_sha256: image_sha256.unwrap_or("").to_string(),
+        })
+        .await?
+        .into_inner();
+    println!("Uploaded image to {}", resp.path);
+    println!("  Size:   {}", client::format_bytes(resp.size_bytes));
+    println!("  Format: {}", resp.image_format);
+    println!("  SHA256: {}", resp.image_sha256);
+    Ok(())
+}
+
+fn infer_image_format_from_name(name: &str) -> String {
+    let lower = name.to_ascii_lowercase();
+    if lower.ends_with(".qcow2") || lower.ends_with(".qcow") {
+        "qcow2".to_string()
+    } else {
+        "raw".to_string()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::validate_install_controller_mode;
@@ -175,5 +222,12 @@ mod tests {
     fn validate_install_mode_accepts_run_controller_only() {
         let join = validate_install_controller_mode(None, true).expect("should pass");
         assert!(join.is_empty());
+    }
+
+    #[test]
+    fn infer_image_format_from_name_handles_qcow2_and_raw() {
+        assert_eq!(super::infer_image_format_from_name("debian.qcow2"), "qcow2");
+        assert_eq!(super::infer_image_format_from_name("disk.raw"), "raw");
+        assert_eq!(super::infer_image_format_from_name("disk.img"), "raw");
     }
 }

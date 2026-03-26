@@ -115,6 +115,12 @@ enum CreateResource {
         /// Required SHA256 for --image URL
         #[arg(long = "image-sha256")]
         image_sha256: Option<String>,
+        /// Node-local image path (alternative to --image URL mode)
+        #[arg(long = "image-path")]
+        image_path: Option<String>,
+        /// Image format for --image-path mode (raw or qcow2)
+        #[arg(long = "image-format")]
+        image_format: Option<String>,
         /// Network name
         #[arg(long)]
         network: Option<String>,
@@ -303,6 +309,21 @@ enum NodeAction {
         #[arg(long)]
         no_rebuild: bool,
     },
+    /// Upload a local image file to a node image cache
+    UploadImage {
+        /// Local image filename (qcow2 or raw)
+        #[arg(short = 'f', long = "filename")]
+        file: String,
+        /// Optional destination filename on node
+        #[arg(long)]
+        name: Option<String>,
+        /// Image format (defaults to extension-based inference)
+        #[arg(long, value_enum)]
+        format: Option<NodeImageFormat>,
+        /// Optional expected SHA256 checksum
+        #[arg(long = "image-sha256")]
+        image_sha256: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -312,6 +333,12 @@ enum PullResource {
         /// Image URI (HTTP/HTTPS)
         uri: String,
     },
+}
+
+#[derive(Clone, ValueEnum)]
+enum NodeImageFormat {
+    Raw,
+    Qcow2,
 }
 
 fn resolve_controller(cli: &Cli) -> Result<config::ConnectionInfo, String> {
@@ -344,6 +371,8 @@ async fn main() {
                     memory,
                     image,
                     image_sha256,
+                    image_path,
+                    image_format,
                     network,
                     target_node,
                 },
@@ -358,6 +387,8 @@ async fn main() {
                     memory: memory.clone(),
                     image: image.clone(),
                     image_sha256: image_sha256.clone(),
+                    image_path: image_path.clone(),
+                    image_format: image_format.clone(),
                     network: network.clone(),
                     target_node: target_node.clone(),
                 },
@@ -548,6 +579,23 @@ async fn main() {
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
             commands::node::apply_nix(&info, file, !no_rebuild).await
+        }
+        Command::Node {
+            action:
+                NodeAction::UploadImage {
+                    file,
+                    name,
+                    format,
+                    image_sha256,
+                },
+        } => {
+            let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
+            let fmt = format.as_ref().map(|f| match f {
+                NodeImageFormat::Raw => "raw",
+                NodeImageFormat::Qcow2 => "qcow2",
+            });
+            commands::node::upload_image(&info, file, name.as_deref(), fmt, image_sha256.as_deref())
+                .await
         }
 
         Command::Pull {

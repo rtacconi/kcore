@@ -79,7 +79,9 @@ pub async fn node_admin_client(
     info: &ConnectionInfo,
 ) -> Result<node_proto::node_admin_client::NodeAdminClient<Channel>> {
     let channel = connect(info).await?;
-    Ok(node_proto::node_admin_client::NodeAdminClient::new(channel))
+    Ok(node_proto::node_admin_client::NodeAdminClient::new(channel)
+        .max_encoding_message_size(1024 * 1024 * 1024)
+        .max_decoding_message_size(1024 * 1024 * 1024))
 }
 
 /// Parse a human-readable size string (e.g. "4G", "8192M", "1T") into bytes.

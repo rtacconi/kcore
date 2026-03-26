@@ -61,6 +61,41 @@ pub fn derive_image_format(image_url: &str) -> String {
     }
 }
 
+pub fn validate_image_path(path: &str) -> Result<String, Status> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(Status::invalid_argument("image_path is required"));
+    }
+    if !trimmed.starts_with('/') {
+        return Err(Status::invalid_argument("image_path must be absolute"));
+    }
+    if trimmed.contains("..") {
+        return Err(Status::invalid_argument(
+            "image_path must not contain path traversal",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+pub fn normalize_image_format(format: &str) -> Result<String, Status> {
+    let normalized = format.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "raw" | "qcow2" => Ok(normalized),
+        _ => Err(Status::invalid_argument(
+            "image_format must be 'raw' or 'qcow2'",
+        )),
+    }
+}
+
+pub fn derive_image_format_from_path(path: &str) -> String {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".qcow2") || lower.ends_with(".qcow") {
+        "qcow2".to_string()
+    } else {
+        "raw".to_string()
+    }
+}
+
 pub fn validate_network_name(name: &str) -> Result<String, Status> {
     let trimmed = name.trim();
     if trimmed.is_empty() {

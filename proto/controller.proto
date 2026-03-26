@@ -78,6 +78,8 @@ message CreateVmRequest {
   string image_url = 3;     // HTTPS image URL to download on target node
   string image_sha256 = 4;  // Required SHA256 checksum for image_url
   string cloud_init_user_data = 5;  // Optional cloud-init user-data (YAML); uses default if empty
+  string image_path = 6;    // Optional node-local image path (alternative to image_url/image_sha256)
+  string image_format = 7;  // Required when image_path is used: qcow2 or raw
 }
 
 message CreateVmResponse {

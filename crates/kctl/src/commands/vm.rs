@@ -12,12 +12,22 @@ pub struct CreateArgs {
     pub memory: String,
     pub image: Option<String>,
     pub image_sha256: Option<String>,
+    pub image_path: Option<String>,
+    pub image_format: Option<String>,
     pub network: Option<String>,
     pub target_node: Option<String>,
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
-    let (vm_name, vm_cpu, mem_bytes, nics, manifest_image, manifest_image_sha256) =
+    let (
+        vm_name,
+        vm_cpu,
+        mem_bytes,
+        nics,
+        manifest_image,
+        manifest_image_sha256,
+        manifest_image_format,
+    ) =
         if let Some(path) = &args.filename {
             let manifest = parse_vm_manifest(path)?;
             let n = args.name.unwrap_or(manifest.name);
@@ -28,6 +38,7 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
                 manifest.nics,
                 manifest.image,
                 manifest.image_sha256,
+                manifest.image_format,
             )
         } else {
             let n = args
@@ -45,13 +56,16 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
                     }]
                 })
                 .unwrap_or_default();
-            (n, cpu, mem, nics, None, None)
+            (n, cpu, mem, nics, None, None, None)
         };
     let image = resolve_create_image_source(
         args.image.as_deref(),
         args.image_sha256.as_deref(),
+        args.image_path.as_deref(),
+        args.image_format.as_deref(),
         manifest_image.as_deref(),
         manifest_image_sha256.as_deref(),
+        manifest_image_format.as_deref(),
     )?;
 
     let mut client = client::controller_client(info).await?;
@@ -71,6 +85,8 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         image_url: image.url,
         image_sha256: image.sha256,
         cloud_init_user_data: String::new(),
+        image_path: image.path,
+        image_format: image.format,
     };
 
     let resp = client.create_vm(req).await?.into_inner();
@@ -222,43 +238,131 @@ struct VmManifest {
     nics: Vec<proto::Nic>,
     image: Option<String>,
     image_sha256: Option<String>,
+    image_format: Option<String>,
 }
 
 #[derive(Debug)]
 struct ImageSource {
     url: String,
     sha256: String,
+    path: String,
+    format: String,
 }
 
 fn resolve_create_image_source(
     cli_image: Option<&str>,
     cli_image_sha256: Option<&str>,
+    cli_image_path: Option<&str>,
+    cli_image_format: Option<&str>,
     manifest_image: Option<&str>,
     manifest_image_sha256: Option<&str>,
+    manifest_image_format: Option<&str>,
 ) -> Result<ImageSource> {
-    let url = cli_image.or(manifest_image).unwrap_or("").trim();
-    let sha256 = cli_image_sha256
-        .or(manifest_image_sha256)
+    let selected = select_image_mode(
+        cli_image,
+        cli_image_path,
+        manifest_image,
+        manifest_image_sha256,
+    )?;
+    if selected == "url" {
+        let url = cli_image.or(manifest_image).unwrap_or("").trim();
+        let sha256 = cli_image_sha256
+            .or(manifest_image_sha256)
+            .unwrap_or("")
+            .trim();
+        if !url.starts_with("https://") {
+            bail!("VM image must be an https:// URL, got: {url}");
+        }
+        if sha256.is_empty() {
+            bail!("VM image SHA256 is required. Pass --image-sha256 <hex> or set spec.imageSha256 in the VM manifest.");
+        }
+        if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
+            bail!("VM image SHA256 must be exactly 64 hexadecimal characters.");
+        }
+        return Ok(ImageSource {
+            url: url.to_string(),
+            sha256: sha256.to_ascii_lowercase(),
+            path: String::new(),
+            format: String::new(),
+        });
+    }
+
+    let path = cli_image_path
+        .or_else(|| {
+            manifest_image.and_then(|img| {
+                if img.starts_with("https://") {
+                    None
+                } else {
+                    Some(img)
+                }
+            })
+        })
         .unwrap_or("")
         .trim();
-
-    if url.is_empty() {
-        bail!("VM image URL is required. Pass --image <https-url> or set spec.disks[0].backendHandle in the VM manifest.");
+    if path.is_empty() {
+        bail!("VM image path is required when using local image mode");
     }
-    if !url.starts_with("https://") {
-        bail!("VM image must be an https:// URL, got: {url}");
-    }
-    if sha256.is_empty() {
-        bail!("VM image SHA256 is required. Pass --image-sha256 <hex> or set spec.imageSha256 in the VM manifest.");
-    }
-    if sha256.len() != 64 || !sha256.chars().all(|c| c.is_ascii_hexdigit()) {
-        bail!("VM image SHA256 must be exactly 64 hexadecimal characters.");
-    }
-
+    let format = normalize_image_format(
+        cli_image_format
+            .or(manifest_image_format)
+            .unwrap_or_else(|| infer_format_from_path(path)),
+    )?;
     Ok(ImageSource {
-        url: url.to_string(),
-        sha256: sha256.to_ascii_lowercase(),
+        url: String::new(),
+        sha256: String::new(),
+        path: path.to_string(),
+        format,
     })
+}
+
+fn select_image_mode(
+    cli_image: Option<&str>,
+    cli_image_path: Option<&str>,
+    manifest_image: Option<&str>,
+    manifest_image_sha256: Option<&str>,
+) -> Result<&'static str> {
+    let cli_has_url = cli_image.is_some_and(|s| !s.trim().is_empty());
+    let cli_has_path = cli_image_path.is_some_and(|s| !s.trim().is_empty());
+    if cli_has_url && cli_has_path {
+        bail!("--image and --image-path are mutually exclusive");
+    }
+    if cli_has_url {
+        return Ok("url");
+    }
+    if cli_has_path {
+        return Ok("path");
+    }
+    if let Some(img) = manifest_image {
+        if img.trim().starts_with("https://") {
+            return Ok("url");
+        }
+        if !img.trim().is_empty() {
+            return Ok("path");
+        }
+    }
+    if manifest_image_sha256.is_some_and(|s| !s.trim().is_empty()) {
+        return Ok("url");
+    }
+    bail!(
+        "VM image is required. Use --image <https-url> with --image-sha256, or --image-path <node-local-path>."
+    )
+}
+
+fn infer_format_from_path(path: &str) -> &str {
+    let lower = path.to_ascii_lowercase();
+    if lower.ends_with(".qcow2") || lower.ends_with(".qcow") {
+        "qcow2"
+    } else {
+        "raw"
+    }
+}
+
+fn normalize_image_format(format: &str) -> Result<String> {
+    let normalized = format.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "raw" | "qcow2" => Ok(normalized),
+        _ => bail!("image format must be 'raw' or 'qcow2'"),
+    }
 }
 
 fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
@@ -318,6 +422,21 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
                 })
         })
         .map(|s| s.to_string());
+    let image_format = doc["spec"]["imageFormat"]
+        .as_str()
+        .or_else(|| doc["spec"]["image_format"].as_str())
+        .or_else(|| {
+            doc["spec"]["disks"]
+                .as_sequence()
+                .and_then(|seq| seq.first())
+                .and_then(|disk| {
+                    disk["format"]
+                        .as_str()
+                        .or_else(|| disk["imageFormat"].as_str())
+                        .or_else(|| disk["image_format"].as_str())
+                })
+        })
+        .map(|s| s.to_string());
 
     Ok(VmManifest {
         name,
@@ -326,6 +445,7 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
         nics,
         image,
         image_sha256,
+        image_format,
     })
 }
 
@@ -358,8 +478,11 @@ mod tests {
         let image = resolve_create_image_source(
             Some("https://example.com/cli.img"),
             Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            None,
+            None,
             Some("https://example.com/manifest.img"),
             Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            None,
         )
         .expect("image");
         assert_eq!(image.url, "https://example.com/cli.img");
@@ -374,8 +497,11 @@ mod tests {
         let image = resolve_create_image_source(
             None,
             None,
+            None,
+            None,
             Some("https://example.com/manifest.img"),
             Some("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"),
+            None,
         )
         .expect("image");
         assert_eq!(image.url, "https://example.com/manifest.img");
@@ -383,16 +509,40 @@ mod tests {
 
     #[test]
     fn resolve_create_image_rejects_missing_image() {
-        let err = resolve_create_image_source(None, None, None, None)
+        let err = resolve_create_image_source(None, None, None, None, None, None, None)
             .expect_err("missing image should fail");
-        assert!(err.to_string().contains("VM image URL is required"));
+        assert!(err.to_string().contains("VM image is required"));
     }
 
     #[test]
     fn resolve_create_image_rejects_non_https_and_missing_sha() {
-        let err =
-            resolve_create_image_source(Some("http://example.com/debian.img"), None, None, None)
-                .expect_err("http image should fail");
+        let err = resolve_create_image_source(
+            Some("http://example.com/debian.img"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .expect_err("http image should fail");
         assert!(err.to_string().contains("https:// URL"));
+    }
+
+    #[test]
+    fn resolve_create_image_accepts_local_path_mode() {
+        let image = resolve_create_image_source(
+            None,
+            None,
+            Some("/var/lib/kcore/images/debian.raw"),
+            Some("raw"),
+            None,
+            None,
+            None,
+        )
+        .expect("local image");
+        assert!(image.url.is_empty());
+        assert_eq!(image.path, "/var/lib/kcore/images/debian.raw");
+        assert_eq!(image.format, "raw");
     }
 }

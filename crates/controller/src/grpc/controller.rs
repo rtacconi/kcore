@@ -14,7 +14,8 @@ use super::helpers::{
     short_vm_id_seed, state_fallback_without_runtime,
 };
 use super::validation::{
-    derive_image_format, derive_local_image_path, validate_image_sha256, validate_image_url,
+    derive_image_format, derive_image_format_from_path, derive_local_image_path,
+    normalize_image_format, validate_image_path, validate_image_sha256, validate_image_url,
     validate_ipv4, validate_netmask, validate_network_name,
 };
 
@@ -387,10 +388,34 @@ impl controller_proto::controller_server::Controller for ControllerService {
             )));
         }
 
-        let image_url = validate_image_url(&req.image_url)?;
-        let image_sha256 = validate_image_sha256(&req.image_sha256)?;
-        let image_path = derive_local_image_path(&image_url, &image_sha256);
-        let image_format = derive_image_format(&image_url);
+        let image_url_input = req.image_url.trim();
+        let image_path_input = req.image_path.trim();
+        if image_url_input.is_empty() && image_path_input.is_empty() {
+            return Err(Status::invalid_argument(
+                "either image_url or image_path is required",
+            ));
+        }
+        if !image_url_input.is_empty() && !image_path_input.is_empty() {
+            return Err(Status::invalid_argument(
+                "image_url and image_path are mutually exclusive",
+            ));
+        }
+
+        let (image_url, image_sha256, image_path, image_format) = if !image_url_input.is_empty() {
+            let image_url = validate_image_url(image_url_input)?;
+            let image_sha256 = validate_image_sha256(&req.image_sha256)?;
+            let image_path = derive_local_image_path(&image_url, &image_sha256);
+            let image_format = derive_image_format(&image_url);
+            (image_url, image_sha256, image_path, image_format)
+        } else {
+            let image_path = validate_image_path(image_path_input)?;
+            let image_format = if req.image_format.trim().is_empty() {
+                derive_image_format_from_path(&image_path)
+            } else {
+                normalize_image_format(&req.image_format)?
+            };
+            (String::new(), String::new(), image_path, image_format)
+        };
         let vm_network = spec
             .nics
             .first()

@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod discovery;
 mod grpc;
+mod storage;
 mod vmm;
 
 use clap::Parser;
@@ -44,17 +45,21 @@ async fn main() -> anyhow::Result<()> {
 
     let addr = cfg.listen_addr.parse()?;
     let vm_client = vmm::Client::new(&cfg.vm_socket_dir);
+    let storage = storage::from_config(&cfg.storage).map_err(anyhow::Error::new)?;
 
     let compute_svc = proto::node_compute_server::NodeComputeServer::new(
         grpc::ComputeService::new(vm_client.clone()),
     );
     let info_svc =
         proto::node_info_server::NodeInfoServer::new(grpc::InfoService::new(cfg.node_id.clone()));
-    let admin_svc = proto::node_admin_server::NodeAdminServer::new(grpc::AdminService::new(
-        cfg.nix_config_path.clone(),
-    ));
-    let storage_svc =
-        proto::node_storage_server::NodeStorageServer::new(grpc::StorageService::new());
+    let admin_svc = proto::node_admin_server::NodeAdminServer::new(
+        grpc::AdminService::new_with_storage(cfg.nix_config_path.clone(), storage.clone()),
+    )
+    .max_decoding_message_size(1024 * 1024 * 1024)
+    .max_encoding_message_size(64 * 1024 * 1024);
+    let storage_svc = proto::node_storage_server::NodeStorageServer::new(
+        grpc::StorageService::new_with_storage(storage),
+    );
 
     let mut server = Server::builder();
     if let Some(tls) = cfg.tls.as_ref() {

@@ -10,9 +10,12 @@ use tracing::{error, info};
 use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
 use crate::discovery;
 use crate::proto;
+use crate::storage::{self, StorageAdapter};
+use std::sync::Arc;
 
 pub struct AdminService {
     nix_config_path: PathBuf,
+    storage: Arc<dyn StorageAdapter>,
 }
 
 const BOOTSTRAP_CERT_DIR: &str = "/etc/kcore/certs";
@@ -48,8 +51,13 @@ async fn resolve_nixpkgs_path() -> Option<String> {
 
 impl AdminService {
     pub fn new(nix_config_path: String) -> Self {
+        Self::new_with_storage(nix_config_path, storage::default_adapter())
+    }
+
+    pub fn new_with_storage(nix_config_path: String, storage: Arc<dyn StorageAdapter>) -> Self {
         Self {
             nix_config_path: PathBuf::from(nix_config_path),
+            storage,
         }
     }
 }
@@ -223,111 +231,6 @@ fn validate_destination_path(path: &str) -> Result<PathBuf, Status> {
     Ok(p)
 }
 
-fn sha256sum_file(path: &std::path::Path) -> Result<String, Status> {
-    let out = std::process::Command::new("sha256sum")
-        .arg(path)
-        .output()
-        .map_err(|e| Status::internal(format!("running sha256sum on {}: {e}", path.display())))?;
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        return Err(Status::internal(format!(
-            "sha256sum failed for {}: {}",
-            path.display(),
-            stderr.trim()
-        )));
-    }
-    let stdout = String::from_utf8_lossy(&out.stdout);
-    let digest = stdout
-        .split_whitespace()
-        .next()
-        .ok_or_else(|| Status::internal("invalid sha256sum output"))?;
-    Ok(digest.to_ascii_lowercase())
-}
-
-fn ensure_image_cached(
-    req: proto::EnsureImageRequest,
-) -> Result<proto::EnsureImageResponse, Status> {
-    let image_url = validate_image_url(&req.image_url)?;
-    let image_sha256 = validate_image_sha256(&req.image_sha256)?;
-    let destination = validate_destination_path(&req.destination_path)?;
-
-    if let Some(parent) = destination.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| Status::internal(format!("creating {}: {e}", parent.display())))?;
-    }
-
-    if destination.exists() {
-        let existing_sha = sha256sum_file(&destination)?;
-        if existing_sha == image_sha256 {
-            let size_bytes = std::fs::metadata(&destination)
-                .map_err(|e| Status::internal(format!("stat {}: {e}", destination.display())))?
-                .len() as i64;
-            return Ok(proto::EnsureImageResponse {
-                path: destination.display().to_string(),
-                size_bytes,
-                cached: true,
-                downloaded: false,
-            });
-        }
-        std::fs::remove_file(&destination)
-            .map_err(|e| Status::internal(format!("removing {}: {e}", destination.display())))?;
-    }
-
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|e| Status::internal(format!("system clock before UNIX_EPOCH: {e}")))?
-        .as_millis();
-    let tmp_path = PathBuf::from(format!("{}.part-{timestamp}", destination.display()));
-
-    let status = std::process::Command::new("curl")
-        .args([
-            "--fail",
-            "--location",
-            "--silent",
-            "--show-error",
-            "--output",
-            tmp_path.to_string_lossy().as_ref(),
-            image_url.as_str(),
-        ])
-        .status()
-        .map_err(|e| Status::internal(format!("starting curl: {e}")))?;
-    if !status.success() {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(Status::internal(format!(
-            "curl download failed for {}",
-            image_url
-        )));
-    }
-
-    let downloaded_sha = sha256sum_file(&tmp_path)?;
-    if downloaded_sha != image_sha256 {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(Status::failed_precondition(format!(
-            "sha256 mismatch for {} (expected {}, got {})",
-            image_url, image_sha256, downloaded_sha
-        )));
-    }
-
-    std::fs::rename(&tmp_path, &destination).map_err(|e| {
-        Status::internal(format!(
-            "moving {} to {}: {e}",
-            tmp_path.display(),
-            destination.display()
-        ))
-    })?;
-
-    let size_bytes = std::fs::metadata(&destination)
-        .map_err(|e| Status::internal(format!("stat {}: {e}", destination.display())))?
-        .len() as i64;
-
-    Ok(proto::EnsureImageResponse {
-        path: destination.display().to_string(),
-        size_bytes,
-        cached: false,
-        downloaded: true,
-    })
-}
-
 fn is_private_key(filename: &str) -> bool {
     filename.ends_with(".key")
 }
@@ -497,9 +400,41 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
     ) -> Result<Response<proto::EnsureImageResponse>, Status> {
         auth::require_peer(&request, &[CN_CONTROLLER])?;
         let req = request.into_inner();
-        let resp = tokio::task::spawn_blocking(move || ensure_image_cached(req))
-            .await
-            .map_err(|e| Status::internal(format!("task join: {e}")))??;
+        let storage = Arc::clone(&self.storage);
+        let resp = tokio::task::spawn_blocking(move || {
+            storage
+                .ensure_image(storage::EnsureImageRequest {
+                    image_url: req.image_url,
+                    image_sha256: req.image_sha256,
+                    destination_path: req.destination_path,
+                })
+                .map(storage::ensure_image_response)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join: {e}")))??;
+        Ok(Response::new(resp))
+    }
+
+    async fn upload_image(
+        &self,
+        request: Request<proto::UploadImageRequest>,
+    ) -> Result<Response<proto::UploadImageResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let storage = Arc::clone(&self.storage);
+        let resp = tokio::task::spawn_blocking(move || {
+            storage
+                .upload_image(storage::UploadImageRequest {
+                    image_bytes: req.image_bytes,
+                    source_name: req.source_name,
+                    destination_name: req.destination_name,
+                    image_format: req.image_format,
+                    image_sha256: req.image_sha256,
+                })
+                .map(storage::upload_image_response)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join: {e}")))??;
         Ok(Response::new(resp))
     }
 
