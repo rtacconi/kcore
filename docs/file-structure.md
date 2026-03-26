@@ -170,91 +170,108 @@ This list focuses on files that implement the end-to-end storage backend flow (f
 
 ## Full File Catalog
 
-This is a complete source/docs catalog (excluding build artifacts like `target/` and `result-*` symlinks).
+This is a complete source/docs catalog (excluding build artifacts like `target/` and `result-*` symlinks).  
+For each file: purpose + where it is used in runtime/operator flows.
 
-- `Cargo.toml` — workspace manifest defining member crates and shared settings.
-- `Cargo.lock` — locked Rust dependency graph for reproducible builds.
-- `flake.nix` — Nix flake entrypoint for packages, checks, dev shell, and ISO builds.
-- `flake.lock` — pinned Nix inputs for reproducible flake resolution.
-- `Makefile` — convenience targets for common build/test/lint workflows.
-- `VERSION` — repository version marker.
-- `README.md` — project overview, quick-start, and operator workflow summary.
-- `.gitignore` — ignored files and directories for git.
+### Workspace Root
 
-- `proto/controller.proto` — controller public gRPC API.
-- `proto/node.proto` — node-agent public gRPC API.
+- `Cargo.toml` — workspace manifest; defines member crates and shared dependency policy.
+- `Cargo.lock` — exact dependency resolution used by CI and local reproducible builds.
+- `flake.nix` — Nix build graph (packages/checks/dev shell/ISO outputs); canonical reproducible entrypoint.
+- `flake.lock` — pinned flake input revisions to keep builds deterministic across machines.
+- `Makefile` — convenience wrappers for `cargo`/Nix workflows (build, test, lint, ISO automation).
+- `VERSION` — version marker consumed by release/build flows.
+- `README.md` — operator-facing quickstart and command workflows; first-stop onboarding doc.
+- `.gitignore` — excludes build artifacts, result symlinks, and local transient files from VCS.
 
-- `crates/controller/Cargo.toml` — controller crate manifest and dependencies.
-- `crates/controller/build.rs` — protobuf code generation for controller build.
-- `crates/controller/src/main.rs` — controller process startup and gRPC server wiring.
-- `crates/controller/src/config.rs` — controller runtime config schema and validation.
-- `crates/controller/src/db.rs` — SQLite schema, migrations, and persistence helpers.
-- `crates/controller/src/scheduler.rs` — scheduling and capacity-based node selection logic.
-- `crates/controller/src/nixgen.rs` — generated node Nix config renderer from DB state.
-- `crates/controller/src/node_client.rs` — outbound controller-side clients to node-agent endpoints.
-- `crates/controller/src/auth.rs` — controller RPC peer identity authorization checks.
-- `crates/controller/src/grpc/mod.rs` — grpc module re-exports.
-- `crates/controller/src/grpc/helpers.rs` — grpc helper utilities and transformations.
-- `crates/controller/src/grpc/validation.rs` — request validation and normalization helpers.
-- `crates/controller/src/grpc/controller.rs` — main controller service RPC implementation.
-- `crates/controller/src/grpc/admin.rs` — controller admin RPC implementation.
+### API Contracts
 
-- `crates/node-agent/Cargo.toml` — node-agent crate manifest and dependencies.
-- `crates/node-agent/build.rs` — protobuf code generation for node-agent build.
-- `crates/node-agent/src/main.rs` — node-agent process startup and service registration.
-- `crates/node-agent/src/config.rs` — node-agent runtime config schema and validation.
-- `crates/node-agent/src/auth.rs` — node-agent RPC peer identity authorization checks.
-- `crates/node-agent/src/grpc/mod.rs` — grpc module re-exports.
-- `crates/node-agent/src/grpc/admin.rs` — admin endpoints (apply nix, install, upload, readiness checks).
-- `crates/node-agent/src/grpc/compute.rs` — compute endpoints for VM/image runtime operations.
-- `crates/node-agent/src/grpc/info.rs` — node info endpoint implementation.
-- `crates/node-agent/src/grpc/storage.rs` — storage service RPC implementation facade.
-- `crates/node-agent/src/discovery/mod.rs` — discovery module re-exports.
-- `crates/node-agent/src/discovery/disks.rs` — disk discovery helpers.
-- `crates/node-agent/src/discovery/nics.rs` — network interface discovery helpers.
-- `crates/node-agent/src/storage/mod.rs` — storage adapter abstraction and FS/LVM/ZFS backends.
-- `crates/node-agent/src/vmm/mod.rs` — VMM module re-exports.
-- `crates/node-agent/src/vmm/client.rs` — cloud-hypervisor socket client.
-- `crates/node-agent/src/vmm/types.rs` — deserialization types for VMM API payloads.
+- `proto/controller.proto` — control-plane API (`RegisterNode`, `CreateVm`, networks, SSH keys, drain); source-of-truth contract for controller behavior.
+- `proto/node.proto` — node API (`NodeAdmin`, `NodeCompute`, `NodeStorage`, `NodeInfo`); defines install/upload/readiness/storage RPC contracts.
 
-- `crates/kctl/Cargo.toml` — kctl crate manifest and dependencies.
-- `crates/kctl/build.rs` — protobuf code generation for kctl client stubs.
-- `crates/kctl/src/main.rs` — CLI entrypoint, argument model, and dispatch.
-- `crates/kctl/src/config.rs` — context/certificate config resolution.
-- `crates/kctl/src/client.rs` — gRPC client/channel construction helpers.
-- `crates/kctl/src/output.rs` — table/detail output formatting helpers.
-- `crates/kctl/src/pki.rs` — PKI generation and loading helpers.
-- `crates/kctl/src/commands/mod.rs` — command module re-exports.
-- `crates/kctl/src/commands/apply.rs` — controller apply command logic.
-- `crates/kctl/src/commands/cluster.rs` — cluster bootstrap command logic.
-- `crates/kctl/src/commands/image.rs` — image management command logic.
-- `crates/kctl/src/commands/network.rs` — network create/list/delete command logic.
-- `crates/kctl/src/commands/node.rs` — node inspection/install/apply/upload command logic.
-- `crates/kctl/src/commands/ssh_key.rs` — SSH key management command logic.
-- `crates/kctl/src/commands/vm.rs` — VM lifecycle/create/wait command logic.
+### Controller Crate (`crates/controller`)
 
-- `modules/ch-vm/default.nix` — module entrypoint importing VM submodules.
-- `modules/ch-vm/options.nix` — user-facing options for VM/network/storage settings.
-- `modules/ch-vm/networking.nix` — bridge, tap, DHCP, and NAT orchestration.
-- `modules/ch-vm/vm-service.nix` — per-VM systemd service generation and CH invocation.
-- `modules/ch-vm/cloud-init.nix` — cloud-init seed ISO generation.
-- `modules/ch-vm/helpers.nix` — helper utilities for deterministic naming/mac.
-- `modules/kcore-branding.nix` — OS branding and identity settings.
-- `modules/kcore-minimal.nix` — minimal baseline system module.
+- `crates/controller/Cargo.toml` — controller crate deps and compile features.
+- `crates/controller/build.rs` — protobuf build step generating Rust stubs for controller and node client usage.
+- `crates/controller/src/main.rs` — process bootstrap: config loading, TLS setup, gRPC service registration, shutdown handling.
+- `crates/controller/src/config.rs` — YAML schema/defaults/validation for listen address, DB path, TLS material, network defaults.
+- `crates/controller/src/db.rs` — SQLite schema + migrations + typed row mapping; central persistence layer for nodes/VMs/networks/keys.
+- `crates/controller/src/scheduler.rs` — placement heuristics (`select_node*`) used by VM creation/drain.
+- `crates/controller/src/nixgen.rs` — renders node Nix config from DB state (VMs/networks/storage/cloud-init/SSH key injection).
+- `crates/controller/src/node_client.rs` — connection pool and typed gRPC clients to node-agent admin/compute services.
+- `crates/controller/src/auth.rs` — peer identity checks (CN-based authorization gates on controller RPCs).
+- `crates/controller/src/grpc/mod.rs` — module aggregator for grpc service implementations.
+- `crates/controller/src/grpc/helpers.rs` — shared conversion/time/parsing helpers used by grpc handlers.
+- `crates/controller/src/grpc/validation.rs` — input validation and normalization (image, network, storage); enforces API invariants before DB writes.
+- `crates/controller/src/grpc/controller.rs` — main controller business logic for node register/heartbeat, VM lifecycle, network CRUD, scheduling, and push/rollback behavior.
+- `crates/controller/src/grpc/admin.rs` — controller-side admin API (apply nix on controller host).
 
-- `tests/vm-module.nix` — integration-style NixOS VM module test.
-- `scripts/build-iso-remote.sh` — remote ISO build helper script.
+### Node-Agent Crate (`crates/node-agent`)
 
-- `docs/Architecture.md` — architecture overview and diagrams.
-- `docs/networking.md` — networking behavior and operator examples.
-- `docs/migrations.md` — migration/upgrade notes.
-- `docs/heartbeat.md` — heartbeat model and timing semantics.
-- `docs/scheduler.md` — scheduling model and decision criteria.
-- `docs/security.md` — authn/authz and security model details.
-- `docs/kctl-commands-and-workflows.md` — CLI command reference and workflows.
-- `docs/images.md` — image upload/create/wait guidance.
-- `docs/node-install-bootstrap-flow.md` — node install and bootstrap sequence.
-- `docs/nix-vm-config-generation.md` — Nix generation internals and flow.
-- `docs/mtls-bootstrap-and-auth.md` — mTLS bootstrap and certificate usage.
-- `docs/formal-methods-and-verification.md` — verification notes and future work.
-- `docs/file-structure.md` — file map and implementation catalog (this document).
+- `crates/node-agent/Cargo.toml` — node-agent crate deps and compile features.
+- `crates/node-agent/build.rs` — protobuf build step generating node server stubs.
+- `crates/node-agent/src/main.rs` — node-agent bootstrap: config/auth/TLS/server wiring and storage adapter injection.
+- `crates/node-agent/src/config.rs` — node runtime config model, including storage backend settings and backend-specific required fields.
+- `crates/node-agent/src/auth.rs` — RPC authorization checks for kctl/controller peer identities.
+- `crates/node-agent/src/grpc/mod.rs` — module aggregator for grpc services.
+- `crates/node-agent/src/grpc/admin.rs` — admin control surface: apply nix, install-to-disk orchestration, image upload stream handling, VM SSH readiness probes.
+- `crates/node-agent/src/grpc/compute.rs` — runtime VM/image operations exposed to controller (list/get/set/delete/pull image flows).
+- `crates/node-agent/src/grpc/info.rs` — node telemetry endpoint (capacity/usage + backend surface for discovery/placement).
+- `crates/node-agent/src/grpc/storage.rs` — NodeStorage RPC facade mapping volume calls to storage adapter implementation.
+- `crates/node-agent/src/discovery/mod.rs` — discovery module exports.
+- `crates/node-agent/src/discovery/disks.rs` — host block-device discovery used by install workflows.
+- `crates/node-agent/src/discovery/nics.rs` — NIC/address discovery used by operator inspection.
+- `crates/node-agent/src/storage/mod.rs` — storage abstraction + FS/LVM/ZFS adapters; image ensure/upload and volume create/delete logic.
+- `crates/node-agent/src/vmm/mod.rs` — VMM module exports.
+- `crates/node-agent/src/vmm/client.rs` — cloud-hypervisor socket API client for VM status/config introspection.
+- `crates/node-agent/src/vmm/types.rs` — typed deserialization structs for cloud-hypervisor payloads.
+
+### kctl Crate (`crates/kctl`)
+
+- `crates/kctl/Cargo.toml` — CLI crate dependencies and features.
+- `crates/kctl/build.rs` — protobuf client stub generation for controller/node services.
+- `crates/kctl/src/main.rs` — command model and top-level dispatch; maps CLI flags into command handlers.
+- `crates/kctl/src/config.rs` — context resolution and cert path lookup (`~/.kcore/config` and context directories).
+- `crates/kctl/src/client.rs` — gRPC channel/client construction with TLS/insecure modes and message size tuning.
+- `crates/kctl/src/output.rs` — standardized tabular/detail rendering for nodes/VMs/disks/NICs.
+- `crates/kctl/src/pki.rs` — certificate generation/loading utilities for bootstrap and install flows.
+- `crates/kctl/src/commands/mod.rs` — command module exports.
+- `crates/kctl/src/commands/apply.rs` — `kctl apply` controller admin workflow implementation.
+- `crates/kctl/src/commands/cluster.rs` — cluster bootstrap workflow (PKI + context generation).
+- `crates/kctl/src/commands/image.rs` — image pull/delete node operations.
+- `crates/kctl/src/commands/network.rs` — controller-backed network create/list/delete operations.
+- `crates/kctl/src/commands/node.rs` — node commands (disks/nics/install/apply/upload/readiness helpers).
+- `crates/kctl/src/commands/ssh_key.rs` — SSH key lifecycle commands against controller API.
+- `crates/kctl/src/commands/vm.rs` — VM create/update/get/list/set/delete + wait/SSH readiness polling logic.
+
+### Nix Modules
+
+- `modules/ch-vm/default.nix` — entrypoint importing VM/network/cloud-init/service submodules.
+- `modules/ch-vm/options.nix` — typed option schema for VM/network/storage and module-level settings.
+- `modules/ch-vm/networking.nix` — realizes bridges, TAPs, firewall/NAT, and per-network forwarding.
+- `modules/ch-vm/vm-service.nix` — generates systemd unit definitions and cloud-hypervisor launch arguments per VM.
+- `modules/ch-vm/cloud-init.nix` — creates cloud-init seed artifacts per VM from module options.
+- `modules/ch-vm/helpers.nix` — helper functions for deterministic naming and MAC generation.
+- `modules/kcore-branding.nix` — system identity/branding (MOTD/banner/labels).
+- `modules/kcore-minimal.nix` — minimal base profile used for lean appliance-like systems.
+
+### Tests & Scripts
+
+- `tests/vm-module.nix` — integration NixOS test asserting module wiring and generated runtime units/networking.
+- `scripts/build-iso-remote.sh` — helper script to build the ISO on a remote host.
+
+### Documentation
+
+- `docs/Architecture.md` — system architecture and high-level component interactions.
+- `docs/networking.md` — network model, topology examples, and operator workflows.
+- `docs/migrations.md` — migration/versioning guidance for schema/API changes.
+- `docs/heartbeat.md` — heartbeat semantics and node liveness behavior.
+- `docs/scheduler.md` — scheduler policy, inputs, and expected placement behavior.
+- `docs/security.md` — mTLS/CN auth model, trust boundaries, and security notes.
+- `docs/kctl-commands-and-workflows.md` — command-by-command operator reference.
+- `docs/images.md` — image upload/download/create/wait flows and troubleshooting.
+- `docs/node-install-bootstrap-flow.md` — install bootstrap sequence and cert handoff process.
+- `docs/nix-vm-config-generation.md` — how controller-generated Nix config is built and applied.
+- `docs/mtls-bootstrap-and-auth.md` — certificate bootstrap and auth flow details.
+- `docs/formal-methods-and-verification.md` — verification concepts and future hardening notes.
+- `docs/file-structure.md` — this catalog + architecture-oriented file map.
