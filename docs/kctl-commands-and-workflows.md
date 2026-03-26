@@ -72,6 +72,11 @@ kctl create vm web-01 \
   --ssh-port 22
 ```
 
+When using `--wait-for-ssh`, failures are surfaced early:
+
+- VM unit crash loops/failures are treated as fatal (wait stops immediately)
+- if DHCP lease files are empty, node-agent also attempts ARP/neighbor IP fallback
+
 Create from YAML:
 
 ```bash

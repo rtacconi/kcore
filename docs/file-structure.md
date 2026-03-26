@@ -41,14 +41,16 @@ kcore-rust/
 │   │   ├── build.rs                 tonic-build: compiles node server protos
 │   │   └── src/
 │   │       ├── main.rs              CLI entry: loads config, sets up TLS, starts gRPC server
-│   │       ├── config.rs            YAML config model (node ID, listen addr, TLS, socket/nix paths)
+│   │       ├── config.rs            YAML config model (node ID, listen addr, TLS, socket/nix/storage paths)
 │   │       ├── auth.rs              CN-based authorization rules for node RPCs
 │   │       ├── grpc/
 │   │       │   ├── mod.rs           re-exports gRPC service modules
-│   │       │   ├── admin.rs         NodeAdmin: apply nix config, install-to-disk, bootstrap certs
+│   │       │   ├── admin.rs         NodeAdmin: apply nix config, install-to-disk, image upload (unary+stream), VM SSH readiness checks
 │   │       │   ├── compute.rs       NodeCompute: VM status queries via cloud-hypervisor sockets
 │   │       │   ├── info.rs          NodeInfo: returns hostname, CPU count, memory
 │   │       │   └── storage.rs       NodeStorage: volume/image RPCs (stub, declarative guidance)
+│   │       ├── storage/
+│   │       │   └── mod.rs           storage adapter interface + filesystem/lvm/zfs implementations
 │   │       ├── discovery/
 │   │       │   ├── mod.rs           re-exports discovery modules
 │   │       │   ├── disks.rs         enumerates block devices from /sys/block for install flow
@@ -69,8 +71,8 @@ kcore-rust/
 │           ├── pki.rs               cluster PKI generation (CA, controller, node, kctl certs)
 │           └── commands/
 │               ├── mod.rs           re-exports command modules
-│               ├── vm.rs            VM commands: create (flags/YAML), delete, get, list, set state
-│               ├── node.rs          node commands: disks, nics, install, apply-nix, list, get
+│               ├── vm.rs            VM commands: create (flags/YAML), delete, get, list, set state, wait/wait-for-ssh readiness
+│               ├── node.rs          node commands: disks, nics, install, apply-nix, upload-image, list, get
 │               ├── cluster.rs       cluster commands: create cluster (PKI + context setup)
 │               ├── apply.rs         apply commands: push nix config to controller
 │               └── image.rs         image commands: pull/delete images on nodes
@@ -96,6 +98,7 @@ kcore-rust/
     ├── Architecture.md              high-level flow diagrams (Mermaid) and component responsibilities
     ├── security.md                  PKI, CN authorization, input validation, async safety, auditing
     ├── kctl-commands-and-workflows.md   full kctl command reference and operator patterns
+    ├── images.md                    VM image workflows: upload, create by path/URL, wait-for-ssh troubleshooting
     ├── node-install-bootstrap-flow.md   node install procedure with cert handoff flowchart
     ├── nix-vm-config-generation.md      when/how Nix VM configs are generated and applied
     ├── mtls-bootstrap-and-auth.md       certificate creation, node bootstrap, runtime mTLS
@@ -116,7 +119,7 @@ kcore-rust/
 ### Protobuf contracts (`proto/`)
 
 - `controller.proto` defines the API that `kctl` calls to manage the cluster (VM CRUD, node listing, heartbeats).
-- `node.proto` defines the API that each node-agent exposes (admin ops, compute status, storage, system info).
+- `node.proto` defines the API that each node-agent exposes (admin ops including streaming image upload and VM SSH readiness checks, compute status, storage, system info).
 
 ### NixOS modules (`modules/`)
 
