@@ -110,6 +110,8 @@ async fn log_failed_kcore_units(context: &'static str) {
             "list-units",
             "kcore-vm-*",
             "kcore-tap-*",
+            "kcore-bridge-*",
+            "kcore-dhcp-*",
         ])
         .output()
         .await

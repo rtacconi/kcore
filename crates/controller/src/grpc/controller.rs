@@ -1,11 +1,12 @@
+use std::net::Ipv4Addr;
+use std::time::Duration;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
-use std::time::Duration;
 
 use crate::auth::{self, CN_KCTL, CN_NODE_PREFIX};
 use crate::config::NetworkConfig;
 use crate::controller_proto;
-use crate::db::{Database, NodeRow, VmRow};
+use crate::db::{Database, NetworkRow, NodeRow, VmRow};
 use crate::node_proto;
 use crate::{nixgen, node_client::NodeClients, scheduler};
 
@@ -56,6 +57,10 @@ impl ControllerService {
             .db
             .list_vms_for_node(&node.id)
             .map_err(|e| Status::internal(format!("listing vms: {e}")))?;
+        let networks = self
+            .db
+            .list_networks_for_node(&node.id)
+            .map_err(|e| Status::internal(format!("listing networks: {e}")))?;
 
         let iface = if node.gateway_interface.is_empty() {
             &self.default_network.gateway_interface
@@ -63,7 +68,8 @@ impl ControllerService {
             &node.gateway_interface
         };
 
-        let nix_config = nixgen::generate_node_config(&vms, iface, &self.default_network);
+        let nix_config =
+            nixgen::generate_node_config(&vms, iface, &self.default_network, &networks);
 
         let mut admin = self.clients.get_admin(&node.address).ok_or_else(|| {
             Status::unavailable(format!("no connection to node {}", node.address))
@@ -240,6 +246,59 @@ fn derive_image_format(image_url: &str) -> String {
     } else {
         "raw".to_string()
     }
+}
+
+fn validate_network_name(name: &str) -> Result<String, Status> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err(Status::invalid_argument("network name is required"));
+    }
+    if trimmed == "default" {
+        return Err(Status::invalid_argument(
+            "network name 'default' is reserved; configure it via controller defaultNetwork",
+        ));
+    }
+    if !trimmed
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    {
+        return Err(Status::invalid_argument(
+            "network name must contain only letters, digits, '-' or '_'",
+        ));
+    }
+    Ok(trimmed.to_string())
+}
+
+fn validate_ipv4(value: &str, field: &str) -> Result<String, Status> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(Status::invalid_argument(format!("{field} is required")));
+    }
+    trimmed
+        .parse::<Ipv4Addr>()
+        .map_err(|_| Status::invalid_argument(format!("{field} must be a valid IPv4 address")))?;
+    Ok(trimmed.to_string())
+}
+
+fn validate_netmask(value: &str) -> Result<String, Status> {
+    let parsed = validate_ipv4(value, "internal_netmask")?;
+    // Keep validation simple and explicit: only contiguous masks are accepted.
+    let bits =
+        u32::from(parsed.parse::<Ipv4Addr>().map_err(|_| {
+            Status::invalid_argument("internal_netmask must be a valid IPv4 address")
+        })?);
+    let mut seen_zero = false;
+    for i in 0..32 {
+        let bit = (bits >> (31 - i)) & 1;
+        if bit == 0 {
+            seen_zero = true;
+        } else if seen_zero {
+            return Err(Status::invalid_argument(
+                "internal_netmask must be contiguous (for example 255.255.255.0)",
+            ));
+        }
+    }
+    Ok(parsed)
 }
 
 fn controller_state_from_node_state(state: i32) -> i32 {
@@ -422,6 +481,23 @@ impl controller_proto::controller_server::Controller for ControllerService {
         let image_sha256 = validate_image_sha256(&req.image_sha256)?;
         let image_path = derive_local_image_path(&image_url, &image_sha256);
         let image_format = derive_image_format(&image_url);
+        let vm_network = spec
+            .nics
+            .first()
+            .map(|n| n.network.clone())
+            .unwrap_or_else(|| "default".into());
+        if vm_network != "default"
+            && self
+                .db
+                .get_network_for_node(&node.id, &vm_network)
+                .map_err(|e| Status::internal(format!("checking network: {e}")))?
+                .is_none()
+        {
+            return Err(Status::failed_precondition(format!(
+                "network '{}' is not configured on node '{}'",
+                vm_network, node.id
+            )));
+        }
 
         let vm = VmRow {
             id: vm_id.clone(),
@@ -433,11 +509,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             image_sha256,
             image_format,
             image_size: 8192,
-            network: spec
-                .nics
-                .first()
-                .map(|n| n.network.clone())
-                .unwrap_or_else(|| "default".into()),
+            network: vm_network,
             auto_start: true,
             node_id: node.id.clone(),
             created_at: String::new(),
@@ -686,6 +758,180 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         Ok(Response::new(controller_proto::ListVmsResponse {
             vms: infos,
+        }))
+    }
+
+    async fn create_network(
+        &self,
+        request: Request<controller_proto::CreateNetworkRequest>,
+    ) -> Result<Response<controller_proto::CreateNetworkResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let name = validate_network_name(&req.name)?;
+        let external_ip = validate_ipv4(&req.external_ip, "external_ip")?;
+        let gateway_ip = validate_ipv4(&req.gateway_ip, "gateway_ip")?;
+        let internal_netmask = if req.internal_netmask.trim().is_empty() {
+            "255.255.255.0".to_string()
+        } else {
+            validate_netmask(&req.internal_netmask)?
+        };
+
+        let node = if !req.target_node.is_empty() {
+            self.db
+                .get_node_by_address(&req.target_node)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
+                .ok_or_else(|| Status::not_found(format!("node {} not found", req.target_node)))?
+        } else {
+            let nodes = self
+                .db
+                .list_nodes()
+                .map_err(|e| Status::internal(e.to_string()))?;
+            scheduler::select_node(&nodes)
+                .cloned()
+                .ok_or_else(|| Status::unavailable("no ready nodes"))?
+        };
+
+        if self
+            .db
+            .get_network_for_node(&node.id, &name)
+            .map_err(|e| Status::internal(format!("checking existing network: {e}")))?
+            .is_some()
+        {
+            return Err(Status::already_exists(format!(
+                "network '{}' already exists on node '{}'",
+                name, node.id
+            )));
+        }
+
+        self.db
+            .insert_network(&NetworkRow {
+                name: name.clone(),
+                external_ip,
+                gateway_ip,
+                internal_netmask,
+                node_id: node.id.clone(),
+            })
+            .map_err(|e| Status::internal(format!("storing network: {e}")))?;
+
+        self.push_config_to_node(&node).await?;
+
+        Ok(Response::new(controller_proto::CreateNetworkResponse {
+            success: true,
+            message: format!("created network '{name}' on node '{}'", node.id),
+            node_id: node.id,
+        }))
+    }
+
+    async fn delete_network(
+        &self,
+        request: Request<controller_proto::DeleteNetworkRequest>,
+    ) -> Result<Response<controller_proto::DeleteNetworkResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("network name is required"));
+        }
+        if name == "default" {
+            return Err(Status::invalid_argument(
+                "cannot delete reserved network 'default'",
+            ));
+        }
+
+        let node = if !req.target_node.is_empty() {
+            self.db
+                .get_node_by_address(&req.target_node)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
+                .ok_or_else(|| Status::not_found(format!("node {} not found", req.target_node)))?
+        } else {
+            let matches = self
+                .db
+                .list_networks()
+                .map_err(|e| Status::internal(format!("listing networks: {e}")))?
+                .into_iter()
+                .filter(|n| n.name == name)
+                .collect::<Vec<_>>();
+            if matches.is_empty() {
+                return Err(Status::not_found(format!("network '{name}' not found")));
+            }
+            if matches.len() > 1 {
+                return Err(Status::failed_precondition(format!(
+                    "network '{name}' exists on multiple nodes; pass target_node"
+                )));
+            }
+            self.db
+                .get_node(&matches[0].node_id)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .ok_or_else(|| {
+                    Status::not_found(format!("node '{}' not found", matches[0].node_id))
+                })?
+        };
+
+        let in_use = self
+            .db
+            .list_vms_for_node(&node.id)
+            .map_err(|e| Status::internal(format!("listing vms: {e}")))?
+            .into_iter()
+            .any(|vm| vm.network == name);
+        if in_use {
+            return Err(Status::failed_precondition(format!(
+                "network '{name}' is still in use by at least one VM on node '{}'",
+                node.id
+            )));
+        }
+
+        let deleted = self
+            .db
+            .delete_network(&node.id, name)
+            .map_err(|e| Status::internal(format!("deleting network: {e}")))?;
+        if !deleted {
+            return Err(Status::not_found(format!(
+                "network '{name}' not found on node '{}'",
+                node.id
+            )));
+        }
+
+        self.push_config_to_node(&node).await?;
+        Ok(Response::new(controller_proto::DeleteNetworkResponse {
+            success: true,
+        }))
+    }
+
+    async fn list_networks(
+        &self,
+        request: Request<controller_proto::ListNetworksRequest>,
+    ) -> Result<Response<controller_proto::ListNetworksResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let rows = if req.target_node.is_empty() {
+            self.db
+                .list_networks()
+                .map_err(|e| Status::internal(format!("listing networks: {e}")))?
+        } else {
+            let node = self
+                .db
+                .get_node_by_address(&req.target_node)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
+                .ok_or_else(|| Status::not_found(format!("node {} not found", req.target_node)))?;
+            self.db
+                .list_networks_for_node(&node.id)
+                .map_err(|e| Status::internal(format!("listing networks for node: {e}")))?
+        };
+
+        Ok(Response::new(controller_proto::ListNetworksResponse {
+            networks: rows
+                .into_iter()
+                .map(|n| controller_proto::NetworkInfo {
+                    name: n.name,
+                    external_ip: n.external_ip,
+                    gateway_ip: n.gateway_ip,
+                    internal_netmask: n.internal_netmask,
+                    node_id: n.node_id,
+                })
+                .collect(),
         }))
     }
 
@@ -946,6 +1192,17 @@ mod tests {
             "qcow2"
         );
         assert_eq!(derive_image_format("https://example.com/rootfs.raw"), "raw");
+    }
+
+    #[test]
+    fn validate_network_inputs_reject_bad_values() {
+        let reserved = validate_network_name("default").expect_err("default is reserved");
+        assert_eq!(reserved.code(), tonic::Code::InvalidArgument);
+        let invalid_ip = validate_ipv4("10.0.0", "gateway_ip").expect_err("invalid ip");
+        assert_eq!(invalid_ip.code(), tonic::Code::InvalidArgument);
+        let invalid_mask =
+            validate_netmask("255.0.255.0").expect_err("non-contiguous mask should fail");
+        assert_eq!(invalid_mask.code(), tonic::Code::InvalidArgument);
     }
 
     #[tokio::test]

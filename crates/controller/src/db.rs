@@ -38,6 +38,15 @@ pub struct VmRow {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct NetworkRow {
+    pub name: String,
+    pub external_ip: String,
+    pub gateway_ip: String,
+    pub internal_netmask: String,
+    pub node_id: String,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -88,6 +97,14 @@ impl Database {
                 auto_start INTEGER NOT NULL DEFAULT 1,
                 node_id TEXT NOT NULL REFERENCES nodes(id),
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS networks (
+                name TEXT NOT NULL,
+                external_ip TEXT NOT NULL,
+                gateway_ip TEXT NOT NULL,
+                internal_netmask TEXT NOT NULL DEFAULT '255.255.255.0',
+                node_id TEXT NOT NULL REFERENCES nodes(id),
+                PRIMARY KEY (name, node_id)
             );",
         )?;
         let _ = conn.execute(
@@ -244,6 +261,70 @@ impl Database {
         rows.collect()
     }
 
+    pub fn insert_network(&self, network: &NetworkRow) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO networks (name, external_ip, gateway_ip, internal_netmask, node_id)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                network.name,
+                network.external_ip,
+                network.gateway_ip,
+                network.internal_netmask,
+                network.node_id
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_network_for_node(
+        &self,
+        node_id: &str,
+        name: &str,
+    ) -> Result<Option<NetworkRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id
+             FROM networks
+             WHERE node_id = ?1 AND name = ?2",
+        )?;
+        let mut rows = stmt.query_map(params![node_id, name], row_to_network)?;
+        rows.next().transpose()
+    }
+
+    pub fn list_networks(&self) -> Result<Vec<NetworkRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id
+             FROM networks",
+        )?;
+        let rows = stmt.query_map([], row_to_network)?;
+        rows.collect()
+    }
+
+    pub fn list_networks_for_node(
+        &self,
+        node_id: &str,
+    ) -> Result<Vec<NetworkRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id
+             FROM networks
+             WHERE node_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![node_id], row_to_network)?;
+        rows.collect()
+    }
+
+    pub fn delete_network(&self, node_id: &str, name: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM networks WHERE node_id = ?1 AND name = ?2",
+            params![node_id, name],
+        )?;
+        Ok(rows > 0)
+    }
+
     pub fn find_node_for_vm(&self, vm_id: &str) -> Result<Option<String>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt =
@@ -297,6 +378,16 @@ fn row_to_vm(row: &rusqlite::Row) -> Result<VmRow, rusqlite::Error> {
         auto_start: row.get::<_, i32>(10)? != 0,
         node_id: row.get(11)?,
         created_at: row.get(12)?,
+    })
+}
+
+fn row_to_network(row: &rusqlite::Row) -> Result<NetworkRow, rusqlite::Error> {
+    Ok(NetworkRow {
+        name: row.get(0)?,
+        external_ip: row.get(1)?,
+        gateway_ip: row.get(2)?,
+        internal_netmask: row.get(3)?,
+        node_id: row.get(4)?,
     })
 }
 
@@ -402,5 +493,32 @@ mod tests {
 
         let vm = db.get_vm("vm-qcow").expect("get vm").expect("vm exists");
         assert_eq!(vm.image_format, "qcow2");
+    }
+
+    #[test]
+    fn network_roundtrip_works() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+        db.insert_network(&NetworkRow {
+            name: "frontend".to_string(),
+            external_ip: "203.0.113.10".to_string(),
+            gateway_ip: "10.240.10.1".to_string(),
+            internal_netmask: "255.255.255.0".to_string(),
+            node_id: node.id.clone(),
+        })
+        .expect("insert network");
+
+        let got = db
+            .get_network_for_node(&node.id, "frontend")
+            .expect("get network")
+            .expect("network exists");
+        assert_eq!(got.gateway_ip, "10.240.10.1");
+
+        let listed = db
+            .list_networks_for_node(&node.id)
+            .expect("list networks for node");
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].name, "frontend");
     }
 }

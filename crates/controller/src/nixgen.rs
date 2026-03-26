@@ -1,5 +1,5 @@
 use crate::config::NetworkConfig;
-use crate::db::VmRow;
+use crate::db::{NetworkRow, VmRow};
 
 /// Escape a string for use inside a Nix double-quoted string literal.
 /// Handles `\` → `\\`, `"` → `\"`, and `${` → `\${` (prevents interpolation).
@@ -39,6 +39,7 @@ pub fn generate_node_config(
     vms: &[VmRow],
     gateway_interface: &str,
     network: &NetworkConfig,
+    networks: &[NetworkRow],
 ) -> String {
     let mut out = String::from("{ pkgs, ... }: {\n");
     out.push_str("  ch-vm.vms = {\n");
@@ -65,6 +66,31 @@ pub fn generate_node_config(
         ));
     }
     out.push_str("    };\n");
+
+    for net in networks {
+        if net.name == "default" {
+            continue;
+        }
+        out.push_str(&format!(
+            "    networks.\"{}\" = {{\n",
+            nix_escape(&net.name)
+        ));
+        out.push_str(&format!(
+            "      externalIP = \"{}\";\n",
+            nix_escape(&net.external_ip)
+        ));
+        out.push_str(&format!(
+            "      gatewayIP = \"{}\";\n",
+            nix_escape(&net.gateway_ip)
+        ));
+        if net.internal_netmask != "255.255.255.0" {
+            out.push_str(&format!(
+                "      internalNetmask = \"{}\";\n",
+                nix_escape(&net.internal_netmask)
+            ));
+        }
+        out.push_str("    };\n");
+    }
 
     for vm in vms {
         let nix_name = sanitize_nix_attr_key(&vm.name);
@@ -132,7 +158,7 @@ mod tests {
 
     #[test]
     fn generates_valid_nix() {
-        let config = generate_node_config(&[vm(true, "web-01")], "eno1", &default_net());
+        let config = generate_node_config(&[vm(true, "web-01")], "eno1", &default_net(), &[]);
         assert!(config.contains("ch-vm.vms"));
         assert!(config.contains("web-01"));
         assert!(config.contains("cores = 2"));
@@ -148,20 +174,20 @@ mod tests {
             internal_netmask: "255.255.255.128".into(),
             ..default_net()
         };
-        let config = generate_node_config(&[vm(false, "web-01")], "eno1", &net);
+        let config = generate_node_config(&[vm(false, "web-01")], "eno1", &net, &[]);
         assert!(config.contains("internalNetmask = \"255.255.255.128\""));
         assert!(config.contains("autoStart = false;"));
     }
 
     #[test]
     fn sanitizes_vm_name_for_nix_attr_key() {
-        let config = generate_node_config(&[vm(true, "db node 01")], "eno1", &default_net());
+        let config = generate_node_config(&[vm(true, "db node 01")], "eno1", &default_net(), &[]);
         assert!(config.contains("virtualMachines.\"db-node-01\""));
     }
 
     #[test]
     fn sanitizes_special_chars_in_vm_name() {
-        let config = generate_node_config(&[vm(true, "web\";inject")], "eno1", &default_net());
+        let config = generate_node_config(&[vm(true, "web\";inject")], "eno1", &default_net(), &[]);
         assert!(config.contains("virtualMachines.\"web--inject\""));
         assert!(!config.contains("\";inject"));
     }
@@ -177,7 +203,7 @@ mod tests {
     fn image_path_with_special_chars_is_escaped() {
         let mut v = vm(true, "evil");
         v.image_path = r#"/images/foo"${bar}.raw"#.into();
-        let config = generate_node_config(&[v], "eno1", &default_net());
+        let config = generate_node_config(&[v], "eno1", &default_net(), &[]);
         assert!(config.contains(r#"image = "/images/foo\"\${bar}.raw";"#));
         // The raw `${` is escaped to `\${`, preventing Nix interpolation.
         assert!(!config.contains("image = \"/images/foo\"${bar}.raw\";"));
@@ -187,7 +213,7 @@ mod tests {
     fn image_format_is_rendered_for_qcow2() {
         let mut v = vm(true, "qcow");
         v.image_format = "qcow2".into();
-        let config = generate_node_config(&[v], "eno1", &default_net());
+        let config = generate_node_config(&[v], "eno1", &default_net(), &[]);
         assert!(config.contains("imageFormat = \"qcow2\";"));
     }
 
@@ -199,9 +225,23 @@ mod tests {
             gateway_ip: "10.0.0.1\\".into(),
             internal_netmask: "255.255.255.0".into(),
         };
-        let config = generate_node_config(&[], "eno1\"", &net);
+        let config = generate_node_config(&[], "eno1\"", &net, &[]);
         assert!(config.contains(r#"gatewayInterface = "eno1\"";"#));
         assert!(config.contains(r#"externalIP = "1.2.3.4\"";"#));
         assert!(config.contains(r#"gatewayIP = "10.0.0.1\\";"#));
+    }
+
+    #[test]
+    fn renders_custom_networks() {
+        let networks = vec![NetworkRow {
+            name: "frontend".into(),
+            external_ip: "198.51.100.5".into(),
+            gateway_ip: "10.240.10.1".into(),
+            internal_netmask: "255.255.255.0".into(),
+            node_id: "node-1".into(),
+        }];
+        let config = generate_node_config(&[], "eno1", &default_net(), &networks);
+        assert!(config.contains("networks.\"frontend\""));
+        assert!(config.contains("gatewayIP = \"10.240.10.1\";"));
     }
 }

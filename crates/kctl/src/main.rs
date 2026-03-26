@@ -117,6 +117,23 @@ enum CreateResource {
         #[arg(long = "target-node")]
         target_node: Option<String>,
     },
+    /// Create a network on a node (declarative)
+    Network {
+        /// Network name
+        name: String,
+        /// External IP used as NAT source for this network
+        #[arg(long = "external-ip")]
+        external_ip: String,
+        /// Gateway IP assigned to the bridge
+        #[arg(long = "gateway-ip")]
+        gateway_ip: String,
+        /// Internal netmask (default: 255.255.255.0)
+        #[arg(long = "internal-netmask", default_value = "255.255.255.0")]
+        internal_netmask: String,
+        /// Target node (optional, controller picks if empty)
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
     /// Create cluster PKI and local context for mTLS
     Cluster {
         /// Controller address (host:port)
@@ -141,6 +158,14 @@ enum DeleteResource {
         /// VM ID or name
         vm_id: String,
         /// Target node (optional)
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+    /// Delete a network
+    Network {
+        /// Network name
+        name: String,
+        /// Target node (optional; required if network exists on multiple nodes)
         #[arg(long = "target-node")]
         target_node: Option<String>,
     },
@@ -215,6 +240,13 @@ enum GetResource {
     Nodes {
         /// Node ID (omit to list all)
         name: Option<String>,
+    },
+    /// List custom networks
+    #[command(alias = "network")]
+    Networks {
+        /// Filter by node
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
     },
 }
 
@@ -311,6 +343,29 @@ async fn main() {
         }
         Command::Create {
             resource:
+                CreateResource::Network {
+                    name,
+                    external_ip,
+                    gateway_ip,
+                    internal_netmask,
+                    target_node,
+                },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::network::create(
+                &info,
+                commands::network::CreateArgs {
+                    name: name.clone(),
+                    external_ip: external_ip.clone(),
+                    gateway_ip: gateway_ip.clone(),
+                    internal_netmask: internal_netmask.clone(),
+                    target_node: target_node.clone(),
+                },
+            )
+            .await
+        }
+        Command::Create {
+            resource:
                 CreateResource::Cluster {
                     controller,
                     certs_dir,
@@ -333,6 +388,12 @@ async fn main() {
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::vm::delete(&info, vm_id, target_node.clone()).await
+        }
+        Command::Delete {
+            resource: DeleteResource::Network { name, target_node },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::network::delete(&info, name, target_node.clone()).await
         }
 
         Command::Delete {
@@ -396,6 +457,12 @@ async fn main() {
             } else {
                 commands::node::list_nodes(&info).await
             }
+        }
+        Command::Get {
+            resource: GetResource::Networks { target_node },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::network::list(&info, target_node.clone()).await
         }
 
         Command::Node {

@@ -19,6 +19,9 @@ service Controller {
   rpc SetVmDesiredState(SetVmDesiredStateRequest) returns (SetVmDesiredStateResponse);
   rpc GetVm(GetVmRequest) returns (GetVmResponse);
   rpc ListVms(ListVmsRequest) returns (ListVmsResponse);
+  rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
+  rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
+  rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
   
   // Node operations
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
@@ -123,6 +126,45 @@ message ListVmsRequest {
 
 message ListVmsResponse {
   repeated VmInfo vms = 1;
+}
+
+message CreateNetworkRequest {
+  string name = 1;
+  string external_ip = 2;
+  string gateway_ip = 3;
+  string internal_netmask = 4;
+  string target_node = 5;  // Optional - controller picks if empty
+}
+
+message CreateNetworkResponse {
+  bool success = 1;
+  string message = 2;
+  string node_id = 3;
+}
+
+message DeleteNetworkRequest {
+  string name = 1;
+  string target_node = 2;  // Optional - controller resolves by name if unique
+}
+
+message DeleteNetworkResponse {
+  bool success = 1;
+}
+
+message ListNetworksRequest {
+  string target_node = 1;  // Optional
+}
+
+message ListNetworksResponse {
+  repeated NetworkInfo networks = 1;
+}
+
+message NetworkInfo {
+  string name = 1;
+  string external_ip = 2;
+  string gateway_ip = 3;
+  string internal_netmask = 4;
+  string node_id = 5;
 }
 
 message VmInfo {

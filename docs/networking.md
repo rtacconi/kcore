@@ -136,9 +136,50 @@ kcore-kctl create vm db-back-net \
 ```
 
 Note:
-- `--network` must reference a network that exists in the applied node Nix config under `ch-vm.vms.networks`.
+- `--network` must reference a network that exists in controller-managed node config under `ch-vm.vms.networks`.
+- You can provision those networks either:
+  - programmatically with `kcore-kctl create network` (recommended), or
+  - by applying a hand-written Nix config file.
 
-Create networks first (before `kctl create vm`):
+## Programmatic network management with kctl (recommended)
+
+Create custom networks before creating VMs that reference them:
+
+```bash
+kcore-kctl create network frontend \
+  --external-ip 192.168.40.105 \
+  --gateway-ip 10.240.10.1 \
+  --internal-netmask 255.255.255.0 \
+  --target-node 192.168.40.105:9091
+
+kcore-kctl create network backend \
+  --external-ip 192.168.40.105 \
+  --gateway-ip 10.240.20.1 \
+  --internal-netmask 255.255.255.0 \
+  --target-node 192.168.40.105:9091
+```
+
+Inspect controller-managed custom networks:
+
+```bash
+kcore-kctl get networks
+kcore-kctl get networks --target-node 192.168.40.105:9091
+```
+
+Delete a network (only when no VM is attached to it):
+
+```bash
+kcore-kctl delete network backend --target-node 192.168.40.105:9091
+```
+
+Behavior:
+- `kcore-kctl create network` stores desired network state in controller DB and triggers reconcile on the target node.
+- The node apply path renders and activates matching `ch-vm.vms.networks.<name>` entries.
+- `default` is reserved and is driven by controller `defaultNetwork` config.
+
+## Alternative: create networks via static Nix apply
+
+You can still create networks first (before `kctl create vm`) with static Nix:
 
 ```nix
 # networks.nix
