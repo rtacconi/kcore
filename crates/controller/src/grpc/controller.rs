@@ -77,8 +77,24 @@ impl ControllerService {
             &node.gateway_interface
         };
 
-        let nix_config =
-            nixgen::generate_node_config(&vms, iface, &self.default_network, &networks);
+        let mut vm_ssh_keys: std::collections::HashMap<String, Vec<String>> =
+            std::collections::HashMap::new();
+        for vm in &vms {
+            match self.db.get_vm_ssh_keys(&vm.id) {
+                Ok(keys) if !keys.is_empty() => {
+                    vm_ssh_keys.insert(vm.id.clone(), keys);
+                }
+                _ => {}
+            }
+        }
+
+        let nix_config = nixgen::generate_node_config(
+            &vms,
+            iface,
+            &self.default_network,
+            &networks,
+            &vm_ssh_keys,
+        );
 
         let mut admin = self.ensure_admin_client_for_node(node).await?;
 
@@ -501,6 +517,31 @@ impl controller_proto::controller_server::Controller for ControllerService {
         self.db
             .insert_vm(&vm)
             .map_err(|e| Status::internal(format!("storing vm: {e}")))?;
+
+        if !req.ssh_key_names.is_empty() {
+            for key_name in &req.ssh_key_names {
+                if self
+                    .db
+                    .get_ssh_key(key_name)
+                    .map_err(|e| Status::internal(format!("checking ssh key: {e}")))?
+                    .is_none()
+                {
+                    self.db
+                        .delete_vm_by_id_or_name(&vm_id)
+                        .ok();
+                    return Err(Status::not_found(format!(
+                        "SSH key '{}' not found",
+                        key_name
+                    )));
+                }
+            }
+            self.db
+                .associate_vm_ssh_keys(&vm_id, &req.ssh_key_names)
+                .map_err(|e| {
+                    self.db.delete_vm_by_id_or_name(&vm_id).ok();
+                    Status::internal(format!("associating ssh keys: {e}"))
+                })?;
+        }
 
         info!(vm_id = %vm_id, node_id = %node.id, "created VM, pushing config");
 
@@ -1117,6 +1158,260 @@ impl controller_proto::controller_server::Controller for ControllerService {
             }),
         }))
     }
+
+    async fn create_ssh_key(
+        &self,
+        request: Request<controller_proto::CreateSshKeyRequest>,
+    ) -> Result<Response<controller_proto::CreateSshKeyResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        if req.name.trim().is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        if req.public_key.trim().is_empty() {
+            return Err(Status::invalid_argument("public_key is required"));
+        }
+        if !req.public_key.starts_with("ssh-") && !req.public_key.starts_with("ecdsa-") {
+            return Err(Status::invalid_argument(
+                "public_key must start with ssh- or ecdsa- (OpenSSH format)",
+            ));
+        }
+
+        self.db
+            .insert_ssh_key(req.name.trim(), req.public_key.trim())
+            .map_err(|e| {
+                if e.to_string().contains("UNIQUE constraint") {
+                    Status::already_exists(format!("SSH key '{}' already exists", req.name))
+                } else {
+                    Status::internal(format!("storing ssh key: {e}"))
+                }
+            })?;
+
+        info!(name = %req.name, "created SSH key");
+
+        Ok(Response::new(controller_proto::CreateSshKeyResponse {
+            success: true,
+            message: format!("SSH key '{}' created", req.name),
+        }))
+    }
+
+    async fn delete_ssh_key(
+        &self,
+        request: Request<controller_proto::DeleteSshKeyRequest>,
+    ) -> Result<Response<controller_proto::DeleteSshKeyResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        let deleted = self
+            .db
+            .delete_ssh_key(&req.name)
+            .map_err(|e| Status::internal(format!("deleting ssh key: {e}")))?;
+
+        if !deleted {
+            return Err(Status::not_found(format!(
+                "SSH key '{}' not found",
+                req.name
+            )));
+        }
+
+        info!(name = %req.name, "deleted SSH key");
+
+        Ok(Response::new(controller_proto::DeleteSshKeyResponse {
+            success: true,
+        }))
+    }
+
+    async fn list_ssh_keys(
+        &self,
+        request: Request<controller_proto::ListSshKeysRequest>,
+    ) -> Result<Response<controller_proto::ListSshKeysResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+
+        let keys = self
+            .db
+            .list_ssh_keys()
+            .map_err(|e| Status::internal(format!("listing ssh keys: {e}")))?;
+
+        let infos = keys
+            .into_iter()
+            .map(|(name, public_key, created_at)| {
+                let ts = parse_datetime_to_timestamp(&created_at);
+                controller_proto::SshKeyInfo {
+                    name,
+                    public_key,
+                    created_at: ts,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(controller_proto::ListSshKeysResponse {
+            keys: infos,
+        }))
+    }
+
+    async fn get_ssh_key(
+        &self,
+        request: Request<controller_proto::GetSshKeyRequest>,
+    ) -> Result<Response<controller_proto::GetSshKeyResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        let (name, public_key, created_at) = self
+            .db
+            .get_ssh_key(&req.name)
+            .map_err(|e| Status::internal(format!("getting ssh key: {e}")))?
+            .ok_or_else(|| Status::not_found(format!("SSH key '{}' not found", req.name)))?;
+
+        let ts = parse_datetime_to_timestamp(&created_at);
+
+        Ok(Response::new(controller_proto::GetSshKeyResponse {
+            key: Some(controller_proto::SshKeyInfo {
+                name,
+                public_key,
+                created_at: ts,
+            }),
+        }))
+    }
+
+    async fn drain_node(
+        &self,
+        request: Request<controller_proto::DrainNodeRequest>,
+    ) -> Result<Response<controller_proto::DrainNodeResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        let source_node = self
+            .db
+            .get_node(&req.node_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.node_id)))?;
+
+        self.db
+            .update_node_status(&req.node_id, "draining")
+            .map_err(|e| Status::internal(format!("updating node status: {e}")))?;
+
+        let vms = self
+            .db
+            .list_vms_for_node(&req.node_id)
+            .map_err(|e| Status::internal(format!("listing vms: {e}")))?;
+
+        if vms.is_empty() {
+            self.db
+                .update_node_status(&req.node_id, "drained")
+                .map_err(|e| Status::internal(format!("updating node status: {e}")))?;
+            return Ok(Response::new(controller_proto::DrainNodeResponse {
+                success: true,
+                vms_migrated: 0,
+                message: "node has no VMs, marked as drained".into(),
+            }));
+        }
+
+        let all_nodes = self
+            .db
+            .list_nodes()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let mut migrated = 0i32;
+        let mut errors = Vec::new();
+        let eligible_nodes: Vec<NodeRow> = all_nodes
+            .iter()
+            .filter(|n| n.id != req.node_id)
+            .cloned()
+            .collect();
+
+        let mut destination_node_ids: std::collections::HashSet<String> =
+            std::collections::HashSet::new();
+
+        for vm in &vms {
+            let target = if !req.target_node.is_empty() {
+                eligible_nodes
+                    .iter()
+                    .find(|n| n.id == req.target_node || n.address == req.target_node)
+                    .ok_or_else(|| {
+                        Status::not_found(format!("target node '{}' not found", req.target_node))
+                    })?
+            } else {
+                match scheduler::select_node_for_vm(
+                    &eligible_nodes,
+                    vm.cpu,
+                    vm.memory_bytes,
+                ) {
+                    Some(n) => n,
+                    None => {
+                        errors.push(format!(
+                            "no node with capacity for VM '{}'",
+                            vm.name
+                        ));
+                        continue;
+                    }
+                }
+            };
+
+            let deleted = self
+                .db
+                .delete_vm_by_id_or_name(&vm.id)
+                .map_err(|e| Status::internal(format!("deleting vm: {e}")))?;
+            if !deleted {
+                continue;
+            }
+
+            let mut new_vm = vm.clone();
+            new_vm.node_id = target.id.clone();
+            if let Err(e) = self.db.insert_vm(&new_vm) {
+                errors.push(format!("re-inserting VM '{}': {e}", vm.name));
+                continue;
+            }
+
+            let ssh_keys = self.db.get_vm_ssh_keys(&vm.id).unwrap_or_default();
+            if !ssh_keys.is_empty() {
+                let key_names: Vec<String> = self
+                    .db
+                    .list_ssh_keys()
+                    .unwrap_or_default()
+                    .iter()
+                    .filter(|(_, pk, _)| ssh_keys.contains(pk))
+                    .map(|(name, _, _)| name.clone())
+                    .collect();
+                let _ = self.db.associate_vm_ssh_keys(&new_vm.id, &key_names);
+            }
+
+            migrated += 1;
+            destination_node_ids.insert(target.id.clone());
+        }
+
+        if let Err(e) = self.push_config_to_node(&source_node).await {
+            warn!(node = %req.node_id, error = %e, "failed to push config to drained node");
+        }
+
+        for target_id in &destination_node_ids {
+            if let Ok(Some(target_node)) = self.db.get_node(target_id) {
+                if let Err(e) = self.push_config_to_node(&target_node).await {
+                    warn!(node = %target_id, error = %e, "failed to push config to target node");
+                }
+            }
+        }
+
+        self.db
+            .update_node_status(&req.node_id, "drained")
+            .map_err(|e| Status::internal(format!("updating node status: {e}")))?;
+
+        let msg = if errors.is_empty() {
+            format!("{migrated} VMs migrated successfully")
+        } else {
+            format!(
+                "{migrated} VMs migrated, {} errors: {}",
+                errors.len(),
+                errors.join("; ")
+            )
+        };
+
+        Ok(Response::new(controller_proto::DrainNodeResponse {
+            success: errors.is_empty(),
+            vms_migrated: migrated,
+            message: msg,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -1358,6 +1653,7 @@ mod tests {
             cloud_init_user_data: String::new(),
             image_path: String::new(),
             image_format: String::new(),
+            ssh_key_names: vec![],
         };
 
         let err =
@@ -1403,6 +1699,7 @@ mod tests {
             cloud_init_user_data: String::new(),
             image_path: String::new(),
             image_format: String::new(),
+            ssh_key_names: vec![],
         };
 
         let err = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
@@ -1449,6 +1746,7 @@ mod tests {
             cloud_init_user_data: String::new(),
             image_path: "/var/lib/kcore/images/web-1.raw".to_string(),
             image_format: "raw".to_string(),
+            ssh_key_names: vec![],
         };
 
         let err = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
@@ -1459,5 +1757,80 @@ mod tests {
         .expect_err("duplicate image path should be rejected");
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
         assert!(err.message().contains("already used"));
+    }
+
+    #[tokio::test]
+    async fn drain_node_moves_vms_to_target_and_pushes_config() {
+        let db = Database::open(":memory:").expect("open db");
+
+        let mut node_a = test_node();
+        node_a.id = "node-a".to_string();
+        node_a.hostname = "node-a".to_string();
+        db.upsert_node(&node_a).expect("insert node-a");
+
+        let mut node_b = test_node();
+        node_b.id = "node-b".to_string();
+        node_b.hostname = "node-b".to_string();
+        node_b.address = "127.0.0.2:9091".to_string();
+        db.upsert_node(&node_b).expect("insert node-b");
+
+        let mut vm1 = test_vm("node-a");
+        vm1.id = "vm-drain-1".to_string();
+        vm1.name = "drain-web-1".to_string();
+        db.insert_vm(&vm1).expect("insert vm1");
+
+        let mut vm2 = test_vm("node-a");
+        vm2.id = "vm-drain-2".to_string();
+        vm2.name = "drain-web-2".to_string();
+        db.insert_vm(&vm2).expect("insert vm2");
+
+        let pushed_nodes: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let pushed_clone = Arc::clone(&pushed_nodes);
+        let hook: PushHook = Arc::new(move |n: &NodeRow| {
+            pushed_clone.lock().expect("lock").push(n.id.clone());
+            Ok(())
+        });
+
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::drain_node(
+            &svc,
+            Request::new(controller_proto::DrainNodeRequest {
+                node_id: "node-a".to_string(),
+                target_node: "node-b".to_string(),
+            }),
+        )
+        .await
+        .expect("drain should succeed")
+        .into_inner();
+
+        assert!(resp.success, "drain should succeed: {}", resp.message);
+        assert_eq!(resp.vms_migrated, 2);
+
+        let node_a_vms = db.list_vms_for_node("node-a").expect("list vms node-a");
+        assert!(node_a_vms.is_empty(), "node-a should have no VMs after drain");
+
+        let node_b_vms = db.list_vms_for_node("node-b").expect("list vms node-b");
+        assert_eq!(node_b_vms.len(), 2, "node-b should have 2 VMs after drain");
+
+        let pushed = pushed_nodes.lock().expect("lock");
+        assert!(
+            pushed.contains(&"node-a".to_string()),
+            "should push config to drained node: {:?}",
+            *pushed
+        );
+        assert!(
+            pushed.contains(&"node-b".to_string()),
+            "should push config to target node: {:?}",
+            *pushed
+        );
+
+        let node_a_status = db.get_node("node-a").expect("get node-a").expect("node-a exists");
+        assert_eq!(node_a_status.status, "drained");
     }
 }

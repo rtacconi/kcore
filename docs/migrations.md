@@ -26,7 +26,7 @@ schema_version
 
 ## Current schema version
 
-**3** (as of March 2026)
+**4** (as of March 2026)
 
 ## Migration history
 
@@ -35,6 +35,7 @@ schema_version
 | 0 → 1 | Added `image_url`, `image_sha256`, `image_format` columns to `vms`. Backfilled `image_format` from file extension for URL-backed images. | Support downloading VM images by URL with integrity checks. |
 | 1 → 2 | Added `runtime_state` column to `vms` (default `'unknown'`). | Persist actual VM state reported by nodes via `SyncVmState`, so the controller doesn't have to poll every node on every `list_vms`. |
 | 2 → 3 | Added `cpu_used`, `memory_used` to `nodes`; `allowed_tcp_ports`, `allowed_udp_ports` to `networks`; `cloud_init_user_data` to `vms`; new `node_labels` table. | Persist heartbeat resource usage for scheduler, port-forwarding rules per network, cloud-init customization per VM, and node labels for placement hints. |
+| 3 → 4 | New `ssh_keys` and `vm_ssh_keys` tables. | SSH public key management — store keys centrally, reference by name when creating VMs, inject into cloud-init. |
 
 ## Adding a new migration
 
@@ -51,16 +52,16 @@ schema_version
 ### Example
 
 ```rust
-// in Database::migrate(), after the version < 3 block:
+// in Database::migrate(), after the version < 4 block:
 
-if version < 4 {
+if version < 5 {
     let _ = conn.execute(
         "ALTER TABLE vms ADD COLUMN ssh_port INTEGER NOT NULL DEFAULT 0",
         [],
     );
 }
 
-const CURRENT_VERSION: i32 = 4;  // bump this
+const CURRENT_VERSION: i32 = 5;  // bump this
 ```
 
 ## Tables overview
@@ -134,6 +135,25 @@ Per-node labels for placement hints and metadata.
 |--------|------|-------|
 | node_id | TEXT | PK (with label), FK → nodes |
 | label | TEXT | PK (with node_id), e.g. `dc=dc-a` |
+
+### ssh_keys
+
+Centrally stored SSH public keys, referenced by name.
+
+| Column | Type | Default | Notes |
+|--------|------|---------|-------|
+| name | TEXT | PK | Human-readable key name |
+| public_key | TEXT | | OpenSSH public key string |
+| created_at | TEXT | `datetime('now')` | When the key was added |
+
+### vm_ssh_keys
+
+Association table linking VMs to SSH keys for cloud-init injection.
+
+| Column | Type | Notes |
+|--------|------|-------|
+| vm_id | TEXT | PK (with key_name), FK → vms ON DELETE CASCADE |
+| key_name | TEXT | PK (with vm_id), FK → ssh_keys |
 
 ## Notes
 

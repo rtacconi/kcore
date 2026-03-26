@@ -2,21 +2,34 @@ use crate::client::{self, node_proto};
 use crate::config::ConnectionInfo;
 use anyhow::Result;
 
-pub async fn pull(info: &ConnectionInfo, uri: &str) -> Result<()> {
+pub async fn pull(info: &ConnectionInfo, uri: &str, sha256: Option<&str>) -> Result<()> {
+    let sha = sha256.unwrap_or_default();
+    if sha.is_empty() {
+        anyhow::bail!("--sha256 is required for image pull (integrity check)");
+    }
+
+    let file_name = uri.rsplit('/').next().unwrap_or("image.raw");
+    let dest = format!(
+        "/var/lib/kcore/images/{}-{}",
+        &sha[..sha.len().min(12)],
+        file_name
+    );
+
     println!("Pulling image from {uri}...");
 
-    let mut client = client::node_compute_client(info).await?;
+    let mut client = client::node_admin_client(info).await?;
     let resp = client
-        .pull_image(node_proto::PullImageRequest {
-            uri: uri.to_string(),
-            name: String::new(),
+        .ensure_image(node_proto::EnsureImageRequest {
+            image_url: uri.to_string(),
+            image_sha256: sha.to_string(),
+            destination_path: dest,
         })
         .await?
         .into_inner();
 
     if resp.cached {
         println!("Image already cached at {}", resp.path);
-    } else {
+    } else if resp.downloaded {
         println!(
             "Image downloaded to {} ({})",
             resp.path,

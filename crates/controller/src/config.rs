@@ -48,7 +48,35 @@ impl Config {
         let contents = std::fs::read_to_string(Path::new(path))
             .with_context(|| format!("reading config {path}"))?;
         let cfg: Config = serde_yaml::from_str(&contents).context("parsing config")?;
+        cfg.validate()?;
         Ok(cfg)
+    }
+
+    fn validate(&self) -> Result<()> {
+        if self.listen_addr.parse::<std::net::SocketAddr>().is_err() {
+            anyhow::bail!("listen_addr '{}' is not a valid socket address", self.listen_addr);
+        }
+        if let Some(tls) = &self.tls {
+            for (label, path) in [
+                ("tls.ca_file", &tls.ca_file),
+                ("tls.cert_file", &tls.cert_file),
+                ("tls.key_file", &tls.key_file),
+            ] {
+                if !std::path::Path::new(path).exists() {
+                    anyhow::bail!("{label} '{}' does not exist", path);
+                }
+            }
+        }
+        if self.default_network.gateway_interface.trim().is_empty() {
+            anyhow::bail!("defaultNetwork.gatewayInterface is required");
+        }
+        if self.default_network.external_ip.trim().is_empty() {
+            anyhow::bail!("defaultNetwork.externalIp is required");
+        }
+        if self.default_network.gateway_ip.trim().is_empty() {
+            anyhow::bail!("defaultNetwork.gatewayIp is required");
+        }
+        Ok(())
     }
 }
 

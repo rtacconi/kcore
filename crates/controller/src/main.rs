@@ -9,6 +9,7 @@ mod scheduler;
 use clap::Parser;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
+use tokio::signal;
 
 pub mod controller_proto {
     tonic::include_proto!("kcore.controller");
@@ -68,6 +69,11 @@ async fn main() -> anyhow::Result<()> {
         grpc::ControllerAdminService::new(),
     );
 
+    let (mut health_reporter, health_svc) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<controller_proto::controller_server::ControllerServer<grpc::ControllerService>>()
+        .await;
+
     let mut server = Server::builder();
     if let Some(tls) = cfg.tls.as_ref() {
         let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
@@ -82,11 +88,56 @@ async fn main() -> anyhow::Result<()> {
         warn!(addr = %addr, "starting controller WITHOUT TLS (--allow-insecure) — all RPCs are unauthenticated");
     }
 
+    let staleness_db = database.clone();
+    tokio::spawn(async move {
+        const HEARTBEAT_TIMEOUT_SECS: i64 = 90;
+        const CHECK_INTERVAL_SECS: u64 = 30;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(CHECK_INTERVAL_SECS)).await;
+            match staleness_db.get_stale_nodes(HEARTBEAT_TIMEOUT_SECS) {
+                Ok(stale) => {
+                    for node in &stale {
+                        if staleness_db
+                            .update_node_status(&node.id, "not-ready")
+                            .unwrap_or(false)
+                        {
+                            warn!(
+                                node_id = %node.id,
+                                last_heartbeat = %node.last_heartbeat,
+                                "node missed heartbeat deadline, marked not-ready"
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(error = %e, "failed to check for stale nodes");
+                }
+            }
+        }
+    });
+
     server
+        .add_service(health_svc)
         .add_service(controller_svc)
         .add_service(admin_svc)
-        .serve(addr)
+        .serve_with_shutdown(addr, shutdown_signal())
         .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = signal::ctrl_c();
+    #[cfg(unix)]
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+        .expect("failed to register SIGTERM handler");
+    #[cfg(unix)]
+    let terminate = sigterm.recv();
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => { info!("received Ctrl+C, shutting down"); },
+        _ = terminate => { info!("received SIGTERM, shutting down"); },
+    }
 }

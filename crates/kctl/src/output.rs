@@ -83,6 +83,9 @@ pub fn print_node_detail(n: &controller_proto::NodeInfo) {
             crate::client::format_bytes(usage.memory_bytes_used)
         );
     }
+    if !n.labels.is_empty() {
+        println!("Labels:    {}", n.labels.join(", "));
+    }
 }
 
 pub fn print_disk_table(disks: &[node_proto::DiskInfo]) {

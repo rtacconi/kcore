@@ -27,6 +27,15 @@ service Controller {
   // Node operations
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
   rpc GetNode(GetNodeRequest) returns (GetNodeResponse);
+
+  // SSH key management
+  rpc CreateSshKey(CreateSshKeyRequest) returns (CreateSshKeyResponse);
+  rpc DeleteSshKey(DeleteSshKeyRequest) returns (DeleteSshKeyResponse);
+  rpc ListSshKeys(ListSshKeysRequest) returns (ListSshKeysResponse);
+  rpc GetSshKey(GetSshKeyRequest) returns (GetSshKeyResponse);
+
+  // Node lifecycle
+  rpc DrainNode(DrainNodeRequest) returns (DrainNodeResponse);
 }
 
 message RegisterNodeRequest {
@@ -80,6 +89,7 @@ message CreateVmRequest {
   string cloud_init_user_data = 5;  // Optional cloud-init user-data (YAML); uses default if empty
   string image_path = 6;    // Optional node-local image path (alternative to image_url/image_sha256)
   string image_format = 7;  // Required when image_path is used: qcow2 or raw
+  repeated string ssh_key_names = 8;  // SSH key names to inject (looked up from controller DB)
 }
 
 message CreateVmResponse {
@@ -285,5 +295,58 @@ service ControllerAdmin {
   // ApplyNixConfig replaces the controller's /etc/nixos/configuration.nix with
   // the provided content and (optionally) triggers a nixos-rebuild.
   rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
+}
+
+// SSH Key Management
+
+message CreateSshKeyRequest {
+  string name = 1;
+  string public_key = 2;  // e.g., "ssh-rsa AAAA... user@host"
+}
+
+message CreateSshKeyResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message DeleteSshKeyRequest {
+  string name = 1;
+}
+
+message DeleteSshKeyResponse {
+  bool success = 1;
+}
+
+message ListSshKeysRequest {}
+
+message ListSshKeysResponse {
+  repeated SshKeyInfo keys = 1;
+}
+
+message GetSshKeyRequest {
+  string name = 1;
+}
+
+message GetSshKeyResponse {
+  SshKeyInfo key = 1;
+}
+
+message SshKeyInfo {
+  string name = 1;
+  string public_key = 2;
+  google.protobuf.Timestamp created_at = 3;
+}
+
+// Node Drain
+
+message DrainNodeRequest {
+  string node_id = 1;
+  string target_node = 2;  // Optional: move VMs to this specific node; auto-schedule if empty
+}
+
+message DrainNodeResponse {
+  bool success = 1;
+  int32 vms_migrated = 2;
+  string message = 3;
 }
 

@@ -40,6 +40,7 @@ pub fn generate_node_config(
     gateway_interface: &str,
     network: &NetworkConfig,
     networks: &[NetworkRow],
+    vm_ssh_keys: &std::collections::HashMap<String, Vec<String>>,
 ) -> String {
     let mut out = String::from("{ pkgs, ... }: {\n");
     out.push_str("  ch-vm.vms = {\n");
@@ -145,8 +146,28 @@ pub fn generate_node_config(
             "      autoStart = {};\n",
             if vm.auto_start { "true" } else { "false" }
         ));
+        let ssh_keys = vm_ssh_keys.get(&vm.id).cloned().unwrap_or_default();
         if !vm.cloud_init_user_data.is_empty() {
             let escaped = nix_escape(&vm.cloud_init_user_data);
+            out.push_str(&format!(
+                "      cloudInitUserConfigFile = pkgs.writeText \"{nix_name}-cloud-init.yaml\" \"{escaped}\";\n"
+            ));
+        } else if !ssh_keys.is_empty() {
+            let mut ci = String::from("#cloud-config\n");
+            ci.push_str(&format!("hostname: {}\n", nix_name));
+            ci.push_str("users:\n");
+            ci.push_str("  - default\n");
+            ci.push_str("  - name: kcore\n");
+            ci.push_str("    gecos: kcore default user\n");
+            ci.push_str("    groups: [sudo]\n");
+            ci.push_str("    shell: /bin/bash\n");
+            ci.push_str("    lock_passwd: true\n");
+            ci.push_str("    ssh_authorized_keys:\n");
+            for key in &ssh_keys {
+                ci.push_str(&format!("      - \"{}\"\n", key.replace('"', "\\\"").replace('\\', "\\\\")));
+            }
+            ci.push_str("ssh_pwauth: false\n");
+            let escaped = nix_escape(&ci);
             out.push_str(&format!(
                 "      cloudInitUserConfigFile = pkgs.writeText \"{nix_name}-cloud-init.yaml\" \"{escaped}\";\n"
             ));
@@ -194,7 +215,7 @@ mod tests {
 
     #[test]
     fn generates_valid_nix() {
-        let config = generate_node_config(&[vm(true, "web-01")], "eno1", &default_net(), &[]);
+        let config = generate_node_config(&[vm(true, "web-01")], "eno1", &default_net(), &[], &std::collections::HashMap::new());
         assert!(config.contains("ch-vm.vms"));
         assert!(config.contains("web-01"));
         assert!(config.contains("cores = 2"));
@@ -210,20 +231,20 @@ mod tests {
             internal_netmask: "255.255.255.128".into(),
             ..default_net()
         };
-        let config = generate_node_config(&[vm(false, "web-01")], "eno1", &net, &[]);
+        let config = generate_node_config(&[vm(false, "web-01")], "eno1", &net, &[], &std::collections::HashMap::new());
         assert!(config.contains("internalNetmask = \"255.255.255.128\""));
         assert!(config.contains("autoStart = false;"));
     }
 
     #[test]
     fn sanitizes_vm_name_for_nix_attr_key() {
-        let config = generate_node_config(&[vm(true, "db node 01")], "eno1", &default_net(), &[]);
+        let config = generate_node_config(&[vm(true, "db node 01")], "eno1", &default_net(), &[], &std::collections::HashMap::new());
         assert!(config.contains("virtualMachines.\"db-node-01\""));
     }
 
     #[test]
     fn sanitizes_special_chars_in_vm_name() {
-        let config = generate_node_config(&[vm(true, "web\";inject")], "eno1", &default_net(), &[]);
+        let config = generate_node_config(&[vm(true, "web\";inject")], "eno1", &default_net(), &[], &std::collections::HashMap::new());
         assert!(config.contains("virtualMachines.\"web--inject\""));
         assert!(!config.contains("\";inject"));
     }
@@ -239,7 +260,7 @@ mod tests {
     fn image_path_with_special_chars_is_escaped() {
         let mut v = vm(true, "evil");
         v.image_path = r#"/images/foo"${bar}.raw"#.into();
-        let config = generate_node_config(&[v], "eno1", &default_net(), &[]);
+        let config = generate_node_config(&[v], "eno1", &default_net(), &[], &std::collections::HashMap::new());
         assert!(config.contains(r#"image = "/images/foo\"\${bar}.raw";"#));
         // The raw `${` is escaped to `\${`, preventing Nix interpolation.
         assert!(!config.contains("image = \"/images/foo\"${bar}.raw\";"));
@@ -249,7 +270,7 @@ mod tests {
     fn image_format_is_rendered_for_qcow2() {
         let mut v = vm(true, "qcow");
         v.image_format = "qcow2".into();
-        let config = generate_node_config(&[v], "eno1", &default_net(), &[]);
+        let config = generate_node_config(&[v], "eno1", &default_net(), &[], &std::collections::HashMap::new());
         assert!(config.contains("imageFormat = \"qcow2\";"));
     }
 
@@ -261,7 +282,7 @@ mod tests {
             gateway_ip: "10.0.0.1\\".into(),
             internal_netmask: "255.255.255.0".into(),
         };
-        let config = generate_node_config(&[], "eno1\"", &net, &[]);
+        let config = generate_node_config(&[], "eno1\"", &net, &[], &std::collections::HashMap::new());
         assert!(config.contains(r#"gatewayInterface = "eno1\"";"#));
         assert!(config.contains(r#"externalIP = "1.2.3.4\"";"#));
         assert!(config.contains(r#"gatewayIP = "10.0.0.1\\";"#));
@@ -278,7 +299,7 @@ mod tests {
             allowed_tcp_ports: String::new(),
             allowed_udp_ports: String::new(),
         }];
-        let config = generate_node_config(&[], "eno1", &default_net(), &networks);
+        let config = generate_node_config(&[], "eno1", &default_net(), &networks, &std::collections::HashMap::new());
         assert!(config.contains("networks.\"frontend\""));
         assert!(config.contains("gatewayIP = \"10.240.10.1\";"));
     }
@@ -294,8 +315,20 @@ mod tests {
             allowed_tcp_ports: "80,443,8080".into(),
             allowed_udp_ports: "53".into(),
         }];
-        let config = generate_node_config(&[], "eno1", &default_net(), &networks);
+        let config = generate_node_config(&[], "eno1", &default_net(), &networks, &std::collections::HashMap::new());
         assert!(config.contains("allowedTCPPorts = [ 80 443 8080 ];"));
         assert!(config.contains("allowedUDPPorts = [ 53 ];"));
+    }
+
+    #[test]
+    fn injects_ssh_keys_into_cloud_init() {
+        let v = vm(true, "web-01");
+        let mut keys = std::collections::HashMap::new();
+        keys.insert("vm-1".to_string(), vec!["ssh-rsa AAAAB3... user@host".to_string()]);
+        let config = generate_node_config(&[v], "eno1", &default_net(), &[], &keys);
+        assert!(config.contains("cloudInitUserConfigFile"));
+        assert!(config.contains("ssh_authorized_keys"));
+        assert!(config.contains("lock_passwd: true"));
+        assert!(config.contains("ssh_pwauth: false"));
     }
 }
