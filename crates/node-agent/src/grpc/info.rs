@@ -69,7 +69,11 @@ fn read_capacity_and_usage() -> (i32, i64, i32, i64) {
 
     let cpu_used = std::fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| s.split_whitespace().next().and_then(|v| v.parse::<f64>().ok()))
+        .and_then(|s| {
+            s.split_whitespace()
+                .next()
+                .and_then(|v| v.parse::<f64>().ok())
+        })
         .map(|load| load.round() as i32)
         .unwrap_or(0);
 

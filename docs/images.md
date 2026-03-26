@@ -18,6 +18,8 @@ kcore-kctl create vm web-01 \
   --image "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2" \
   --image-sha256 "<sha256>" \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --cpu 2 \
   --memory 4G
 ```
@@ -64,6 +66,8 @@ kcore-kctl create vm ubuntu-noble-1 \
   --image-path /var/lib/kcore/images/ubuntu-24.04-noble-cloudimg-amd64.qcow2 \
   --image-format qcow2 \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --cpu 2 \
   --memory 4G
 ```
@@ -77,6 +81,8 @@ kcore-kctl create vm app-01 \
   --image-path /var/lib/kcore/images/app-base.qcow2 \
   --image-format qcow2 \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --wait
 ```
 
@@ -87,6 +93,8 @@ kcore-kctl create vm app-ssh-01 \
   --image-path /var/lib/kcore/images/app-base.qcow2 \
   --image-format qcow2 \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --wait-for-ssh \
   --wait-timeout-seconds 300 \
   --ssh-port 22

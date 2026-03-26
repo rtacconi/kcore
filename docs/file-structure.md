@@ -16,8 +16,8 @@ kcore-rust/
 ├── .gitignore                       ignored paths (target, result-*, ISOs)
 │
 ├── proto/
-│   ├── controller.proto             gRPC API for the controller (node reg, heartbeats, VM CRUD)
-│   └── node.proto                   gRPC API for nodes (admin, compute, storage, info)
+│   ├── controller.proto             gRPC API for the controller (node reg+storage capability, heartbeats, VM CRUD)
+│   └── node.proto                   gRPC API for nodes (admin, compute, storage, info, typed install storage)
 │
 ├── crates/
 │   ├── controller/                  kcore-controller crate
@@ -71,8 +71,8 @@ kcore-rust/
 │           ├── pki.rs               cluster PKI generation (CA, controller, node, kctl certs)
 │           └── commands/
 │               ├── mod.rs           re-exports command modules
-│               ├── vm.rs            VM commands: create (flags/YAML), delete, get, list, set state, wait/wait-for-ssh readiness
-│               ├── node.rs          node commands: disks, nics, install, apply-nix, upload-image, list, get
+│               ├── vm.rs            VM commands: create (flags/YAML, storage backend+size), delete, get, list, set state, wait/wait-for-ssh readiness
+│               ├── node.rs          node commands: disks, nics, install (typed storage opts), apply-nix, upload-image, list, get
 │               ├── cluster.rs       cluster commands: create cluster (PKI + context setup)
 │               ├── apply.rs         apply commands: push nix config to controller
 │               └── image.rs         image commands: pull/delete images on nodes

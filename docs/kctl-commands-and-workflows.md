@@ -46,6 +46,8 @@ kctl create vm web-01 \
   --cpu 2 \
   --memory 4G \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --image https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2 \
   --image-sha256 <sha256>
 ```
@@ -57,6 +59,8 @@ kctl create vm web-01 \
   --image-path /var/lib/kcore/images/debian12-base.qcow2 \
   --image-format qcow2 \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --wait
 ```
 
@@ -67,6 +71,8 @@ kctl create vm web-01 \
   --image-path /var/lib/kcore/images/debian12-base.qcow2 \
   --image-format qcow2 \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --wait-for-ssh \
   --wait-timeout-seconds 300 \
   --ssh-port 22
@@ -145,7 +151,8 @@ Install KcoreOS to disk:
 kctl --node 10.0.0.21:9091 node install \
   --os-disk /dev/sda \
   --data-disk /dev/nvme0n1 \
-  --join-controller 10.0.0.10:9090
+  --join-controller 10.0.0.10:9090 \
+  --storage-backend filesystem
 ```
 
 Apply Nix to a node:
@@ -190,6 +197,8 @@ kctl create vm web-01 \
   --cpu 2 \
   --memory 4G \
   --network default \
+  --storage-backend filesystem \
+  --storage-size-bytes 42949672960 \
   --image-path /var/lib/kcore/images/debian12-base.qcow2 \
   --image-format qcow2
 ```
@@ -224,7 +233,7 @@ kctl apply -f ./controller-config.nix --dry-run
 
 Top-level commands:
 
-- `kctl create vm ...`
+- `kctl create vm ... --storage-backend <filesystem|lvm|zfs> --storage-size-bytes <bytes>`
 - `kctl create cluster ...`
 - `kctl delete vm ...`
 - `kctl delete image ...`
@@ -235,7 +244,7 @@ Top-level commands:
 - `kctl get nodes [name]`
 - `kctl node disks`
 - `kctl node nics`
-- `kctl node install --os-disk ... --join-controller ... [--data-disk ...]`
+- `kctl node install --os-disk ... --join-controller ... [--data-disk ...] [--storage-backend filesystem|lvm|zfs]`
 - `kctl node apply-nix -f ... [--no-rebuild]`
 - `kctl pull image <uri>` (legacy/manual path)
 - `kctl apply -f ... [--dry-run]`
@@ -247,10 +256,36 @@ New environment:
 
 1. `kctl create cluster --controller <controller:9090>`
 2. Install each node with `kctl --node ... node install ...`
-3. Create VMs with `kctl create vm ... --image <https-url> --image-sha256 <sha256>`
+3. Create VMs with `kctl create vm ... --storage-backend ... --storage-size-bytes ... --image <https-url> --image-sha256 <sha256>`
 
 Day-2 operations:
 
 1. inspect with `kctl get ...`
 2. adjust desired VM running state with `kctl set vm ... --state ...` (or `kctl start/stop vm ...`)
 3. update configs with `kctl node apply-nix ...` or `kctl apply ...`
+
+## 10) Storage backend examples
+
+Install node with LVM data disk mode:
+
+```bash
+kcore-kctl --node 192.168.40.105:9091 node install \
+  --os-disk /dev/sda \
+  --data-disk /dev/nvme0n1 \
+  --join-controller 192.168.40.105:9090 \
+  --data-disk-mode lvm
+```
+
+Create VM with ZFS storage settings:
+
+```bash
+kcore-kctl create vm app-zfs-01 \
+  --image-path /var/lib/kcore/images/ubuntu-24.04.raw \
+  --image-format raw \
+  --cpu 2 \
+  --memory 4G \
+  --network default \
+  --storage-backend zfs \
+  --storage-size-bytes 42949672960 \
+  --target-node 192.168.40.105:9091
+```

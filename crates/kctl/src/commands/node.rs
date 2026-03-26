@@ -52,10 +52,7 @@ pub async fn get_node(info: &ConnectionInfo, node_id: &str) -> Result<()> {
                 4 => "Error",
                 _ => "Unknown",
             };
-            println!(
-                "  {:<36}  {:<20}  {:<10}",
-                vm.id, vm.name, state
-            );
+            println!("  {:<36}  {:<20}  {:<10}", vm.id, vm.name, state);
         }
     }
     Ok(())
@@ -100,6 +97,11 @@ pub async fn install(
     join_controller: Option<&str>,
     run_controller: bool,
     data_disk_mode: &str,
+    storage_backend: Option<&str>,
+    lvm_vg_name: Option<&str>,
+    lvm_lv_prefix: Option<&str>,
+    zfs_pool_name: Option<&str>,
+    zfs_dataset_prefix: Option<&str>,
     certs_dir: &Path,
 ) -> Result<()> {
     let join_controller = validate_install_controller_mode(join_controller, run_controller)?;
@@ -112,6 +114,9 @@ pub async fn install(
     let install_pki = pki::load_install_pki(certs_dir, &node_host, node_is_controller)
         .map_err(|e| anyhow::anyhow!("loading PKI: {e}"))?;
 
+    let typed_storage_backend = storage_backend
+        .map(storage_backend_to_proto)
+        .unwrap_or(node_proto::StorageBackendType::Unspecified as i32);
     let mut client = client::node_admin_client(info).await?;
     let resp = client
         .install_to_disk(node_proto::InstallToDiskRequest {
@@ -127,6 +132,11 @@ pub async fn install(
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
             data_disk_mode: data_disk_mode.trim().to_string(),
+            storage_backend: typed_storage_backend,
+            lvm_vg_name: lvm_vg_name.unwrap_or("").trim().to_string(),
+            lvm_lv_prefix: lvm_lv_prefix.unwrap_or("").trim().to_string(),
+            zfs_pool_name: zfs_pool_name.unwrap_or("").trim().to_string(),
+            zfs_dataset_prefix: zfs_dataset_prefix.unwrap_or("").trim().to_string(),
         })
         .await?
         .into_inner();
@@ -149,6 +159,15 @@ fn validate_install_controller_mode(
         anyhow::bail!("provide exactly one of --join-controller <host:port> or --run-controller");
     }
     Ok(join.to_string())
+}
+
+fn storage_backend_to_proto(value: &str) -> i32 {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "filesystem" => node_proto::StorageBackendType::Filesystem as i32,
+        "lvm" => node_proto::StorageBackendType::Lvm as i32,
+        "zfs" => node_proto::StorageBackendType::Zfs as i32,
+        _ => node_proto::StorageBackendType::Unspecified as i32,
+    }
 }
 
 pub async fn apply_nix(info: &ConnectionInfo, file: &str, rebuild: bool) -> Result<()> {
@@ -335,5 +354,25 @@ mod tests {
         assert_eq!(super::infer_image_format_from_name("debian.qcow2"), "qcow2");
         assert_eq!(super::infer_image_format_from_name("disk.raw"), "raw");
         assert_eq!(super::infer_image_format_from_name("disk.img"), "raw");
+    }
+
+    #[test]
+    fn storage_backend_to_proto_maps_supported_values() {
+        assert_eq!(
+            super::storage_backend_to_proto("filesystem"),
+            super::node_proto::StorageBackendType::Filesystem as i32
+        );
+        assert_eq!(
+            super::storage_backend_to_proto("lvm"),
+            super::node_proto::StorageBackendType::Lvm as i32
+        );
+        assert_eq!(
+            super::storage_backend_to_proto("zfs"),
+            super::node_proto::StorageBackendType::Zfs as i32
+        );
+        assert_eq!(
+            super::storage_backend_to_proto(""),
+            super::node_proto::StorageBackendType::Unspecified as i32
+        );
     }
 }

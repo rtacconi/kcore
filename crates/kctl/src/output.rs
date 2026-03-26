@@ -48,8 +48,8 @@ pub fn print_vm_detail(
 
 pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
     println!(
-        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}",
-        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS"
+        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}",
+        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS", "STORAGE"
     );
     for n in nodes {
         let (cores, mem) = if let Some(cap) = &n.capacity {
@@ -58,8 +58,14 @@ pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
             (0, "n/a".to_string())
         };
         println!(
-            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}",
-            n.node_id, n.hostname, n.address, cores, mem, n.status
+            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}",
+            n.node_id,
+            n.hostname,
+            n.address,
+            cores,
+            mem,
+            n.status,
+            storage_backend_str(n.storage_backend)
         );
     }
 }
@@ -86,6 +92,7 @@ pub fn print_node_detail(n: &controller_proto::NodeInfo) {
     if !n.labels.is_empty() {
         println!("Labels:    {}", n.labels.join(", "));
     }
+    println!("Storage:   {}", storage_backend_str(n.storage_backend));
 }
 
 pub fn print_disk_table(disks: &[node_proto::DiskInfo]) {
@@ -122,5 +129,16 @@ fn vm_state_str(state: i32) -> &'static str {
         3 => "Paused",
         4 => "Error",
         _ => "Unknown",
+    }
+}
+
+fn storage_backend_str(value: i32) -> &'static str {
+    match controller_proto::StorageBackendType::try_from(value)
+        .unwrap_or(controller_proto::StorageBackendType::Unspecified)
+    {
+        controller_proto::StorageBackendType::Filesystem => "filesystem",
+        controller_proto::StorageBackendType::Lvm => "lvm",
+        controller_proto::StorageBackendType::Zfs => "zfs",
+        controller_proto::StorageBackendType::Unspecified => "unspecified",
     }
 }

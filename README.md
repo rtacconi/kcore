@@ -40,10 +40,10 @@ See: [Security model](docs/security.md)
 - Initialize cluster PKI/context: `kctl create cluster --controller <host:9090>`
 - Install nodes from live ISO: `kctl --node <host:9091> node install ...`
 - Create VMs with a direct HTTPS image URL + checksum:
-  `kctl create vm <name> --image <https-url> --image-sha256 <sha256>`
+  `kctl create vm <name> --storage-backend <filesystem|lvm|zfs> --storage-size-bytes <bytes> --image <https-url> --image-sha256 <sha256>`
 - Create VMs from node-local uploaded image path:
   `kctl --node <host:9091> node upload-image -f <local-image.{qcow2,raw}> ...`
-  then `kctl create vm <name> --image-path <node-path> --image-format <qcow2|raw>`
+  then `kctl create vm <name> --storage-backend <filesystem|lvm|zfs> --storage-size-bytes <bytes> --image-path <node-path> --image-format <qcow2|raw>`
 - Wait for VM readiness:
   `kctl create vm <name> ... --wait` or `kctl create vm <name> ... --wait-for-ssh`
 - Manage VM desired state declaratively: `kctl set vm <name> --state <running|stopped>`

@@ -44,6 +44,7 @@ message RegisterNodeRequest {
   string address = 3; // gRPC endpoint address
   NodeCapacity capacity = 4;
   repeated string labels = 5; // e.g., "dc=dc-a", "rack=rack-1"
+  StorageBackendType storage_backend = 6; // Node storage backend capability (filesystem/lvm/zfs)
 }
 
 message RegisterNodeResponse {
@@ -79,6 +80,13 @@ message NodeUsage {
   int64 memory_bytes_used = 2;
 }
 
+enum StorageBackendType {
+  STORAGE_BACKEND_TYPE_UNSPECIFIED = 0;
+  STORAGE_BACKEND_TYPE_FILESYSTEM = 1;
+  STORAGE_BACKEND_TYPE_LVM = 2;
+  STORAGE_BACKEND_TYPE_ZFS = 3;
+}
+
 // VM Operations - all include target_node for explicit node selection
 
 message CreateVmRequest {
@@ -90,6 +98,8 @@ message CreateVmRequest {
   string image_path = 6;    // Optional node-local image path (alternative to image_url/image_sha256)
   string image_format = 7;  // Required when image_path is used: qcow2 or raw
   repeated string ssh_key_names = 8;  // SSH key names to inject (looked up from controller DB)
+  StorageBackendType storage_backend = 9; // Required VM storage backend for compatibility checks
+  int64 storage_size_bytes = 10; // Required VM storage size in bytes (> 0)
 }
 
 message CreateVmResponse {
@@ -224,6 +234,7 @@ message NodeInfo {
   string status = 6;  // "ready", "not-ready", "unknown"
   google.protobuf.Timestamp last_heartbeat = 7;
   repeated string labels = 8;  // e.g., "dc=dc-a", "rack=rack-1"
+  StorageBackendType storage_backend = 9;
 }
 
 message GetNodeRequest {

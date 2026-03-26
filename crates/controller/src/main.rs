@@ -7,9 +7,9 @@ mod node_client;
 mod scheduler;
 
 use clap::Parser;
+use tokio::signal;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
-use tokio::signal;
 
 pub mod controller_proto {
     tonic::include_proto!("kcore.controller");

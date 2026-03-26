@@ -119,7 +119,10 @@ impl Config {
             anyhow::bail!("nodeId is required");
         }
         if self.listen_addr.parse::<std::net::SocketAddr>().is_err() {
-            anyhow::bail!("listen_addr '{}' is not a valid socket address", self.listen_addr);
+            anyhow::bail!(
+                "listen_addr '{}' is not a valid socket address",
+                self.listen_addr
+            );
         }
         if let Some(tls) = &self.tls {
             for (label, path) in [
@@ -200,7 +203,9 @@ storage:
 "#,
         )
         .expect("parse");
-        let err = cfg.validate().expect_err("should reject missing lvm config");
+        let err = cfg
+            .validate()
+            .expect_err("should reject missing lvm config");
         assert!(err.to_string().contains("lvm"));
     }
 }

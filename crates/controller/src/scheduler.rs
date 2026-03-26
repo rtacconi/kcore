@@ -51,6 +51,7 @@ mod tests {
             gateway_interface: String::new(),
             cpu_used,
             memory_used: mem_used,
+            storage_backend: "filesystem".into(),
         }
     }
 

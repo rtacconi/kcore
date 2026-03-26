@@ -769,7 +769,10 @@ fn sanitize_image_name(name: &str, format: &str) -> String {
     if cleaned.is_empty() {
         cleaned = format!("uploaded-image.{format}");
     }
-    if !cleaned.to_ascii_lowercase().ends_with(&format!(".{format}")) {
+    if !cleaned
+        .to_ascii_lowercase()
+        .ends_with(&format!(".{format}"))
+    {
         cleaned.push('.');
         cleaned.push_str(format);
     }

@@ -15,8 +15,9 @@ use super::helpers::{
 };
 use super::validation::{
     derive_image_format, derive_image_format_from_path, derive_local_image_path,
-    normalize_image_format, validate_image_path, validate_image_sha256, validate_image_url,
-    validate_ipv4, validate_netmask, validate_network_name,
+    normalize_image_format, normalize_storage_backend, storage_backend_to_proto,
+    validate_image_path, validate_image_sha256, validate_image_url, validate_ipv4,
+    validate_netmask, validate_network_name, validate_storage_size_bytes,
 };
 
 #[cfg(test)]
@@ -215,18 +216,16 @@ impl ControllerService {
         self.clients.connect(&node.address).await.map_err(|e| {
             Status::unavailable(format!("no connection to node {}: {e}", node.address))
         })?;
-        self.clients.get_admin(&node.address).ok_or_else(|| {
-            Status::unavailable(format!("no connection to node {}", node.address))
-        })
+        self.clients
+            .get_admin(&node.address)
+            .ok_or_else(|| Status::unavailable(format!("no connection to node {}", node.address)))
     }
 
     async fn ensure_compute_client_for_address(
         &self,
         address: &str,
-    ) -> Result<
-        node_proto::node_compute_client::NodeComputeClient<tonic::transport::Channel>,
-        Status,
-    > {
+    ) -> Result<node_proto::node_compute_client::NodeComputeClient<tonic::transport::Channel>, Status>
+    {
         if let Some(client) = self.clients.get_compute(address) {
             return Ok(client);
         }
@@ -252,6 +251,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .capacity
             .map(|c| (c.cpu_cores, c.memory_bytes))
             .unwrap_or((0, 0));
+        let storage_backend = normalize_storage_backend(req.storage_backend, false)?;
 
         let node = NodeRow {
             id: req.node_id.clone(),
@@ -264,6 +264,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             gateway_interface: String::new(),
             cpu_used: 0,
             memory_used: 0,
+            storage_backend,
         };
 
         self.db
@@ -374,6 +375,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .spec
             .ok_or_else(|| Status::invalid_argument("spec is required"))?;
 
+        let requested_storage_backend = normalize_storage_backend(req.storage_backend, true)?;
+        let requested_storage_size_bytes = validate_storage_size_bytes(req.storage_size_bytes)?;
+
         let node = if !req.target_node.is_empty() {
             self.db
                 .get_node_by_address(&req.target_node)
@@ -385,10 +389,24 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 .db
                 .list_nodes()
                 .map_err(|e| Status::internal(e.to_string()))?;
-            scheduler::select_node_for_vm(&nodes, spec.cpu, spec.memory_bytes)
+            let compatible_nodes: Vec<NodeRow> = nodes
+                .into_iter()
+                .filter(|n| n.storage_backend == requested_storage_backend)
+                .collect();
+            scheduler::select_node_for_vm(&compatible_nodes, spec.cpu, spec.memory_bytes)
                 .cloned()
-                .ok_or_else(|| Status::unavailable("no ready node with sufficient capacity"))?
+                .ok_or_else(|| {
+                    Status::unavailable(
+                        "no ready node with sufficient capacity matching requested storage backend",
+                    )
+                })?
         };
+        if node.storage_backend != requested_storage_backend {
+            return Err(Status::failed_precondition(format!(
+                "VM storage backend '{}' does not match node '{}' backend '{}'",
+                requested_storage_backend, node.id, node.storage_backend
+            )));
+        }
 
         let vm_id = if spec.id.is_empty() {
             let mut selected: Option<String> = None;
@@ -512,6 +530,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
             created_at: String::new(),
             runtime_state: "unknown".to_string(),
             cloud_init_user_data: req.cloud_init_user_data,
+            storage_backend: requested_storage_backend,
+            storage_size_bytes: requested_storage_size_bytes,
         };
 
         self.db
@@ -526,9 +546,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     .map_err(|e| Status::internal(format!("checking ssh key: {e}")))?
                     .is_none()
                 {
-                    self.db
-                        .delete_vm_by_id_or_name(&vm_id)
-                        .ok();
+                    self.db.delete_vm_by_id_or_name(&vm_id).ok();
                     return Err(Status::not_found(format!(
                         "SSH key '{}' not found",
                         key_name
@@ -694,7 +712,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
             })
             .ok_or_else(|| Status::not_found(format!("VM {} not found", req.vm_id)))?;
 
-        let mut client = self.ensure_compute_client_for_address(&node.address).await?;
+        let mut client = self
+            .ensure_compute_client_for_address(&node.address)
+            .await?;
 
         let resp = client
             .get_vm(node_proto::GetVmRequest {
@@ -1111,6 +1131,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     status: n.status,
                     last_heartbeat: hb,
                     labels,
+                    storage_backend: storage_backend_to_proto(&n.storage_backend),
                 }
             })
             .collect();
@@ -1155,6 +1176,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 status: node.status,
                 last_heartbeat: hb,
                 labels,
+                storage_backend: storage_backend_to_proto(&node.storage_backend),
             }),
         }))
     }
@@ -1332,17 +1354,10 @@ impl controller_proto::controller_server::Controller for ControllerService {
                         Status::not_found(format!("target node '{}' not found", req.target_node))
                     })?
             } else {
-                match scheduler::select_node_for_vm(
-                    &eligible_nodes,
-                    vm.cpu,
-                    vm.memory_bytes,
-                ) {
+                match scheduler::select_node_for_vm(&eligible_nodes, vm.cpu, vm.memory_bytes) {
                     Some(n) => n,
                     None => {
-                        errors.push(format!(
-                            "no node with capacity for VM '{}'",
-                            vm.name
-                        ));
+                        errors.push(format!("no node with capacity for VM '{}'", vm.name));
                         continue;
                     }
                 }
@@ -1443,6 +1458,7 @@ mod tests {
             gateway_interface: "eno1".to_string(),
             cpu_used: 0,
             memory_used: 0,
+            storage_backend: "filesystem".to_string(),
         }
     }
 
@@ -1464,6 +1480,8 @@ mod tests {
             created_at: String::new(),
             runtime_state: "unknown".to_string(),
             cloud_init_user_data: String::new(),
+            storage_backend: "filesystem".to_string(),
+            storage_size_bytes: 10 * 1024 * 1024 * 1024,
         }
     }
 
@@ -1654,6 +1672,8 @@ mod tests {
             image_path: String::new(),
             image_format: String::new(),
             ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
         };
 
         let err =
@@ -1673,9 +1693,8 @@ mod tests {
         let node = test_node();
         db.upsert_node(&node).expect("insert node");
 
-        let hook: PushHook = Arc::new(|_n: &NodeRow| {
-            Err(Status::internal("simulated push failure for test"))
-        });
+        let hook: PushHook =
+            Arc::new(|_n: &NodeRow| Err(Status::internal("simulated push failure for test")));
         let svc = ControllerService::new_with_test_push_hook(
             db.clone(),
             NodeClients::new(None),
@@ -1700,14 +1719,17 @@ mod tests {
             image_path: String::new(),
             image_format: String::new(),
             ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
         };
 
-        let err = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
-            &svc,
-            Request::new(req),
-        )
-        .await
-        .expect_err("create should fail when push fails");
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("create should fail when push fails");
         assert_eq!(err.code(), tonic::Code::Aborted);
 
         let found = db
@@ -1721,7 +1743,8 @@ mod tests {
         let db = Database::open(":memory:").expect("open db");
         let node = test_node();
         db.upsert_node(&node).expect("insert node");
-        db.insert_vm(&test_vm(&node.id)).expect("insert existing vm");
+        db.insert_vm(&test_vm(&node.id))
+            .expect("insert existing vm");
 
         let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
         let svc = ControllerService::new_with_test_push_hook(
@@ -1747,16 +1770,65 @@ mod tests {
             image_path: "/var/lib/kcore/images/web-1.raw".to_string(),
             image_format: "raw".to_string(),
             ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
         };
 
-        let err = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
-            &svc,
-            Request::new(req),
-        )
-        .await
-        .expect_err("duplicate image path should be rejected");
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("duplicate image path should be rejected");
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
         assert!(err.message().contains("already used"));
+    }
+
+    #[tokio::test]
+    async fn create_vm_rejects_storage_backend_mismatch() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.storage_backend = "zfs".to_string();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db,
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: node.id,
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-storage-mismatch".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            cloud_init_user_data: String::new(),
+            image_path: "/var/lib/kcore/images/base.raw".to_string(),
+            image_format: "raw".to_string(),
+            ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
+        };
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("mismatched storage backend should fail");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("does not match"));
     }
 
     #[tokio::test]
@@ -1798,22 +1870,26 @@ mod tests {
             hook,
         );
 
-        let resp = <ControllerService as controller_proto::controller_server::Controller>::drain_node(
-            &svc,
-            Request::new(controller_proto::DrainNodeRequest {
-                node_id: "node-a".to_string(),
-                target_node: "node-b".to_string(),
-            }),
-        )
-        .await
-        .expect("drain should succeed")
-        .into_inner();
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::drain_node(
+                &svc,
+                Request::new(controller_proto::DrainNodeRequest {
+                    node_id: "node-a".to_string(),
+                    target_node: "node-b".to_string(),
+                }),
+            )
+            .await
+            .expect("drain should succeed")
+            .into_inner();
 
         assert!(resp.success, "drain should succeed: {}", resp.message);
         assert_eq!(resp.vms_migrated, 2);
 
         let node_a_vms = db.list_vms_for_node("node-a").expect("list vms node-a");
-        assert!(node_a_vms.is_empty(), "node-a should have no VMs after drain");
+        assert!(
+            node_a_vms.is_empty(),
+            "node-a should have no VMs after drain"
+        );
 
         let node_b_vms = db.list_vms_for_node("node-b").expect("list vms node-b");
         assert_eq!(node_b_vms.len(), 2, "node-b should have 2 VMs after drain");
@@ -1830,7 +1906,10 @@ mod tests {
             *pushed
         );
 
-        let node_a_status = db.get_node("node-a").expect("get node-a").expect("node-a exists");
+        let node_a_status = db
+            .get_node("node-a")
+            .expect("get node-a")
+            .expect("node-a exists");
         assert_eq!(node_a_status.status, "drained");
     }
 }

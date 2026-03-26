@@ -50,6 +50,18 @@
         description = "Disk image size in MiB (used when auto-creating).";
       };
 
+      storageBackend = lib.mkOption {
+        type = lib.types.enum ["filesystem" "lvm" "zfs"];
+        default = "filesystem";
+        description = "Storage backend requested for VM data volume provisioning.";
+      };
+
+      storageSizeBytes = lib.mkOption {
+        type = lib.types.ints.positive;
+        default = 10737418240;
+        description = "Requested VM storage size in bytes for backend provisioning metadata.";
+      };
+
       cores = lib.mkOption {
         type = lib.types.ints.positive;
         default = 2;

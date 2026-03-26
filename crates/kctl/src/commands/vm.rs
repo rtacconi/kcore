@@ -2,8 +2,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use crate::client::{self, controller_proto as proto};
-use crate::config::ConnectionInfo;
 use crate::commands::node;
+use crate::config::ConnectionInfo;
 use crate::output;
 use anyhow::{bail, Context, Result};
 
@@ -24,6 +24,8 @@ pub struct CreateArgs {
     pub ssh_port: i32,
     pub ssh_probe_timeout_ms: i32,
     pub ssh_keys: Vec<String>,
+    pub storage_backend: String,
+    pub storage_size_bytes: i64,
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
@@ -33,6 +35,10 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
     if (args.wait || args.wait_for_ssh) && args.wait_timeout_seconds == 0 {
         bail!("--wait-timeout-seconds must be > 0");
     }
+    let storage_backend = normalize_storage_backend_arg(&args.storage_backend)?;
+    if args.storage_size_bytes <= 0 {
+        bail!("--storage-size-bytes must be > 0");
+    }
     let (
         vm_name,
         vm_cpu,
@@ -41,37 +47,36 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         manifest_image,
         manifest_image_sha256,
         manifest_image_format,
-    ) =
-        if let Some(path) = &args.filename {
-            let manifest = parse_vm_manifest(path)?;
-            let n = args.name.unwrap_or(manifest.name);
-            (
-                n,
-                manifest.cpu,
-                manifest.memory_bytes,
-                manifest.nics,
-                manifest.image,
-                manifest.image_sha256,
-                manifest.image_format,
-            )
-        } else {
-            let n = args
-                .name
-                .context("NAME required (or use -f to create from a manifest)")?;
-            let mem = client::parse_size_bytes(&args.memory).map_err(|e| anyhow::anyhow!(e))?;
-            let cpu = args.cpu;
-            let nics = args
-                .network
-                .map(|net| {
-                    vec![proto::Nic {
-                        network: net,
-                        model: "virtio".to_string(),
-                        mac_address: String::new(),
-                    }]
-                })
-                .unwrap_or_default();
-            (n, cpu, mem, nics, None, None, None)
-        };
+    ) = if let Some(path) = &args.filename {
+        let manifest = parse_vm_manifest(path)?;
+        let n = args.name.unwrap_or(manifest.name);
+        (
+            n,
+            manifest.cpu,
+            manifest.memory_bytes,
+            manifest.nics,
+            manifest.image,
+            manifest.image_sha256,
+            manifest.image_format,
+        )
+    } else {
+        let n = args
+            .name
+            .context("NAME required (or use -f to create from a manifest)")?;
+        let mem = client::parse_size_bytes(&args.memory).map_err(|e| anyhow::anyhow!(e))?;
+        let cpu = args.cpu;
+        let nics = args
+            .network
+            .map(|net| {
+                vec![proto::Nic {
+                    network: net,
+                    model: "virtio".to_string(),
+                    mac_address: String::new(),
+                }]
+            })
+            .unwrap_or_default();
+        (n, cpu, mem, nics, None, None, None)
+    };
     let image = resolve_create_image_source(
         args.image.as_deref(),
         args.image_sha256.as_deref(),
@@ -102,6 +107,8 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         image_path: image.path,
         image_format: image.format,
         ssh_key_names: args.ssh_keys,
+        storage_backend: storage_backend_to_proto(&storage_backend),
+        storage_size_bytes: args.storage_size_bytes,
     };
 
     let resp = client.create_vm(req).await?.into_inner();
@@ -167,7 +174,8 @@ async fn wait_for_vm_readiness(
             .into_inner();
         let spec = get.spec.as_ref().context("get_vm missing spec")?;
         let status = get.status.as_ref().context("get_vm missing status")?;
-        let current_state = proto::VmState::try_from(status.state).unwrap_or(proto::VmState::Unknown);
+        let current_state =
+            proto::VmState::try_from(status.state).unwrap_or(proto::VmState::Unknown);
 
         if mode == WaitMode::RunningAndSsh {
             if node_address_cache.is_none() {
@@ -499,6 +507,23 @@ fn normalize_image_format(format: &str) -> Result<String> {
     }
 }
 
+fn normalize_storage_backend_arg(value: &str) -> Result<String> {
+    let normalized = value.trim().to_ascii_lowercase();
+    match normalized.as_str() {
+        "filesystem" | "lvm" | "zfs" => Ok(normalized),
+        _ => bail!("storage backend must be one of: filesystem, lvm, zfs"),
+    }
+}
+
+fn storage_backend_to_proto(value: &str) -> i32 {
+    match value {
+        "filesystem" => proto::StorageBackendType::Filesystem as i32,
+        "lvm" => proto::StorageBackendType::Lvm as i32,
+        "zfs" => proto::StorageBackendType::Zfs as i32,
+        _ => proto::StorageBackendType::Unspecified as i32,
+    }
+}
+
 fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
     let data = std::fs::read_to_string(Path::new(path))?;
     let doc: serde_yaml::Value = serde_yaml::from_str(&data)?;
@@ -692,6 +717,7 @@ mod tests {
                 status: "ready".to_string(),
                 last_heartbeat: None,
                 labels: vec![],
+                storage_backend: proto::StorageBackendType::Filesystem as i32,
             },
             proto::NodeInfo {
                 node_id: "node-b".to_string(),
@@ -702,6 +728,7 @@ mod tests {
                 status: "ready".to_string(),
                 last_heartbeat: None,
                 labels: vec![],
+                storage_backend: proto::StorageBackendType::Filesystem as i32,
             },
         ];
         let addr = node_address_for_vm_node_id(&nodes, "node-b");
@@ -738,5 +765,16 @@ mod tests {
         .expect_err("unsupported format should fail");
         assert!(err.to_string().contains("raw"));
         assert!(err.to_string().contains("qcow2"));
+    }
+
+    #[test]
+    fn normalize_storage_backend_arg_accepts_supported_values() {
+        assert_eq!(
+            normalize_storage_backend_arg("filesystem").expect("filesystem"),
+            "filesystem"
+        );
+        assert_eq!(normalize_storage_backend_arg("LVM").expect("lvm"), "lvm");
+        assert_eq!(normalize_storage_backend_arg("zfs").expect("zfs"), "zfs");
+        assert!(normalize_storage_backend_arg("ceph").is_err());
     }
 }

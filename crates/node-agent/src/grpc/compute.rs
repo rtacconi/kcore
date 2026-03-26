@@ -199,9 +199,8 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
             )));
         }
 
-        std::fs::remove_file(&path).map_err(|e| {
-            Status::internal(format!("deleting {}: {e}", path.display()))
-        })?;
+        std::fs::remove_file(&path)
+            .map_err(|e| Status::internal(format!("deleting {}: {e}", path.display())))?;
 
         Ok(Response::new(proto::DeleteImageResponse {
             success: true,

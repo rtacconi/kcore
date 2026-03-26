@@ -357,6 +357,18 @@ message InstallToDiskRequest {
   string kctl_cert_pem = 9;      // kctl client certificate (PEM)
   string kctl_key_pem = 10;      // kctl client private key (PEM)
   string data_disk_mode = 12;    // storage mode for data disks: "filesystem", "lvm", or "zfs"
+  StorageBackendType storage_backend = 13; // typed storage backend (preferred over data_disk_mode when set)
+  string lvm_vg_name = 14;       // optional LVM VG name for install automation
+  string lvm_lv_prefix = 15;     // optional LVM LV prefix for install automation
+  string zfs_pool_name = 16;     // optional ZFS pool name for install automation
+  string zfs_dataset_prefix = 17; // optional ZFS dataset prefix for install automation
+}
+
+enum StorageBackendType {
+  STORAGE_BACKEND_TYPE_UNSPECIFIED = 0;
+  STORAGE_BACKEND_TYPE_FILESYSTEM = 1;
+  STORAGE_BACKEND_TYPE_LVM = 2;
+  STORAGE_BACKEND_TYPE_ZFS = 3;
 }
 
 message InstallToDiskResponse {

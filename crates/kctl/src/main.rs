@@ -156,6 +156,12 @@ enum CreateResource {
         /// SSH key names to inject (can specify multiple times)
         #[arg(long = "ssh-key")]
         ssh_keys: Vec<String>,
+        /// Required VM storage backend (filesystem, lvm, zfs)
+        #[arg(long = "storage-backend", value_enum)]
+        storage_backend: StorageBackend,
+        /// Required VM storage size in bytes (for backend provisioning metadata)
+        #[arg(long = "storage-size-bytes")]
+        storage_size_bytes: i64,
     },
     /// Create a network on a node (declarative)
     Network {
@@ -331,6 +337,21 @@ enum NodeAction {
         /// Storage mode for data disks: filesystem, lvm, or zfs
         #[arg(long, default_value = "filesystem")]
         data_disk_mode: String,
+        /// Typed storage backend for install flow (preferred over --data-disk-mode)
+        #[arg(long = "storage-backend", value_enum)]
+        storage_backend: Option<StorageBackend>,
+        /// Optional LVM VG name (used when backend is lvm)
+        #[arg(long = "lvm-vg-name")]
+        lvm_vg_name: Option<String>,
+        /// Optional LVM LV prefix (used when backend is lvm)
+        #[arg(long = "lvm-lv-prefix")]
+        lvm_lv_prefix: Option<String>,
+        /// Optional ZFS pool name (used when backend is zfs)
+        #[arg(long = "zfs-pool-name")]
+        zfs_pool_name: Option<String>,
+        /// Optional ZFS dataset prefix (used when backend is zfs)
+        #[arg(long = "zfs-dataset-prefix")]
+        zfs_dataset_prefix: Option<String>,
     },
     /// Apply a NixOS configuration to a node
     ApplyNix {
@@ -412,6 +433,13 @@ enum NodeImageFormat {
     Qcow2,
 }
 
+#[derive(Clone, ValueEnum)]
+enum StorageBackend {
+    Filesystem,
+    Lvm,
+    Zfs,
+}
+
 fn resolve_controller(cli: &Cli) -> Result<config::ConnectionInfo, String> {
     let config_path = cli
         .config
@@ -452,6 +480,8 @@ async fn main() {
                     ssh_port,
                     ssh_probe_timeout_ms,
                     ssh_keys,
+                    storage_backend,
+                    storage_size_bytes,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
@@ -474,6 +504,12 @@ async fn main() {
                     ssh_port: *ssh_port,
                     ssh_probe_timeout_ms: *ssh_probe_timeout_ms,
                     ssh_keys: ssh_keys.clone(),
+                    storage_backend: match storage_backend {
+                        StorageBackend::Filesystem => "filesystem".to_string(),
+                        StorageBackend::Lvm => "lvm".to_string(),
+                        StorageBackend::Zfs => "zfs".to_string(),
+                    },
+                    storage_size_bytes: *storage_size_bytes,
                 },
             )
             .await
@@ -637,6 +673,11 @@ async fn main() {
                     join_controller,
                     run_controller,
                     data_disk_mode,
+                    storage_backend,
+                    lvm_vg_name,
+                    lvm_lv_prefix,
+                    zfs_pool_name,
+                    zfs_dataset_prefix,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
@@ -654,6 +695,15 @@ async fn main() {
                 join_controller.as_deref(),
                 *run_controller,
                 data_disk_mode,
+                storage_backend.as_ref().map(|v| match v {
+                    StorageBackend::Filesystem => "filesystem",
+                    StorageBackend::Lvm => "lvm",
+                    StorageBackend::Zfs => "zfs",
+                }),
+                lvm_vg_name.as_deref(),
+                lvm_lv_prefix.as_deref(),
+                zfs_pool_name.as_deref(),
+                zfs_dataset_prefix.as_deref(),
                 &certs_dir,
             )
             .await

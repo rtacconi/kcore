@@ -1,3 +1,4 @@
+use crate::controller_proto;
 use std::net::Ipv4Addr;
 use tonic::Status;
 
@@ -148,6 +149,36 @@ pub fn validate_netmask(value: &str) -> Result<String, Status> {
     Ok(parsed)
 }
 
+pub fn normalize_storage_backend(backend: i32, required: bool) -> Result<String, Status> {
+    let parsed = controller_proto::StorageBackendType::try_from(backend)
+        .unwrap_or(controller_proto::StorageBackendType::Unspecified);
+    match parsed {
+        controller_proto::StorageBackendType::Filesystem => Ok("filesystem".to_string()),
+        controller_proto::StorageBackendType::Lvm => Ok("lvm".to_string()),
+        controller_proto::StorageBackendType::Zfs => Ok("zfs".to_string()),
+        controller_proto::StorageBackendType::Unspecified if required => Err(
+            Status::invalid_argument("storage_backend is required (filesystem|lvm|zfs)"),
+        ),
+        controller_proto::StorageBackendType::Unspecified => Ok("filesystem".to_string()),
+    }
+}
+
+pub fn storage_backend_to_proto(backend: &str) -> i32 {
+    match backend.trim().to_ascii_lowercase().as_str() {
+        "filesystem" => controller_proto::StorageBackendType::Filesystem as i32,
+        "lvm" => controller_proto::StorageBackendType::Lvm as i32,
+        "zfs" => controller_proto::StorageBackendType::Zfs as i32,
+        _ => controller_proto::StorageBackendType::Unspecified as i32,
+    }
+}
+
+pub fn validate_storage_size_bytes(size_bytes: i64) -> Result<i64, Status> {
+    if size_bytes <= 0 {
+        return Err(Status::invalid_argument("storage_size_bytes must be > 0"));
+    }
+    Ok(size_bytes)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -175,5 +206,37 @@ mod tests {
             "qcow2"
         );
         assert!(normalize_image_format("iso").is_err());
+    }
+
+    #[test]
+    fn normalize_storage_backend_enforces_required_flag() {
+        assert_eq!(
+            normalize_storage_backend(
+                controller_proto::StorageBackendType::Filesystem as i32,
+                true
+            )
+            .expect("filesystem"),
+            "filesystem"
+        );
+        assert_eq!(
+            normalize_storage_backend(controller_proto::StorageBackendType::Lvm as i32, true)
+                .expect("lvm"),
+            "lvm"
+        );
+        assert!(normalize_storage_backend(0, true).is_err());
+        assert_eq!(
+            normalize_storage_backend(0, false).expect("default"),
+            "filesystem"
+        );
+    }
+
+    #[test]
+    fn validate_storage_size_bytes_requires_positive() {
+        assert!(validate_storage_size_bytes(0).is_err());
+        assert!(validate_storage_size_bytes(-1).is_err());
+        assert_eq!(
+            validate_storage_size_bytes(1024 * 1024).expect("positive"),
+            1024 * 1024
+        );
     }
 }

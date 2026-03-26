@@ -20,6 +20,7 @@ pub struct NodeRow {
     pub gateway_interface: String,
     pub cpu_used: i32,
     pub memory_used: i64,
+    pub storage_backend: String,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +41,8 @@ pub struct VmRow {
     pub created_at: String,
     pub runtime_state: String,
     pub cloud_init_user_data: String,
+    pub storage_backend: String,
+    pub storage_size_bytes: i64,
 }
 
 #[derive(Debug, Clone)]
@@ -92,7 +95,8 @@ impl Database {
                 last_heartbeat TEXT NOT NULL DEFAULT '',
                 gateway_interface TEXT NOT NULL DEFAULT '',
                 cpu_used INTEGER NOT NULL DEFAULT 0,
-                memory_used INTEGER NOT NULL DEFAULT 0
+                memory_used INTEGER NOT NULL DEFAULT 0,
+                storage_backend TEXT NOT NULL DEFAULT 'filesystem'
             );
             CREATE TABLE IF NOT EXISTS vms (
                 id TEXT PRIMARY KEY,
@@ -109,7 +113,9 @@ impl Database {
                 node_id TEXT NOT NULL REFERENCES nodes(id),
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 runtime_state TEXT NOT NULL DEFAULT 'unknown',
-                cloud_init_user_data TEXT NOT NULL DEFAULT ''
+                cloud_init_user_data TEXT NOT NULL DEFAULT '',
+                storage_backend TEXT NOT NULL DEFAULT 'filesystem',
+                storage_size_bytes INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS networks (
                 name TEXT NOT NULL,
@@ -211,7 +217,22 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 4;
+        if version < 5 {
+            let _ = conn.execute(
+                "ALTER TABLE nodes ADD COLUMN storage_backend TEXT NOT NULL DEFAULT 'filesystem'",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE vms ADD COLUMN storage_backend TEXT NOT NULL DEFAULT 'filesystem'",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE vms ADD COLUMN storage_size_bytes INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 5;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -231,8 +252,8 @@ impl Database {
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
              ON CONFLICT(id) DO UPDATE SET
                 hostname=excluded.hostname,
                 address=excluded.address,
@@ -242,7 +263,8 @@ impl Database {
                 last_heartbeat=excluded.last_heartbeat,
                 gateway_interface=excluded.gateway_interface,
                 cpu_used=excluded.cpu_used,
-                memory_used=excluded.memory_used",
+                memory_used=excluded.memory_used,
+                storage_backend=excluded.storage_backend",
             params![
                 node.id,
                 node.hostname,
@@ -254,6 +276,7 @@ impl Database {
                 node.gateway_interface,
                 node.cpu_used,
                 node.memory_used,
+                node.storage_backend,
             ],
         )?;
         Ok(())
@@ -276,7 +299,7 @@ impl Database {
     pub fn get_node(&self, node_id: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used FROM nodes WHERE id = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend FROM nodes WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![node_id], row_to_node)?;
         rows.next().transpose()
@@ -285,7 +308,7 @@ impl Database {
     pub fn list_nodes(&self) -> Result<Vec<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used FROM nodes",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend FROM nodes",
         )?;
         let rows = stmt.query_map([], row_to_node)?;
         rows.collect()
@@ -294,7 +317,7 @@ impl Database {
     pub fn get_node_by_address(&self, address: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used FROM nodes WHERE address = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend FROM nodes WHERE address = ?1",
         )?;
         let mut rows = stmt.query_map(params![address], row_to_node)?;
         rows.next().transpose()
@@ -303,8 +326,8 @@ impl Database {
     pub fn insert_vm(&self, vm: &VmRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'), ?13, ?14)",
+            "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data, storage_backend, storage_size_bytes)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'), ?13, ?14, ?15, ?16)",
             params![
                 vm.id,
                 vm.name,
@@ -320,6 +343,8 @@ impl Database {
                 vm.node_id,
                 vm.runtime_state,
                 vm.cloud_init_user_data,
+                vm.storage_backend,
+                vm.storage_size_bytes,
             ],
         )?;
         Ok(())
@@ -328,7 +353,7 @@ impl Database {
     pub fn get_vm(&self, vm_id: &str) -> Result<Option<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data FROM vms WHERE id = ?1",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data, storage_backend, storage_size_bytes FROM vms WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![vm_id], row_to_vm)?;
         rows.next().transpose()
@@ -337,7 +362,7 @@ impl Database {
     pub fn list_vms(&self) -> Result<Vec<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data FROM vms",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data, storage_backend, storage_size_bytes FROM vms",
         )?;
         let rows = stmt.query_map([], row_to_vm)?;
         rows.collect()
@@ -346,7 +371,7 @@ impl Database {
     pub fn list_vms_for_node(&self, node_id: &str) -> Result<Vec<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data FROM vms WHERE node_id = ?1",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state, cloud_init_user_data, storage_backend, storage_size_bytes FROM vms WHERE node_id = ?1",
         )?;
         let rows = stmt.query_map(params![node_id], row_to_vm)?;
         rows.collect()
@@ -543,11 +568,13 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_ssh_key(&self, name: &str) -> Result<Option<(String, String, String)>, rusqlite::Error> {
+    pub fn get_ssh_key(
+        &self,
+        name: &str,
+    ) -> Result<Option<(String, String, String)>, rusqlite::Error> {
         let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT name, public_key, created_at FROM ssh_keys WHERE name = ?1",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT name, public_key, created_at FROM ssh_keys WHERE name = ?1")?;
         let mut rows = stmt.query_map(params![name], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -560,9 +587,8 @@ impl Database {
 
     pub fn list_ssh_keys(&self) -> Result<Vec<(String, String, String)>, rusqlite::Error> {
         let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT name, public_key, created_at FROM ssh_keys ORDER BY name",
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT name, public_key, created_at FROM ssh_keys ORDER BY name")?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
@@ -634,6 +660,7 @@ fn row_to_node(row: &rusqlite::Row) -> Result<NodeRow, rusqlite::Error> {
         gateway_interface: row.get(7)?,
         cpu_used: row.get(8)?,
         memory_used: row.get(9)?,
+        storage_backend: row.get(10)?,
     })
 }
 
@@ -657,6 +684,8 @@ fn row_to_vm(row: &rusqlite::Row) -> Result<VmRow, rusqlite::Error> {
         created_at: row.get(12)?,
         runtime_state: row.get(13)?,
         cloud_init_user_data: row.get(14)?,
+        storage_backend: row.get(15)?,
+        storage_size_bytes: row.get(16)?,
     })
 }
 
@@ -713,6 +742,7 @@ mod tests {
             gateway_interface: "eno1".to_string(),
             cpu_used: 0,
             memory_used: 0,
+            storage_backend: "filesystem".to_string(),
         }
     }
 
@@ -733,6 +763,8 @@ mod tests {
             created_at: String::new(),
             runtime_state: "unknown".to_string(),
             cloud_init_user_data: String::new(),
+            storage_backend: "filesystem".to_string(),
+            storage_size_bytes: 0,
         }
     }
 
@@ -775,6 +807,8 @@ mod tests {
             created_at: String::new(),
             runtime_state: "unknown".to_string(),
             cloud_init_user_data: String::new(),
+            storage_backend: "filesystem".to_string(),
+            storage_size_bytes: 0,
         })
         .expect("insert qcow vm");
 
@@ -809,5 +843,19 @@ mod tests {
             .expect("list networks for node");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].name, "frontend");
+    }
+
+    #[test]
+    fn node_storage_backend_roundtrip_works() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.storage_backend = "zfs".to_string();
+        db.upsert_node(&node).expect("insert node");
+
+        let got = db
+            .get_node(&node.id)
+            .expect("get node")
+            .expect("node exists");
+        assert_eq!(got.storage_backend, "zfs");
     }
 }

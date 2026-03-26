@@ -6,9 +6,9 @@ mod storage;
 mod vmm;
 
 use clap::Parser;
+use tokio::signal;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
-use tokio::signal;
 
 pub mod proto {
     tonic::include_proto!("kcore.node");
@@ -53,15 +53,14 @@ async fn main() -> anyhow::Result<()> {
     );
     let info_svc =
         proto::node_info_server::NodeInfoServer::new(grpc::InfoService::new(cfg.node_id.clone()));
-    let admin_svc = proto::node_admin_server::NodeAdminServer::new(
-        grpc::AdminService::new_with_storage(
+    let admin_svc =
+        proto::node_admin_server::NodeAdminServer::new(grpc::AdminService::new_with_storage(
             cfg.nix_config_path.clone(),
             cfg.vm_socket_dir.clone(),
             storage.clone(),
-        ),
-    )
-    .max_decoding_message_size(1024 * 1024 * 1024)
-    .max_encoding_message_size(64 * 1024 * 1024);
+        ))
+        .max_decoding_message_size(1024 * 1024 * 1024)
+        .max_encoding_message_size(64 * 1024 * 1024);
     let storage_svc = proto::node_storage_server::NodeStorageServer::new(
         grpc::StorageService::new_with_storage(storage),
     );

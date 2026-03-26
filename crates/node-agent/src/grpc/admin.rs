@@ -513,10 +513,42 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
     if req.run_controller {
         args.push("--run-controller".to_string());
     }
-    let mode = req.data_disk_mode.trim();
+    let typed_mode = match proto::StorageBackendType::try_from(req.storage_backend)
+        .unwrap_or(proto::StorageBackendType::Unspecified)
+    {
+        proto::StorageBackendType::Filesystem => "filesystem",
+        proto::StorageBackendType::Lvm => "lvm",
+        proto::StorageBackendType::Zfs => "zfs",
+        proto::StorageBackendType::Unspecified => "",
+    };
+    let mode = if typed_mode.is_empty() {
+        req.data_disk_mode.trim()
+    } else {
+        typed_mode
+    };
     if !mode.is_empty() {
         args.push("--data-disk-mode".to_string());
         args.push(mode.to_string());
+    }
+    if mode == "lvm" {
+        if !req.lvm_vg_name.trim().is_empty() {
+            args.push("--lvm-vg-name".to_string());
+            args.push(req.lvm_vg_name.trim().to_string());
+        }
+        if !req.lvm_lv_prefix.trim().is_empty() {
+            args.push("--lvm-lv-prefix".to_string());
+            args.push(req.lvm_lv_prefix.trim().to_string());
+        }
+    }
+    if mode == "zfs" {
+        if !req.zfs_pool_name.trim().is_empty() {
+            args.push("--zfs-pool-name".to_string());
+            args.push(req.zfs_pool_name.trim().to_string());
+        }
+        if !req.zfs_dataset_prefix.trim().is_empty() {
+            args.push("--zfs-dataset-prefix".to_string());
+            args.push(req.zfs_dataset_prefix.trim().to_string());
+        }
     }
     Ok(args)
 }
@@ -684,7 +716,8 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
                     "image_sha256 must be consistent across stream chunks",
                 ));
             }
-            if !chunk.source_name.trim().is_empty() && chunk.source_name.trim() != source_name.trim()
+            if !chunk.source_name.trim().is_empty()
+                && chunk.source_name.trim() != source_name.trim()
             {
                 let _ = tokio::fs::remove_file(&tmp_path).await;
                 return Err(Status::invalid_argument(
@@ -950,6 +983,11 @@ mod tests {
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
             data_disk_mode: String::new(),
+            storage_backend: proto::StorageBackendType::Unspecified as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
         };
 
         write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
@@ -1011,6 +1049,11 @@ mod tests {
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
             data_disk_mode: String::new(),
+            storage_backend: proto::StorageBackendType::Unspecified as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
         };
         write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
         assert!(
@@ -1150,6 +1193,11 @@ mod tests {
                 kctl_cert_pem: String::new(),
                 kctl_key_pem: String::new(),
                 data_disk_mode: String::new(),
+                storage_backend: proto::StorageBackendType::Unspecified as i32,
+                lvm_vg_name: String::new(),
+                lvm_lv_prefix: String::new(),
+                zfs_pool_name: String::new(),
+                zfs_dataset_prefix: String::new(),
             }),
         )
         .await
@@ -1178,6 +1226,11 @@ mod tests {
                 kctl_cert_pem: String::new(),
                 kctl_key_pem: String::new(),
                 data_disk_mode: String::new(),
+                storage_backend: proto::StorageBackendType::Unspecified as i32,
+                lvm_vg_name: String::new(),
+                lvm_lv_prefix: String::new(),
+                zfs_pool_name: String::new(),
+                zfs_dataset_prefix: String::new(),
             }),
         )
         .await
@@ -1199,6 +1252,11 @@ mod tests {
                 kctl_cert_pem: String::new(),
                 kctl_key_pem: String::new(),
                 data_disk_mode: String::new(),
+                storage_backend: proto::StorageBackendType::Unspecified as i32,
+                lvm_vg_name: String::new(),
+                lvm_lv_prefix: String::new(),
+                zfs_pool_name: String::new(),
+                zfs_dataset_prefix: String::new(),
             }),
         )
         .await
@@ -1221,6 +1279,11 @@ mod tests {
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
             data_disk_mode: "filesystem".to_string(),
+            storage_backend: proto::StorageBackendType::Filesystem as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--controller".to_string()));
@@ -1245,12 +1308,21 @@ mod tests {
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
             data_disk_mode: "zfs".to_string(),
+            storage_backend: proto::StorageBackendType::Zfs as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: "tank0".to_string(),
+            zfs_dataset_prefix: "kcore-".to_string(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--run-controller".to_string()));
         assert!(!args.contains(&"--controller".to_string()));
         assert!(args.contains(&"--data-disk-mode".to_string()));
         assert!(args.contains(&"zfs".to_string()));
+        assert!(args.contains(&"--zfs-pool-name".to_string()));
+        assert!(args.contains(&"tank0".to_string()));
+        assert!(args.contains(&"--zfs-dataset-prefix".to_string()));
+        assert!(args.contains(&"kcore-".to_string()));
     }
 
     #[test]
@@ -1276,7 +1348,8 @@ mod tests {
         let ip_by_host = find_vm_ip_in_lease_file(&lease, "ubuntu-noble-1", None);
         assert_eq!(ip_by_host.as_deref(), Some("10.240.0.113"));
 
-        let ip_by_mac = find_vm_ip_in_lease_file(&lease, "different-name", Some("52:54:00:4b:13:d6"));
+        let ip_by_mac =
+            find_vm_ip_in_lease_file(&lease, "different-name", Some("52:54:00:4b:13:d6"));
         assert_eq!(ip_by_mac.as_deref(), Some("10.240.0.113"));
     }
 
