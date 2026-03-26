@@ -54,6 +54,24 @@ Result:
 - One DHCP scope for both VMs
 - Two TAPs + two VM services
 
+Create these two VMs with `kctl`:
+
+```bash
+kcore-kctl create vm web-same-net \
+  --image "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2" \
+  --image-sha256 "2f8a63ad18962a6413657b82dd016d71604f84a7cd6fdb17e811099d5c88e854" \
+  --network default \
+  --cpu 2 \
+  --memory 2G
+
+kcore-kctl create vm api-same-net \
+  --image "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2" \
+  --image-sha256 "2f8a63ad18962a6413657b82dd016d71604f84a7cd6fdb17e811099d5c88e854" \
+  --network default \
+  --cpu 2 \
+  --memory 2G
+```
+
 ## Example: Two VMs On Different Networks
 
 Each VM points to a different network, so each gets a separate bridge and DHCP scope:
@@ -98,4 +116,25 @@ Result:
 - `web` on `kbr-frontend`
 - `db` on `kbr-backend`
 - Separate DHCP/NAT domains by design
+
+Create these two VMs with `kctl`:
+
+```bash
+kcore-kctl create vm web-front-net \
+  --image "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2" \
+  --image-sha256 "2f8a63ad18962a6413657b82dd016d71604f84a7cd6fdb17e811099d5c88e854" \
+  --network frontend \
+  --cpu 2 \
+  --memory 2G
+
+kcore-kctl create vm db-back-net \
+  --image "https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-genericcloud-amd64.qcow2" \
+  --image-sha256 "2f8a63ad18962a6413657b82dd016d71604f84a7cd6fdb17e811099d5c88e854" \
+  --network backend \
+  --cpu 2 \
+  --memory 2G
+```
+
+Note:
+- `--network` must reference a network that exists in the applied node Nix config under `ch-vm.vms.networks`.
 
