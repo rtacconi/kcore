@@ -14,6 +14,8 @@ pub struct VmInfo {
 pub struct VmConfig {
     pub cpus: Option<CpuConfig>,
     pub memory: Option<MemoryConfig>,
+    #[serde(default)]
+    pub net: Vec<NetConfig>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,4 +27,10 @@ pub struct CpuConfig {
 pub struct MemoryConfig {
     /// Memory size in bytes.
     pub size: u64,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct NetConfig {
+    #[serde(default)]
+    pub mac: Option<String>,
 }

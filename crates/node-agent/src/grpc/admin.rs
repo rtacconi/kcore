@@ -1,6 +1,7 @@
 #![allow(clippy::result_large_err)]
 
-use std::path::PathBuf;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::process::Command;
@@ -15,6 +16,7 @@ use std::sync::Arc;
 
 pub struct AdminService {
     nix_config_path: PathBuf,
+    vm_socket_dir: PathBuf,
     storage: Arc<dyn StorageAdapter>,
 }
 
@@ -51,12 +53,21 @@ async fn resolve_nixpkgs_path() -> Option<String> {
 
 impl AdminService {
     pub fn new(nix_config_path: String) -> Self {
-        Self::new_with_storage(nix_config_path, storage::default_adapter())
+        Self::new_with_storage(
+            nix_config_path,
+            "/run/kcore".to_string(),
+            storage::default_adapter(),
+        )
     }
 
-    pub fn new_with_storage(nix_config_path: String, storage: Arc<dyn StorageAdapter>) -> Self {
+    pub fn new_with_storage(
+        nix_config_path: String,
+        vm_socket_dir: String,
+        storage: Arc<dyn StorageAdapter>,
+    ) -> Self {
         Self {
             nix_config_path: PathBuf::from(nix_config_path),
+            vm_socket_dir: PathBuf::from(vm_socket_dir),
             storage,
         }
     }
@@ -231,6 +242,80 @@ fn validate_destination_path(path: &str) -> Result<PathBuf, Status> {
     Ok(p)
 }
 
+fn parse_lease_entry(line: &str) -> Option<(&str, &str, &str)> {
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() < 4 {
+        return None;
+    }
+    let mac = fields[1];
+    let ip = fields[2];
+    let hostname = fields[3];
+    Some((mac, ip, hostname))
+}
+
+fn find_vm_ip_in_lease_file(path: &Path, vm_name: &str, vm_mac: Option<&str>) -> Option<String> {
+    let file = std::fs::File::open(path).ok()?;
+    let reader = BufReader::new(file);
+    let target_mac = vm_mac.map(|m| m.to_ascii_lowercase());
+    let mut matched_ip: Option<String> = None;
+    for line in reader.lines().map_while(Result::ok) {
+        let Some((mac, ip, hostname)) = parse_lease_entry(&line) else {
+            continue;
+        };
+        let mac_match = target_mac
+            .as_ref()
+            .map(|target| mac.eq_ignore_ascii_case(target))
+            .unwrap_or(false);
+        let host_match = hostname == vm_name;
+        if mac_match || host_match {
+            matched_ip = Some(ip.to_string());
+        }
+    }
+    matched_ip
+}
+
+fn vm_primary_mac(info: &crate::vmm::VmInfo) -> Option<String> {
+    info.config
+        .net
+        .iter()
+        .find_map(|n| n.mac.as_ref())
+        .map(|m| m.to_ascii_lowercase())
+}
+
+fn lease_files_for_network(runtime_dir: &Path, network: &str) -> Vec<PathBuf> {
+    if !network.trim().is_empty() {
+        return vec![runtime_dir.join(format!("dnsmasq-{}.leases", network.trim()))];
+    }
+    let Ok(entries) = std::fs::read_dir(runtime_dir) else {
+        return Vec::new();
+    };
+    entries
+        .filter_map(Result::ok)
+        .map(|e| e.path())
+        .filter(|p| {
+            p.file_name()
+                .and_then(|s| s.to_str())
+                .is_some_and(|name| name.starts_with("dnsmasq-") && name.ends_with(".leases"))
+        })
+        .collect()
+}
+
+fn validate_port_or_default(port: i32) -> u16 {
+    if port <= 0 {
+        22
+    } else {
+        port.clamp(1, u16::MAX as i32) as u16
+    }
+}
+
+fn validate_timeout_ms_or_default(timeout_ms: i32) -> u64 {
+    if timeout_ms <= 0 {
+        1500
+    } else {
+        timeout_ms as u64
+    }
+}
+
 fn is_private_key(filename: &str) -> bool {
     filename.ends_with(".key")
 }
@@ -319,6 +404,11 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
     }
     if req.run_controller {
         args.push("--run-controller".to_string());
+    }
+    let mode = req.data_disk_mode.trim();
+    if !mode.is_empty() {
+        args.push("--data-disk-mode".to_string());
+        args.push(mode.to_string());
     }
     Ok(args)
 }
@@ -438,6 +528,174 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         Ok(Response::new(resp))
     }
 
+    async fn upload_image_stream(
+        &self,
+        request: Request<tonic::Streaming<proto::UploadImageChunk>>,
+    ) -> Result<Response<proto::UploadImageResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let mut stream = request.into_inner();
+        let first = stream
+            .message()
+            .await?
+            .ok_or_else(|| Status::invalid_argument("upload stream is empty"))?;
+
+        let source_name = first.source_name.clone();
+        let destination_name = first.destination_name.clone();
+        let image_format = first.image_format.clone();
+        let image_sha256 = first.image_sha256.clone();
+
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| Status::internal(format!("system clock error: {e}")))?
+            .as_millis();
+        let tmp_path = PathBuf::from(format!("/tmp/kcore-upload-{timestamp}.part"));
+        let mut file = tokio::fs::File::create(&tmp_path)
+            .await
+            .map_err(|e| Status::internal(format!("creating {}: {e}", tmp_path.display())))?;
+
+        if !first.chunk_data.is_empty() {
+            tokio::io::AsyncWriteExt::write_all(&mut file, &first.chunk_data)
+                .await
+                .map_err(|e| Status::internal(format!("writing {}: {e}", tmp_path.display())))?;
+        }
+
+        while let Some(chunk) = stream.message().await? {
+            if !chunk.image_format.trim().is_empty()
+                && chunk.image_format.trim() != image_format.trim()
+            {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(Status::invalid_argument(
+                    "image_format must be consistent across stream chunks",
+                ));
+            }
+            if !chunk.image_sha256.trim().is_empty()
+                && chunk.image_sha256.trim() != image_sha256.trim()
+            {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(Status::invalid_argument(
+                    "image_sha256 must be consistent across stream chunks",
+                ));
+            }
+            if !chunk.source_name.trim().is_empty() && chunk.source_name.trim() != source_name.trim()
+            {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(Status::invalid_argument(
+                    "source_name must be consistent across stream chunks",
+                ));
+            }
+            if !chunk.destination_name.trim().is_empty()
+                && chunk.destination_name.trim() != destination_name.trim()
+            {
+                let _ = tokio::fs::remove_file(&tmp_path).await;
+                return Err(Status::invalid_argument(
+                    "destination_name must be consistent across stream chunks",
+                ));
+            }
+            if !chunk.chunk_data.is_empty() {
+                tokio::io::AsyncWriteExt::write_all(&mut file, &chunk.chunk_data)
+                    .await
+                    .map_err(|e| {
+                        Status::internal(format!("writing {}: {e}", tmp_path.display()))
+                    })?;
+            }
+        }
+
+        tokio::io::AsyncWriteExt::flush(&mut file)
+            .await
+            .map_err(|e| Status::internal(format!("flushing {}: {e}", tmp_path.display())))?;
+        drop(file);
+
+        let storage = Arc::clone(&self.storage);
+        let tmp_path_for_upload = tmp_path.clone();
+        let resp = tokio::task::spawn_blocking(move || {
+            storage
+                .upload_image_from_path(storage::UploadImageFromPathRequest {
+                    source_file_path: tmp_path_for_upload.display().to_string(),
+                    source_name,
+                    destination_name,
+                    image_format,
+                    image_sha256,
+                })
+                .map(storage::upload_image_response)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("task join: {e}")))??;
+
+        let _ = tokio::fs::remove_file(&tmp_path).await;
+        Ok(Response::new(resp))
+    }
+
+    async fn check_vm_ssh_ready(
+        &self,
+        request: Request<proto::CheckVmSshReadyRequest>,
+    ) -> Result<Response<proto::CheckVmSshReadyResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let vm_name = req.vm_name.trim();
+        if vm_name.is_empty() {
+            return Err(Status::invalid_argument("vm_name is required"));
+        }
+        let port = validate_port_or_default(req.port);
+        let timeout_ms = validate_timeout_ms_or_default(req.timeout_ms);
+        let vmm = crate::vmm::Client::new(&self.vm_socket_dir.display().to_string());
+        let vm_info = vmm.get_vm_info(vm_name).await;
+        let vm_mac = vm_info.as_ref().and_then(vm_primary_mac);
+        let lease_files = lease_files_for_network(&self.vm_socket_dir, &req.network);
+        if lease_files.is_empty() {
+            return Ok(Response::new(proto::CheckVmSshReadyResponse {
+                ready: false,
+                ip: String::new(),
+                port: port as i32,
+                reason: format!(
+                    "no dnsmasq lease files found in {}",
+                    self.vm_socket_dir.display()
+                ),
+            }));
+        }
+
+        let mut vm_ip = None;
+        for lease in &lease_files {
+            if let Some(ip) = find_vm_ip_in_lease_file(lease, vm_name, vm_mac.as_deref()) {
+                vm_ip = Some(ip);
+                break;
+            }
+        }
+        let Some(ip) = vm_ip else {
+            return Ok(Response::new(proto::CheckVmSshReadyResponse {
+                ready: false,
+                ip: String::new(),
+                port: port as i32,
+                reason: "no DHCP lease found for VM yet".to_string(),
+            }));
+        };
+
+        let connect = tokio::time::timeout(
+            std::time::Duration::from_millis(timeout_ms),
+            tokio::net::TcpStream::connect((ip.as_str(), port)),
+        )
+        .await;
+        match connect {
+            Ok(Ok(_stream)) => Ok(Response::new(proto::CheckVmSshReadyResponse {
+                ready: true,
+                ip,
+                port: port as i32,
+                reason: "ssh port reachable".to_string(),
+            })),
+            Ok(Err(e)) => Ok(Response::new(proto::CheckVmSshReadyResponse {
+                ready: false,
+                ip,
+                port: port as i32,
+                reason: format!("tcp connect failed: {e}"),
+            })),
+            Err(_) => Ok(Response::new(proto::CheckVmSshReadyResponse {
+                ready: false,
+                ip,
+                port: port as i32,
+                reason: format!("tcp connect timed out after {timeout_ms}ms"),
+            })),
+        }
+    }
+
     async fn install_to_disk(
         &self,
         request: Request<proto::InstallToDiskRequest>,
@@ -518,6 +776,7 @@ mod tests {
             controller_key_pem: String::new(),
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
+            data_disk_mode: String::new(),
         };
 
         write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
@@ -578,6 +837,7 @@ mod tests {
             controller_key_pem: String::new(),
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
+            data_disk_mode: String::new(),
         };
         write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
         assert!(
@@ -716,6 +976,7 @@ mod tests {
                 controller_key_pem: String::new(),
                 kctl_cert_pem: String::new(),
                 kctl_key_pem: String::new(),
+                data_disk_mode: String::new(),
             }),
         )
         .await
@@ -743,6 +1004,7 @@ mod tests {
                 controller_key_pem: String::new(),
                 kctl_cert_pem: String::new(),
                 kctl_key_pem: String::new(),
+                data_disk_mode: String::new(),
             }),
         )
         .await
@@ -763,6 +1025,7 @@ mod tests {
                 controller_key_pem: String::new(),
                 kctl_cert_pem: String::new(),
                 kctl_key_pem: String::new(),
+                data_disk_mode: String::new(),
             }),
         )
         .await
@@ -784,6 +1047,7 @@ mod tests {
             controller_key_pem: String::new(),
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
+            data_disk_mode: "filesystem".to_string(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--controller".to_string()));
@@ -807,9 +1071,49 @@ mod tests {
             controller_key_pem: String::new(),
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
+            data_disk_mode: "zfs".to_string(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--run-controller".to_string()));
         assert!(!args.contains(&"--controller".to_string()));
+        assert!(args.contains(&"--data-disk-mode".to_string()));
+        assert!(args.contains(&"zfs".to_string()));
+    }
+
+    #[test]
+    fn parse_lease_entry_parses_dnsmasq_format() {
+        let line = "1711454677 52:54:00:4b:13:d6 10.240.0.113 ubuntu-noble-1 01:52:54:00:4b:13:d6";
+        let parsed = parse_lease_entry(line).expect("parse lease");
+        assert_eq!(parsed.0, "52:54:00:4b:13:d6");
+        assert_eq!(parsed.1, "10.240.0.113");
+        assert_eq!(parsed.2, "ubuntu-noble-1");
+    }
+
+    #[test]
+    fn find_vm_ip_in_lease_file_matches_mac_or_hostname() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let lease = temp.path().join("dnsmasq-default.leases");
+        std::fs::write(
+            &lease,
+            "1711454677 52:54:00:aa:bb:cc 10.240.0.50 old-vm *\n\
+             1711454678 52:54:00:4b:13:d6 10.240.0.113 ubuntu-noble-1 *\n",
+        )
+        .expect("write lease");
+
+        let ip_by_host = find_vm_ip_in_lease_file(&lease, "ubuntu-noble-1", None);
+        assert_eq!(ip_by_host.as_deref(), Some("10.240.0.113"));
+
+        let ip_by_mac = find_vm_ip_in_lease_file(&lease, "different-name", Some("52:54:00:4b:13:d6"));
+        assert_eq!(ip_by_mac.as_deref(), Some("10.240.0.113"));
+    }
+
+    #[test]
+    fn validate_port_and_timeout_defaults_are_applied() {
+        assert_eq!(validate_port_or_default(0), 22);
+        assert_eq!(validate_port_or_default(-3), 22);
+        assert_eq!(validate_port_or_default(2222), 2222);
+        assert_eq!(validate_timeout_ms_or_default(0), 1500);
+        assert_eq!(validate_timeout_ms_or_default(-1), 1500);
+        assert_eq!(validate_timeout_ms_or_default(3000), 3000);
     }
 }

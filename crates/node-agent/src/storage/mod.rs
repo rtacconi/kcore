@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::Arc;
@@ -115,6 +116,15 @@ pub struct UploadImageResult {
     pub image_sha256: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct UploadImageFromPathRequest {
+    pub source_file_path: String,
+    pub source_name: String,
+    pub destination_name: String,
+    pub image_format: String,
+    pub image_sha256: String,
+}
+
 pub trait StorageAdapter: Send + Sync {
     fn create_volume(&self, req: CreateVolumeRequest) -> Result<String, StorageError>;
     fn delete_volume(&self, backend_handle: &str) -> Result<(), StorageError>;
@@ -122,6 +132,10 @@ pub trait StorageAdapter: Send + Sync {
     fn detach_volume(&self, req: DetachVolumeRequest) -> Result<(), StorageError>;
     fn ensure_image(&self, req: EnsureImageRequest) -> Result<EnsureImageResult, StorageError>;
     fn upload_image(&self, req: UploadImageRequest) -> Result<UploadImageResult, StorageError>;
+    fn upload_image_from_path(
+        &self,
+        req: UploadImageFromPathRequest,
+    ) -> Result<UploadImageResult, StorageError>;
 }
 
 pub fn from_config(cfg: &StorageConfig) -> Result<Arc<dyn StorageAdapter>, StorageError> {
@@ -236,6 +250,13 @@ impl StorageAdapter for FilesystemAdapter {
     fn upload_image(&self, req: UploadImageRequest) -> Result<UploadImageResult, StorageError> {
         upload_image_to_cache(&self.image_cache_dir, req)
     }
+
+    fn upload_image_from_path(
+        &self,
+        req: UploadImageFromPathRequest,
+    ) -> Result<UploadImageResult, StorageError> {
+        upload_image_file_to_cache(&self.image_cache_dir, req)
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -306,6 +327,13 @@ impl StorageAdapter for LvmAdapter {
 
     fn upload_image(&self, req: UploadImageRequest) -> Result<UploadImageResult, StorageError> {
         upload_image_to_cache(&self.image_cache_dir, req)
+    }
+
+    fn upload_image_from_path(
+        &self,
+        req: UploadImageFromPathRequest,
+    ) -> Result<UploadImageResult, StorageError> {
+        upload_image_file_to_cache(&self.image_cache_dir, req)
     }
 }
 
@@ -385,6 +413,13 @@ impl StorageAdapter for ZfsAdapter {
 
     fn upload_image(&self, req: UploadImageRequest) -> Result<UploadImageResult, StorageError> {
         upload_image_to_cache(&self.image_cache_dir, req)
+    }
+
+    fn upload_image_from_path(
+        &self,
+        req: UploadImageFromPathRequest,
+    ) -> Result<UploadImageResult, StorageError> {
+        upload_image_file_to_cache(&self.image_cache_dir, req)
     }
 }
 
@@ -745,6 +780,23 @@ fn detect_qcow2_magic(data: &[u8]) -> bool {
     data.len() >= 4 && data[0] == b'Q' && data[1] == b'F' && data[2] == b'I' && data[3] == 0xfb
 }
 
+fn detect_qcow2_magic_from_file(path: &Path) -> Result<bool, StorageError> {
+    let mut f = std::fs::File::open(path).map_err(|e| {
+        StorageError::new(
+            ErrorKind::Internal,
+            format!("opening {}: {e}", path.display()),
+        )
+    })?;
+    let mut magic = [0u8; 4];
+    let read = f.read(&mut magic).map_err(|e| {
+        StorageError::new(
+            ErrorKind::Internal,
+            format!("reading {}: {e}", path.display()),
+        )
+    })?;
+    Ok(read == 4 && detect_qcow2_magic(&magic))
+}
+
 fn upload_image_to_cache(
     image_cache_dir: &Path,
     req: UploadImageRequest,
@@ -840,6 +892,116 @@ fn upload_image_to_cache(
     })
 }
 
+fn upload_image_file_to_cache(
+    image_cache_dir: &Path,
+    req: UploadImageFromPathRequest,
+) -> Result<UploadImageResult, StorageError> {
+    let format = validate_image_format(&req.image_format)?;
+    let expected_sha = validate_expected_sha256(&req.image_sha256)?;
+    let source = PathBuf::from(req.source_file_path.trim());
+    if !source.is_absolute() {
+        return Err(StorageError::new(
+            ErrorKind::InvalidArgument,
+            "source_file_path must be absolute",
+        ));
+    }
+    if !source.exists() {
+        return Err(StorageError::new(
+            ErrorKind::NotFound,
+            format!("source file not found: {}", source.display()),
+        ));
+    }
+    let source_meta = std::fs::metadata(&source).map_err(|e| {
+        StorageError::new(
+            ErrorKind::Internal,
+            format!("stat {}: {e}", source.display()),
+        )
+    })?;
+    if source_meta.len() == 0 {
+        return Err(StorageError::new(
+            ErrorKind::InvalidArgument,
+            "source file is empty",
+        ));
+    }
+    if format == "qcow2" && !detect_qcow2_magic_from_file(&source)? {
+        return Err(StorageError::new(
+            ErrorKind::FailedPrecondition,
+            "uploaded image does not look like qcow2 (missing QFI magic)",
+        ));
+    }
+
+    std::fs::create_dir_all(image_cache_dir).map_err(|e| {
+        StorageError::new(
+            ErrorKind::Internal,
+            format!("creating {}: {e}", image_cache_dir.display()),
+        )
+    })?;
+    let base_name = if req.destination_name.trim().is_empty() {
+        sanitize_image_name(&req.source_name, &format)
+    } else {
+        sanitize_image_name(&req.destination_name, &format)
+    };
+    let destination = image_cache_dir.join(base_name);
+    if destination.exists() {
+        return Err(StorageError::new(
+            ErrorKind::AlreadyExists,
+            format!("destination already exists: {}", destination.display()),
+        ));
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| StorageError::new(ErrorKind::Internal, format!("system clock error: {e}")))?
+        .as_millis();
+    let tmp_path = PathBuf::from(format!("{}.upload-{timestamp}.part", destination.display()));
+    std::fs::copy(&source, &tmp_path).map_err(|e| {
+        StorageError::new(
+            ErrorKind::Internal,
+            format!(
+                "copying {} to {}: {e}",
+                source.display(),
+                tmp_path.display()
+            ),
+        )
+    })?;
+    let computed_sha = sha256sum_file(&tmp_path)?;
+    if let Some(expected) = expected_sha {
+        if expected != computed_sha {
+            let _ = std::fs::remove_file(&tmp_path);
+            return Err(StorageError::new(
+                ErrorKind::FailedPrecondition,
+                format!(
+                    "sha256 mismatch for upload (expected {}, got {})",
+                    expected, computed_sha
+                ),
+            ));
+        }
+    }
+    std::fs::rename(&tmp_path, &destination).map_err(|e| {
+        StorageError::new(
+            ErrorKind::Internal,
+            format!(
+                "moving {} to {}: {e}",
+                tmp_path.display(),
+                destination.display()
+            ),
+        )
+    })?;
+    let size_bytes = std::fs::metadata(&destination)
+        .map_err(|e| {
+            StorageError::new(
+                ErrorKind::Internal,
+                format!("stat {}: {e}", destination.display()),
+            )
+        })?
+        .len() as i64;
+    Ok(UploadImageResult {
+        path: destination.display().to_string(),
+        size_bytes,
+        image_format: format,
+        image_sha256: computed_sha,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -870,5 +1032,84 @@ mod tests {
         let cache = PathBuf::from("/var/lib/kcore/images");
         let err = validate_destination_path("/tmp/bad.raw", &cache).expect_err("must fail");
         assert!(matches!(err.kind, ErrorKind::InvalidArgument));
+    }
+
+    #[test]
+    fn upload_rejects_unsupported_format() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = upload_image_to_cache(
+            temp.path(),
+            UploadImageRequest {
+                image_bytes: vec![1, 2, 3],
+                source_name: "disk.iso".to_string(),
+                destination_name: String::new(),
+                image_format: "iso".to_string(),
+                image_sha256: String::new(),
+            },
+        )
+        .expect_err("unsupported format should fail");
+        assert!(matches!(err.kind, ErrorKind::InvalidArgument));
+    }
+
+    #[test]
+    fn upload_rejects_invalid_qcow2_magic() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let err = upload_image_to_cache(
+            temp.path(),
+            UploadImageRequest {
+                image_bytes: vec![0, 1, 2, 3, 4],
+                source_name: "disk.qcow2".to_string(),
+                destination_name: String::new(),
+                image_format: "qcow2".to_string(),
+                image_sha256: String::new(),
+            },
+        )
+        .expect_err("invalid qcow2 should fail");
+        assert!(matches!(err.kind, ErrorKind::FailedPrecondition));
+    }
+
+    #[test]
+    fn upload_sanitizes_destination_name_under_cache_dir() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let result = upload_image_to_cache(
+            temp.path(),
+            UploadImageRequest {
+                image_bytes: vec![9, 8, 7, 6],
+                source_name: "disk.raw".to_string(),
+                destination_name: "../escape.raw".to_string(),
+                image_format: "raw".to_string(),
+                image_sha256: String::new(),
+            },
+        )
+        .expect("upload should succeed");
+        let uploaded = PathBuf::from(&result.path);
+        assert!(uploaded.starts_with(temp.path()));
+        assert!(uploaded.exists());
+        assert!(!result.path.contains("/../"));
+    }
+
+    #[test]
+    fn upload_from_path_handles_qcow2_magic_and_sha() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("ubuntu.qcow2");
+        let cache_dir = temp.path().join("cache");
+        let mut content = Vec::from([b'Q', b'F', b'I', 0xfb]);
+        content.extend_from_slice(&[1, 2, 3, 4]);
+        std::fs::write(&src, &content).expect("write src");
+        let expected = sha256sum_file(&src).expect("sha");
+        let result = upload_image_file_to_cache(
+            &cache_dir,
+            UploadImageFromPathRequest {
+                source_file_path: src.display().to_string(),
+                source_name: "ubuntu.qcow2".to_string(),
+                destination_name: String::new(),
+                image_format: "qcow2".to_string(),
+                image_sha256: expected.clone(),
+            },
+        )
+        .expect("upload from path");
+        assert_eq!(result.image_format, "qcow2");
+        assert_eq!(result.image_sha256, expected);
+        assert!(PathBuf::from(result.path).exists());
     }
 }

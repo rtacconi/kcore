@@ -4,6 +4,8 @@ use crate::output;
 use crate::pki;
 use anyhow::{Context, Result};
 use std::path::Path;
+use tokio::io::AsyncReadExt;
+use tokio_stream::wrappers::ReceiverStream;
 
 pub async fn list_nodes(info: &ConnectionInfo) -> Result<()> {
     let mut client = client::controller_client(info).await?;
@@ -73,6 +75,7 @@ pub async fn install(
     data_disks: Vec<String>,
     join_controller: Option<&str>,
     run_controller: bool,
+    data_disk_mode: &str,
     certs_dir: &Path,
 ) -> Result<()> {
     let join_controller = validate_install_controller_mode(join_controller, run_controller)?;
@@ -99,6 +102,7 @@ pub async fn install(
             controller_key_pem: install_pki.controller_key_pem,
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
+            data_disk_mode: data_disk_mode.trim().to_string(),
         })
         .await?
         .into_inner();
@@ -150,7 +154,9 @@ pub async fn upload_image(
     format: Option<&str>,
     image_sha256: Option<&str>,
 ) -> Result<()> {
-    let data = std::fs::read(file).with_context(|| format!("reading {file}"))?;
+    let mut f = tokio::fs::File::open(file)
+        .await
+        .with_context(|| format!("opening {file}"))?;
     let source_name = Path::new(file)
         .file_name()
         .and_then(|n| n.to_str())
@@ -163,15 +169,71 @@ pub async fn upload_image(
         anyhow::bail!("image format must be raw or qcow2");
     }
 
+    const CHUNK_SIZE: usize = 4 * 1024 * 1024;
+    let (tx, rx) = tokio::sync::mpsc::channel::<node_proto::UploadImageChunk>(8);
+    let source_name_clone = source_name.clone();
+    let destination_name_clone = destination_name.unwrap_or("").to_string();
+    let image_sha_clone = image_sha256.unwrap_or("").to_string();
+    let detected_clone = detected.clone();
+    tokio::spawn(async move {
+        let mut first = true;
+        loop {
+            let mut buf = vec![0u8; CHUNK_SIZE];
+            let read = match f.read(&mut buf).await {
+                Ok(n) => n,
+                Err(e) => {
+                    eprintln!("failed to read upload file chunk: {e}");
+                    return;
+                }
+            };
+            if read == 0 {
+                if first {
+                    let _ = tx
+                        .send(node_proto::UploadImageChunk {
+                            chunk_data: Vec::new(),
+                            source_name: source_name_clone.clone(),
+                            destination_name: destination_name_clone.clone(),
+                            image_format: detected_clone.clone(),
+                            image_sha256: image_sha_clone.clone(),
+                        })
+                        .await;
+                }
+                return;
+            }
+            buf.truncate(read);
+            let msg = node_proto::UploadImageChunk {
+                chunk_data: buf,
+                source_name: if first {
+                    source_name_clone.clone()
+                } else {
+                    String::new()
+                },
+                destination_name: if first {
+                    destination_name_clone.clone()
+                } else {
+                    String::new()
+                },
+                image_format: if first {
+                    detected_clone.clone()
+                } else {
+                    String::new()
+                },
+                image_sha256: if first {
+                    image_sha_clone.clone()
+                } else {
+                    String::new()
+                },
+            };
+            first = false;
+            if tx.send(msg).await.is_err() {
+                return;
+            }
+        }
+    });
+
     let mut client = client::node_admin_client(info).await?;
     let resp = client
-        .upload_image(node_proto::UploadImageRequest {
-            image_bytes: data,
-            source_name,
-            destination_name: destination_name.unwrap_or("").to_string(),
-            image_format: detected,
-            image_sha256: image_sha256.unwrap_or("").to_string(),
-        })
+        .upload_image_stream(tonic::Request::new(ReceiverStream::new(rx)))
         .await?
         .into_inner();
     println!("Uploaded image to {}", resp.path);
@@ -179,6 +241,26 @@ pub async fn upload_image(
     println!("  Format: {}", resp.image_format);
     println!("  SHA256: {}", resp.image_sha256);
     Ok(())
+}
+
+pub async fn check_vm_ssh_ready(
+    info: &ConnectionInfo,
+    vm_name: &str,
+    network: Option<&str>,
+    port: i32,
+    timeout_ms: i32,
+) -> Result<node_proto::CheckVmSshReadyResponse> {
+    let mut client = client::node_admin_client(info).await?;
+    let resp = client
+        .check_vm_ssh_ready(node_proto::CheckVmSshReadyRequest {
+            vm_name: vm_name.to_string(),
+            network: network.unwrap_or("").to_string(),
+            port,
+            timeout_ms,
+        })
+        .await?
+        .into_inner();
+    Ok(resp)
 }
 
 fn infer_image_format_from_name(name: &str) -> String {

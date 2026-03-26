@@ -80,9 +80,7 @@ impl ControllerService {
         let nix_config =
             nixgen::generate_node_config(&vms, iface, &self.default_network, &networks);
 
-        let mut admin = self.clients.get_admin(&node.address).ok_or_else(|| {
-            Status::unavailable(format!("no connection to node {}", node.address))
-        })?;
+        let mut admin = self.ensure_admin_client_for_node(node).await?;
 
         for vm in &vms {
             if vm.image_url.is_empty() {
@@ -188,6 +186,41 @@ impl ControllerService {
         } else {
             controller_proto::VmState::Stopped as i32
         })
+    }
+
+    async fn ensure_admin_client_for_node(
+        &self,
+        node: &NodeRow,
+    ) -> Result<node_proto::node_admin_client::NodeAdminClient<tonic::transport::Channel>, Status>
+    {
+        if let Some(client) = self.clients.get_admin(&node.address) {
+            return Ok(client);
+        }
+        self.clients.connect(&node.address).await.map_err(|e| {
+            Status::unavailable(format!("no connection to node {}: {e}", node.address))
+        })?;
+        self.clients.get_admin(&node.address).ok_or_else(|| {
+            Status::unavailable(format!("no connection to node {}", node.address))
+        })
+    }
+
+    async fn ensure_compute_client_for_address(
+        &self,
+        address: &str,
+    ) -> Result<
+        node_proto::node_compute_client::NodeComputeClient<tonic::transport::Channel>,
+        Status,
+    > {
+        if let Some(client) = self.clients.get_compute(address) {
+            return Ok(client);
+        }
+        self.clients
+            .connect(address)
+            .await
+            .map_err(|e| Status::unavailable(format!("no connection to node {address}: {e}")))?;
+        self.clients
+            .get_compute(address)
+            .ok_or_else(|| Status::unavailable(format!("no connection to node {address}")))
     }
 }
 
@@ -416,6 +449,19 @@ impl controller_proto::controller_server::Controller for ControllerService {
             };
             (String::new(), String::new(), image_path, image_format)
         };
+        let existing_on_node = self
+            .db
+            .list_vms_for_node(&node.id)
+            .map_err(|e| Status::internal(format!("listing vms for image collision check: {e}")))?;
+        if let Some(conflict) = existing_on_node
+            .into_iter()
+            .find(|existing| existing.image_path == image_path)
+        {
+            return Err(Status::failed_precondition(format!(
+                "image path '{}' is already used by VM '{}' on node '{}'; duplicate writable disk usage is not supported",
+                image_path, conflict.name, node.id
+            )));
+        }
         let vm_network = spec
             .nics
             .first()
@@ -458,7 +504,34 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         info!(vm_id = %vm_id, node_id = %node.id, "created VM, pushing config");
 
-        self.push_config_to_node(&node).await?;
+        if let Err(push_err) = self.push_config_to_node(&node).await {
+            warn!(
+                vm_id = %vm_id,
+                node_id = %node.id,
+                error = %push_err,
+                "failed to push config after VM insert; rolling back VM row"
+            );
+            if let Err(db_err) = self.db.delete_vm_by_id_or_name(&vm_id) {
+                error!(
+                    vm_id = %vm_id,
+                    node_id = %node.id,
+                    error = %db_err,
+                    "rollback failed after push error"
+                );
+                return Err(Status::internal(format!(
+                    "failed to apply VM config and rollback VM {}: push error: {}; rollback error: {}",
+                    vm_id,
+                    push_err.message(),
+                    db_err
+                )));
+            }
+            return Err(Status::aborted(format!(
+                "failed to apply VM {} on node {}: {}",
+                vm_id,
+                node.id,
+                push_err.message()
+            )));
+        }
 
         Ok(Response::new(controller_proto::CreateVmResponse {
             vm_id,
@@ -580,9 +653,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             })
             .ok_or_else(|| Status::not_found(format!("VM {} not found", req.vm_id)))?;
 
-        let mut client = self.clients.get_compute(&node.address).ok_or_else(|| {
-            Status::unavailable(format!("no connection to node {}", node.address))
-        })?;
+        let mut client = self.ensure_compute_client_for_address(&node.address).await?;
 
         let resp = client
             .get_vm(node_proto::GetVmRequest {
@@ -709,6 +780,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
         for (idx, vm) in rows.iter().enumerate() {
             fallback_states.push(state_fallback_without_runtime(vm.auto_start));
             if let Some(node_address) = node_address_by_id.get(&vm.node_id) {
+                if self.clients.get_compute(node_address).is_none() {
+                    if let Err(err) = self.clients.connect(node_address).await {
+                        warn!(address = %node_address, error = %err, "failed to refresh node compute client");
+                    }
+                }
                 if let Some(mut compute) = self.clients.get_compute(node_address) {
                     let vm_name = vm.name.clone();
                     let node_id = vm.node_id.clone();
@@ -1280,6 +1356,8 @@ mod tests {
             image_url: String::new(),
             image_sha256: String::new(),
             cloud_init_user_data: String::new(),
+            image_path: String::new(),
+            image_format: String::new(),
         };
 
         let err =
@@ -1291,5 +1369,95 @@ mod tests {
             .expect_err("missing image_url should be rejected");
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
         assert!(err.message().contains("image_url"));
+    }
+
+    #[tokio::test]
+    async fn create_vm_rolls_back_when_push_fails() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| {
+            Err(Status::internal("simulated push failure for test"))
+        });
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: node.id.clone(),
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-rollback".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: "https://example.com/debian.raw".to_string(),
+            image_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
+            cloud_init_user_data: String::new(),
+            image_path: String::new(),
+            image_format: String::new(),
+        };
+
+        let err = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+            &svc,
+            Request::new(req),
+        )
+        .await
+        .expect_err("create should fail when push fails");
+        assert_eq!(err.code(), tonic::Code::Aborted);
+
+        let found = db
+            .find_node_for_vm("vm-rollback")
+            .expect("query vm by name after failed create");
+        assert!(found.is_none(), "failed create should be rolled back");
+    }
+
+    #[tokio::test]
+    async fn create_vm_rejects_image_path_already_in_use() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+        db.insert_vm(&test_vm(&node.id)).expect("insert existing vm");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db,
+            NodeClients::new(None),
+            test_network(),
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: node.id,
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-path-conflict".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            cloud_init_user_data: String::new(),
+            image_path: "/var/lib/kcore/images/web-1.raw".to_string(),
+            image_format: "raw".to_string(),
+        };
+
+        let err = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+            &svc,
+            Request::new(req),
+        )
+        .await
+        .expect_err("duplicate image path should be rejected");
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(err.message().contains("already used"));
     }
 }

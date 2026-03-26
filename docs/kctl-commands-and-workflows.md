@@ -50,6 +50,28 @@ kctl create vm web-01 \
   --image-sha256 <sha256>
 ```
 
+Wait until VM is fully ready:
+
+```bash
+kctl create vm web-01 \
+  --image-path /var/lib/kcore/images/debian12-base.qcow2 \
+  --image-format qcow2 \
+  --network default \
+  --wait
+```
+
+Wait until SSH is reachable from the node host:
+
+```bash
+kctl create vm web-01 \
+  --image-path /var/lib/kcore/images/debian12-base.qcow2 \
+  --image-format qcow2 \
+  --network default \
+  --wait-for-ssh \
+  --wait-timeout-seconds 300 \
+  --ssh-port 22
+```
+
 Create from YAML:
 
 ```bash
@@ -135,14 +157,41 @@ kctl --node 10.0.0.21:9091 node apply-nix -f ./node-config.nix --no-rebuild
 
 ## 6) Image operations
 
-VM image download is controller-managed through VM create (`--image` + `--image-sha256`).
+There are two supported VM image flows:
 
-Legacy direct node image commands remain in CLI for compatibility, but the recommended and reproducible flow is:
+1. URL-backed flow (controller-managed download):
+   - `kctl create vm ... --image <https-url> --image-sha256 <sha256>`
+2. Node-local upload flow (two-step):
+   - `kctl --node <node:9091> node upload-image -f ./disk.qcow2`
+   - `kctl create vm ... --image-path /var/lib/kcore/images/<uploaded-name> --image-format qcow2`
 
-1. `kctl create vm ... --image <https-url> --image-sha256 <sha256>`
-2. controller validates and persists image metadata
-3. node-agent downloads/verifies image to `/var/lib/kcore/images/...`
-4. controller applies rendered Nix config
+Upload flow details:
+
+- `node upload-image` accepts only `raw` and `qcow2`.
+- You can force format with `--format raw|qcow2`; if omitted, kctl infers from filename.
+- Optional integrity check: `--image-sha256 <hex>`.
+- Upload uses chunked gRPC streaming, so large images (for example multi-GB raw disks) are supported.
+- Response includes final node-local path, format, size, and computed SHA256.
+- ISO uploads are not supported in this workflow.
+
+Example:
+
+```bash
+kctl --node 10.0.0.21:9091 node upload-image \
+  -f ./debian-12-genericcloud-amd64.qcow2 \
+  --name debian12-base.qcow2
+
+kctl create vm web-01 \
+  --cpu 2 \
+  --memory 4G \
+  --network default \
+  --image-path /var/lib/kcore/images/debian12-base.qcow2 \
+  --image-format qcow2
+```
+
+For a full image-centric guide (including large raw upload and wait-for-ssh flow), see:
+
+- `docs/images.md`
 
 ## 7) Controller apply
 

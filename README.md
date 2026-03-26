@@ -41,6 +41,11 @@ See: [Security model](docs/security.md)
 - Install nodes from live ISO: `kctl --node <host:9091> node install ...`
 - Create VMs with a direct HTTPS image URL + checksum:
   `kctl create vm <name> --image <https-url> --image-sha256 <sha256>`
+- Create VMs from node-local uploaded image path:
+  `kctl --node <host:9091> node upload-image -f <local-image.{qcow2,raw}> ...`
+  then `kctl create vm <name> --image-path <node-path> --image-format <qcow2|raw>`
+- Wait for VM readiness:
+  `kctl create vm <name> ... --wait` or `kctl create vm <name> ... --wait-for-ssh`
 - Manage VM desired state declaratively: `kctl set vm <name> --state <running|stopped>`
 - Legacy compatibility aliases remain available: `kctl start vm ...`, `kctl stop vm ...`
 
@@ -57,6 +62,7 @@ Default guest access on generated cloud-init seeds:
 
 See:
 - [kctl commands and workflows](docs/kctl-commands-and-workflows.md)
+- [VM images workflow](docs/images.md)
 - [Networking model](docs/networking.md)
 - [Node install bootstrap flow](docs/node-install-bootstrap-flow.md)
 - [mTLS bootstrap and authentication](docs/mtls-bootstrap-and-auth.md)

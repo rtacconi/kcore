@@ -147,3 +147,33 @@ pub fn validate_netmask(value: &str) -> Result<String, Status> {
     }
     Ok(parsed)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn image_path_must_be_absolute_without_traversal() {
+        let ok = validate_image_path("/var/lib/kcore/images/base.raw").expect("valid path");
+        assert_eq!(ok, "/var/lib/kcore/images/base.raw");
+
+        let not_absolute = validate_image_path("var/lib/kcore/images/base.raw");
+        assert!(not_absolute.is_err());
+
+        let traversal = validate_image_path("/var/lib/kcore/images/../evil.raw");
+        assert!(traversal.is_err());
+    }
+
+    #[test]
+    fn normalize_image_format_accepts_only_raw_or_qcow2() {
+        assert_eq!(
+            normalize_image_format("RAW").expect("raw should normalize"),
+            "raw"
+        );
+        assert_eq!(
+            normalize_image_format("qcow2").expect("qcow2 should normalize"),
+            "qcow2"
+        );
+        assert!(normalize_image_format("iso").is_err());
+    }
+}

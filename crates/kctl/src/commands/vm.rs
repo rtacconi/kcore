@@ -1,7 +1,9 @@
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use crate::client::{self, controller_proto as proto};
 use crate::config::ConnectionInfo;
+use crate::commands::node;
 use crate::output;
 use anyhow::{bail, Context, Result};
 
@@ -16,9 +18,20 @@ pub struct CreateArgs {
     pub image_format: Option<String>,
     pub network: Option<String>,
     pub target_node: Option<String>,
+    pub wait: bool,
+    pub wait_for_ssh: bool,
+    pub wait_timeout_seconds: u64,
+    pub ssh_port: i32,
+    pub ssh_probe_timeout_ms: i32,
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
+    if args.wait_for_ssh && args.ssh_port <= 0 {
+        bail!("--ssh-port must be > 0 when using --wait-for-ssh");
+    }
+    if (args.wait || args.wait_for_ssh) && args.wait_timeout_seconds == 0 {
+        bail!("--wait-timeout-seconds must be > 0");
+    }
     let (
         vm_name,
         vm_cpu,
@@ -97,7 +110,124 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
     println!("  CPU:  {vm_cpu} cores");
     println!("  Mem:  {}", client::format_bytes(mem_bytes));
 
+    if args.wait || args.wait_for_ssh {
+        let mode = if args.wait_for_ssh {
+            WaitMode::RunningAndSsh
+        } else {
+            WaitMode::RunningOnly
+        };
+        wait_for_vm_readiness(
+            info,
+            &resp.vm_id,
+            Duration::from_secs(args.wait_timeout_seconds),
+            mode,
+            args.ssh_port,
+            args.ssh_probe_timeout_ms,
+        )
+        .await?;
+    }
+
     Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum WaitMode {
+    RunningOnly,
+    RunningAndSsh,
+}
+
+async fn wait_for_vm_readiness(
+    info: &ConnectionInfo,
+    vm_id: &str,
+    timeout: Duration,
+    mode: WaitMode,
+    ssh_port: i32,
+    ssh_probe_timeout_ms: i32,
+) -> Result<()> {
+    let deadline = Instant::now() + timeout;
+    let mut node_address_cache: Option<String> = None;
+    loop {
+        if Instant::now() > deadline {
+            bail!(
+                "timeout waiting for VM {} readiness after {} seconds",
+                vm_id,
+                timeout.as_secs()
+            );
+        }
+
+        let mut controller = client::controller_client(info).await?;
+        let get = controller
+            .get_vm(proto::GetVmRequest {
+                vm_id: vm_id.to_string(),
+                target_node: String::new(),
+            })
+            .await?
+            .into_inner();
+        let spec = get.spec.as_ref().context("get_vm missing spec")?;
+        let status = get.status.as_ref().context("get_vm missing status")?;
+        let current_state = proto::VmState::try_from(status.state).unwrap_or(proto::VmState::Unknown);
+        if current_state != proto::VmState::Running {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        }
+        if mode == WaitMode::RunningOnly {
+            println!("VM '{}' is running", spec.name);
+            return Ok(());
+        }
+
+        if node_address_cache.is_none() {
+            let mut controller = client::controller_client(info).await?;
+            let nodes = controller
+                .list_nodes(proto::ListNodesRequest {})
+                .await?
+                .into_inner()
+                .nodes;
+            node_address_cache = node_address_for_vm_node_id(&nodes, &get.node_id);
+        }
+        let Some(node_address) = node_address_cache.clone() else {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            continue;
+        };
+        let node_info = ConnectionInfo {
+            address: node_address,
+            insecure: info.insecure,
+            cert: info.cert.clone(),
+            key: info.key.clone(),
+            ca: info.ca.clone(),
+        };
+        let ssh = node::check_vm_ssh_ready(
+            &node_info,
+            &spec.name,
+            None,
+            ssh_port,
+            ssh_probe_timeout_ms,
+        )
+        .await?;
+        if ssh.ready {
+            println!("VM '{}' SSH is ready at {}:{}", spec.name, ssh.ip, ssh.port);
+            return Ok(());
+        }
+        if !ssh.reason.is_empty() {
+            println!(
+                "waiting for SSH on VM '{}': {}{}",
+                spec.name,
+                ssh.reason,
+                if ssh.ip.is_empty() {
+                    String::new()
+                } else {
+                    format!(" (candidate ip: {})", ssh.ip)
+                }
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+fn node_address_for_vm_node_id(nodes: &[proto::NodeInfo], node_id: &str) -> Option<String> {
+    nodes
+        .iter()
+        .find(|n| n.node_id == node_id)
+        .map(|n| n.address.clone())
 }
 
 pub async fn delete(info: &ConnectionInfo, vm_id: &str, target_node: Option<String>) -> Result<()> {
@@ -544,5 +674,65 @@ mod tests {
         assert!(image.url.is_empty());
         assert_eq!(image.path, "/var/lib/kcore/images/debian.raw");
         assert_eq!(image.format, "raw");
+    }
+
+    #[test]
+    fn node_address_for_vm_node_id_picks_matching_node() {
+        let nodes = vec![
+            proto::NodeInfo {
+                node_id: "node-a".to_string(),
+                hostname: "a".to_string(),
+                address: "10.0.0.1:9091".to_string(),
+                capacity: None,
+                usage: None,
+                status: "ready".to_string(),
+                last_heartbeat: None,
+                labels: vec![],
+            },
+            proto::NodeInfo {
+                node_id: "node-b".to_string(),
+                hostname: "b".to_string(),
+                address: "10.0.0.2:9091".to_string(),
+                capacity: None,
+                usage: None,
+                status: "ready".to_string(),
+                last_heartbeat: None,
+                labels: vec![],
+            },
+        ];
+        let addr = node_address_for_vm_node_id(&nodes, "node-b");
+        assert_eq!(addr.as_deref(), Some("10.0.0.2:9091"));
+        assert!(node_address_for_vm_node_id(&nodes, "missing").is_none());
+    }
+
+    #[test]
+    fn resolve_create_image_rejects_url_and_path_together() {
+        let err = resolve_create_image_source(
+            Some("https://example.com/debian.qcow2"),
+            Some("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"),
+            Some("/var/lib/kcore/images/debian.qcow2"),
+            Some("qcow2"),
+            None,
+            None,
+            None,
+        )
+        .expect_err("mixed modes should fail");
+        assert!(err.to_string().contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn resolve_create_image_rejects_invalid_local_image_format() {
+        let err = resolve_create_image_source(
+            None,
+            None,
+            Some("/var/lib/kcore/images/debian.img"),
+            Some("iso"),
+            None,
+            None,
+            None,
+        )
+        .expect_err("unsupported format should fail");
+        assert!(err.to_string().contains("raw"));
+        assert!(err.to_string().contains("qcow2"));
     }
 }

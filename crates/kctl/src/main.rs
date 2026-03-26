@@ -127,6 +127,21 @@ enum CreateResource {
         /// Target node (optional, controller picks if empty)
         #[arg(long = "target-node")]
         target_node: Option<String>,
+        /// Wait until VM reaches running state
+        #[arg(long)]
+        wait: bool,
+        /// Wait until VM is running and SSH port is reachable from node host
+        #[arg(long = "wait-for-ssh")]
+        wait_for_ssh: bool,
+        /// Max wait time in seconds for --wait/--wait-for-ssh
+        #[arg(long = "wait-timeout-seconds", default_value_t = 300)]
+        wait_timeout_seconds: u64,
+        /// SSH port to probe when using --wait-for-ssh
+        #[arg(long = "ssh-port", default_value_t = 22)]
+        ssh_port: i32,
+        /// SSH TCP probe timeout (milliseconds) when using --wait-for-ssh
+        #[arg(long = "ssh-probe-timeout-ms", default_value_t = 1500)]
+        ssh_probe_timeout_ms: i32,
     },
     /// Create a network on a node (declarative)
     Network {
@@ -299,6 +314,9 @@ enum NodeAction {
         /// Install and run controller on this node
         #[arg(long)]
         run_controller: bool,
+        /// Storage mode for data disks: filesystem, lvm, or zfs
+        #[arg(long, default_value = "filesystem")]
+        data_disk_mode: String,
     },
     /// Apply a NixOS configuration to a node
     ApplyNix {
@@ -375,6 +393,11 @@ async fn main() {
                     image_format,
                     network,
                     target_node,
+                    wait,
+                    wait_for_ssh,
+                    wait_timeout_seconds,
+                    ssh_port,
+                    ssh_probe_timeout_ms,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
@@ -391,6 +414,11 @@ async fn main() {
                     image_format: image_format.clone(),
                     network: network.clone(),
                     target_node: target_node.clone(),
+                    wait: *wait,
+                    wait_for_ssh: *wait_for_ssh,
+                    wait_timeout_seconds: *wait_timeout_seconds,
+                    ssh_port: *ssh_port,
+                    ssh_probe_timeout_ms: *ssh_probe_timeout_ms,
                 },
             )
             .await
@@ -553,6 +581,7 @@ async fn main() {
                     data_disk,
                     join_controller,
                     run_controller,
+                    data_disk_mode,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
@@ -569,6 +598,7 @@ async fn main() {
                 data_disk.clone(),
                 join_controller.as_deref(),
                 *run_controller,
+                data_disk_mode,
                 &certs_dir,
             )
             .await

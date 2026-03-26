@@ -47,6 +47,10 @@ service NodeAdmin {
   // UploadImage writes a local image blob to the node image cache.
   // Accepted formats are qcow2 and raw.
   rpc UploadImage(UploadImageRequest) returns (UploadImageResponse);
+  rpc UploadImageStream(stream UploadImageChunk) returns (UploadImageResponse);
+
+  // CheckVmSshReady resolves VM IP from DHCP leases and probes SSH port.
+  rpc CheckVmSshReady(CheckVmSshReadyRequest) returns (CheckVmSshReadyResponse);
 
   // ListDisks returns block devices available on the node.
   rpc ListDisks(ListDisksRequest) returns (ListDisksResponse);
@@ -288,6 +292,28 @@ message UploadImageResponse {
   string image_sha256 = 4;  // computed SHA256
 }
 
+message UploadImageChunk {
+  bytes chunk_data = 1;       // chunk bytes (may be empty for metadata-only first message)
+  string source_name = 2;     // optional source filename from client
+  string destination_name = 3; // optional desired filename on node
+  string image_format = 4;     // required: qcow2 or raw
+  string image_sha256 = 5;     // optional expected SHA256
+}
+
+message CheckVmSshReadyRequest {
+  string vm_name = 1;
+  string network = 2;          // optional; if empty, scan all dnsmasq lease files
+  int32 port = 3;              // default 22 when <= 0
+  int32 timeout_ms = 4;        // default 1500ms when <= 0
+}
+
+message CheckVmSshReadyResponse {
+  bool ready = 1;
+  string ip = 2;
+  int32 port = 3;
+  string reason = 4;
+}
+
 message ListDisksRequest {}
 
 message DiskInfo {
@@ -329,6 +355,7 @@ message InstallToDiskRequest {
   string controller_key_pem = 8;  // Controller server/client private key (PEM)
   string kctl_cert_pem = 9;      // kctl client certificate (PEM)
   string kctl_key_pem = 10;      // kctl client private key (PEM)
+  string data_disk_mode = 12;    // storage mode for data disks: "filesystem", "lvm", or "zfs"
 }
 
 message InstallToDiskResponse {
