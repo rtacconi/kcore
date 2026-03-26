@@ -111,13 +111,44 @@ async fn connect_and_register(
         let ca_pem = std::fs::read_to_string(&tls.ca_file)?;
         let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
         let key_pem = std::fs::read_to_string(&tls.key_file)?;
-        let tls_config = ClientTlsConfig::new()
+        let base_tls_config = ClientTlsConfig::new()
             .ca_certificate(Certificate::from_pem(ca_pem))
             .identity(Identity::from_pem(cert_pem, key_pem));
-        Channel::from_shared(endpoint.to_string())?
-            .tls_config(tls_config)?
-            .connect()
-            .await?
+        let server_name_candidates = tls_server_name_candidates(endpoint, hostname);
+        let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
+        let mut connected: Option<Channel> = None;
+        for server_name in &server_name_candidates {
+            let tls_config = base_tls_config.clone().domain_name(server_name.to_string());
+            match Channel::from_shared(endpoint.to_string())?
+                .tls_config(tls_config)?
+                .connect()
+                .await
+            {
+                Ok(ch) => {
+                    connected = Some(ch);
+                    break;
+                }
+                Err(e) => {
+                    warn!(
+                        endpoint = %endpoint,
+                        server_name = %server_name,
+                        error = %e,
+                        "registration TLS connect attempt failed"
+                    );
+                    last_err = Some(Box::new(e));
+                }
+            }
+        }
+        match connected {
+            Some(ch) => ch,
+            None => {
+                return Err(last_err.unwrap_or_else(|| {
+                    Box::new(std::io::Error::other(
+                        "TLS connect failed without specific error",
+                    )) as Box<dyn std::error::Error + Send + Sync>
+                }));
+            }
+        }
     } else {
         Channel::from_shared(endpoint.to_string())?
             .connect()
@@ -167,6 +198,57 @@ fn get_primary_ip() -> Result<String, std::io::Error> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no IP found"))
 }
 
+fn tls_server_name_candidates(endpoint: &str, hostname: &str) -> Vec<String> {
+    let mut out = Vec::<String>::new();
+    if let Some(host) = endpoint_host(endpoint) {
+        out.push(host.to_string());
+        // Common test env mismatch: endpoint is loopback, cert SAN is node hostname/IP.
+        if is_loopback_host(host) {
+            if !hostname.trim().is_empty() && hostname != "unknown" {
+                out.push(hostname.to_string());
+            }
+            if let Ok(ip) = get_primary_ip() {
+                out.push(ip);
+            }
+        }
+    }
+    if out.is_empty() {
+        out.push("localhost".to_string());
+    }
+    dedup_strings(out)
+}
+
+fn endpoint_host(endpoint: &str) -> Option<&str> {
+    let without_scheme = endpoint
+        .strip_prefix("https://")
+        .or_else(|| endpoint.strip_prefix("http://"))
+        .unwrap_or(endpoint);
+    // Bracketed IPv6 support: [::1]:9090
+    if let Some(rest) = without_scheme.strip_prefix('[') {
+        if let Some(end_idx) = rest.find(']') {
+            return Some(&rest[..end_idx]);
+        }
+    }
+    without_scheme
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .or(Some(without_scheme))
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1"
+}
+
+fn dedup_strings(input: Vec<String>) -> Vec<String> {
+    let mut out = Vec::new();
+    for s in input {
+        if !out.iter().any(|existing| existing == &s) {
+            out.push(s);
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,5 +262,22 @@ mod tests {
     #[test]
     fn marker_file_path_is_correct() {
         assert_eq!(DISABLE_VXLAN_MARKER, "/etc/kcore/disable-vxlan");
+    }
+
+    #[test]
+    fn endpoint_host_parses_scheme_and_port() {
+        assert_eq!(
+            endpoint_host("https://192.168.40.105:9090"),
+            Some("192.168.40.105")
+        );
+        assert_eq!(endpoint_host("127.0.0.1:9090"), Some("127.0.0.1"));
+        assert_eq!(endpoint_host("https://[::1]:9090"), Some("::1"));
+    }
+
+    #[test]
+    fn tls_server_name_candidates_include_hostname_for_loopback() {
+        let names = tls_server_name_candidates("https://127.0.0.1:9090", "kvm-node");
+        assert!(names.iter().any(|n| n == "127.0.0.1"));
+        assert!(names.iter().any(|n| n == "kvm-node"));
     }
 }
