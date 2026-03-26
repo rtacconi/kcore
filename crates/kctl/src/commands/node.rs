@@ -105,10 +105,10 @@ pub async fn install(
 
     if resp.accepted {
         println!("Install accepted: {}", resp.message);
+        Ok(())
     } else {
-        eprintln!("Install rejected: {}", resp.message);
+        anyhow::bail!("Install rejected: {}", resp.message);
     }
-    Ok(())
 }
 
 fn validate_install_controller_mode(
@@ -137,10 +137,10 @@ pub async fn apply_nix(info: &ConnectionInfo, file: &str, rebuild: bool) -> Resu
 
     if resp.success {
         println!("{}", resp.message);
+        Ok(())
     } else {
-        eprintln!("Failed: {}", resp.message);
+        anyhow::bail!("Apply failed: {}", resp.message);
     }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -36,6 +36,7 @@ pub struct VmRow {
     pub node_id: String,
     #[allow(dead_code)]
     pub created_at: String,
+    pub runtime_state: String,
 }
 
 #[derive(Debug, Clone)]
@@ -73,7 +74,10 @@ impl Database {
     fn migrate(&self) -> Result<()> {
         let conn = self.lock_conn()?;
         conn.execute_batch(
-            "CREATE TABLE IF NOT EXISTS nodes (
+            "CREATE TABLE IF NOT EXISTS schema_version (
+                version INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS nodes (
                 id TEXT PRIMARY KEY,
                 hostname TEXT NOT NULL,
                 address TEXT NOT NULL,
@@ -96,7 +100,8 @@ impl Database {
                 network TEXT NOT NULL DEFAULT 'default',
                 auto_start INTEGER NOT NULL DEFAULT 1,
                 node_id TEXT NOT NULL REFERENCES nodes(id),
-                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                runtime_state TEXT NOT NULL DEFAULT 'unknown'
             );
             CREATE TABLE IF NOT EXISTS networks (
                 name TEXT NOT NULL,
@@ -107,30 +112,57 @@ impl Database {
                 PRIMARY KEY (name, node_id)
             );",
         )?;
-        let _ = conn.execute(
-            "ALTER TABLE vms ADD COLUMN image_url TEXT NOT NULL DEFAULT ''",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE vms ADD COLUMN image_sha256 TEXT NOT NULL DEFAULT ''",
-            [],
-        );
-        let _ = conn.execute(
-            "ALTER TABLE vms ADD COLUMN image_format TEXT NOT NULL DEFAULT 'raw'",
-            [],
-        );
-        let _ = conn.execute(
-            "UPDATE vms
-             SET image_format = CASE
-                 WHEN lower(image_path) LIKE '%.qcow2' OR lower(image_path) LIKE '%.qcow' THEN 'qcow2'
-                 ELSE 'raw'
-             END
-             WHERE image_format IS NULL
-                OR image_format = ''
-                OR (image_format = 'raw' AND image_url != '' AND (lower(image_path) LIKE '%.qcow2' OR lower(image_path) LIKE '%.qcow'))",
-            [],
-        );
+
+        let version = Self::schema_version(&conn);
+
+        if version < 1 {
+            let _ = conn.execute(
+                "ALTER TABLE vms ADD COLUMN image_url TEXT NOT NULL DEFAULT ''",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE vms ADD COLUMN image_sha256 TEXT NOT NULL DEFAULT ''",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE vms ADD COLUMN image_format TEXT NOT NULL DEFAULT 'raw'",
+                [],
+            );
+            let _ = conn.execute(
+                "UPDATE vms
+                 SET image_format = CASE
+                     WHEN lower(image_path) LIKE '%.qcow2' OR lower(image_path) LIKE '%.qcow' THEN 'qcow2'
+                     ELSE 'raw'
+                 END
+                 WHERE image_format IS NULL
+                    OR image_format = ''
+                    OR (image_format = 'raw' AND image_url != '' AND (lower(image_path) LIKE '%.qcow2' OR lower(image_path) LIKE '%.qcow'))",
+                [],
+            );
+        }
+
+        if version < 2 {
+            let _ = conn.execute(
+                "ALTER TABLE vms ADD COLUMN runtime_state TEXT NOT NULL DEFAULT 'unknown'",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 2;
+        if version < CURRENT_VERSION {
+            conn.execute("DELETE FROM schema_version", [])?;
+            conn.execute(
+                "INSERT INTO schema_version (version) VALUES (?1)",
+                params![CURRENT_VERSION],
+            )?;
+        }
+
         Ok(())
+    }
+
+    fn schema_version(conn: &Connection) -> i32 {
+        conn.query_row("SELECT version FROM schema_version", [], |row| row.get(0))
+            .unwrap_or(0)
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
@@ -208,8 +240,8 @@ impl Database {
     pub fn insert_vm(&self, vm: &VmRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'))",
+            "INSERT INTO vms (id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, datetime('now'), ?13)",
             params![
                 vm.id,
                 vm.name,
@@ -223,21 +255,16 @@ impl Database {
                 vm.network,
                 vm.auto_start as i32,
                 vm.node_id,
+                vm.runtime_state,
             ],
         )?;
         Ok(())
     }
 
-    pub fn delete_vm(&self, vm_id: &str) -> Result<bool, rusqlite::Error> {
-        let conn = self.lock_conn()?;
-        let rows = conn.execute("DELETE FROM vms WHERE id = ?1", params![vm_id])?;
-        Ok(rows > 0)
-    }
-
     pub fn get_vm(&self, vm_id: &str) -> Result<Option<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at FROM vms WHERE id = ?1",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state FROM vms WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![vm_id], row_to_vm)?;
         rows.next().transpose()
@@ -246,7 +273,7 @@ impl Database {
     pub fn list_vms(&self) -> Result<Vec<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at FROM vms",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state FROM vms",
         )?;
         let rows = stmt.query_map([], row_to_vm)?;
         rows.collect()
@@ -255,7 +282,7 @@ impl Database {
     pub fn list_vms_for_node(&self, node_id: &str) -> Result<Vec<VmRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at FROM vms WHERE node_id = ?1",
+            "SELECT id, name, cpu, memory_bytes, image_path, image_url, image_sha256, image_format, image_size, network, auto_start, node_id, created_at, runtime_state FROM vms WHERE node_id = ?1",
         )?;
         let rows = stmt.query_map(params![node_id], row_to_vm)?;
         rows.collect()
@@ -345,6 +372,29 @@ impl Database {
         )?;
         Ok(rows > 0)
     }
+
+    pub fn update_vm_runtime_state(
+        &self,
+        node_id: &str,
+        vm_name: &str,
+        state: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "UPDATE vms SET runtime_state = ?1 WHERE name = ?2 AND node_id = ?3",
+            params![state, vm_name, node_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    pub fn delete_vm_by_id_or_name(&self, id_or_name: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM vms WHERE id = ?1 OR name = ?1",
+            params![id_or_name],
+        )?;
+        Ok(rows > 0)
+    }
 }
 
 fn row_to_node(row: &rusqlite::Row) -> Result<NodeRow, rusqlite::Error> {
@@ -378,6 +428,7 @@ fn row_to_vm(row: &rusqlite::Row) -> Result<VmRow, rusqlite::Error> {
         auto_start: row.get::<_, i32>(10)? != 0,
         node_id: row.get(11)?,
         created_at: row.get(12)?,
+        runtime_state: row.get(13)?,
     })
 }
 
@@ -448,6 +499,7 @@ mod tests {
             auto_start: true,
             node_id: node_id.to_string(),
             created_at: String::new(),
+            runtime_state: "unknown".to_string(),
         }
     }
 
@@ -488,6 +540,7 @@ mod tests {
             auto_start: true,
             node_id: node.id.clone(),
             created_at: String::new(),
+            runtime_state: "unknown".to_string(),
         })
         .expect("insert qcow vm");
 

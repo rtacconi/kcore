@@ -144,6 +144,7 @@ mod tests {
             auto_start,
             node_id: "node-1".into(),
             created_at: String::new(),
+            runtime_state: "unknown".into(),
         }
     }
 

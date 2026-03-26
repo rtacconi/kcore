@@ -23,8 +23,8 @@ pub async fn apply(info: &ConnectionInfo, file: &str, dry_run: bool) -> Result<(
 
     if resp.success {
         println!("{}", resp.message);
+        Ok(())
     } else {
-        eprintln!("Failed: {}", resp.message);
+        anyhow::bail!("Apply failed: {}", resp.message);
     }
-    Ok(())
 }

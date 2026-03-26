@@ -38,8 +38,8 @@ pub async fn delete(info: &ConnectionInfo, name: &str, force: bool) -> Result<()
 
     if resp.success {
         println!("{}", resp.message);
+        Ok(())
     } else {
-        eprintln!("Failed: {}", resp.message);
+        anyhow::bail!("Delete failed: {}", resp.message);
     }
-    Ok(())
 }

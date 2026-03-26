@@ -399,6 +399,35 @@ impl controller_proto::controller_server::Controller for ControllerService {
             vm_count = req.vms.len(),
             "syncing VM state from node"
         );
+
+        for vm in &req.vms {
+            let state_str = match controller_proto::VmState::try_from(vm.state) {
+                Ok(controller_proto::VmState::Running) => "running",
+                Ok(controller_proto::VmState::Stopped) => "stopped",
+                Ok(controller_proto::VmState::Paused) => "paused",
+                Ok(controller_proto::VmState::Error) => "error",
+                _ => "unknown",
+            };
+            match self.db.update_vm_runtime_state(&req.node_id, &vm.name, state_str) {
+                Ok(true) => {}
+                Ok(false) => {
+                    warn!(
+                        node_id = %req.node_id,
+                        vm_name = %vm.name,
+                        "node reported VM not tracked by controller (orphan)"
+                    );
+                }
+                Err(e) => {
+                    error!(
+                        node_id = %req.node_id,
+                        vm_name = %vm.name,
+                        error = %e,
+                        "failed to update VM runtime state"
+                    );
+                }
+            }
+        }
+
         Ok(Response::new(controller_proto::SyncVmStateResponse {
             success: true,
         }))
@@ -513,6 +542,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             auto_start: true,
             node_id: node.id.clone(),
             created_at: String::new(),
+            runtime_state: "unknown".to_string(),
         };
 
         self.db
@@ -538,9 +568,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
         let req = request.into_inner();
         let node = self.resolve_node_for_vm(&req.vm_id, &req.target_node)?;
 
-        self.db
-            .delete_vm(&req.vm_id)
+        let deleted = self
+            .db
+            .delete_vm_by_id_or_name(&req.vm_id)
             .map_err(|e| Status::internal(format!("deleting vm: {e}")))?;
+        if !deleted {
+            return Err(Status::not_found(format!("VM '{}' not found", req.vm_id)));
+        }
 
         info!(vm_id = %req.vm_id, node_id = %node.id, "deleted VM, pushing config");
 
@@ -718,43 +752,62 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .map(|n| (n.id, n.address))
             .collect::<std::collections::HashMap<_, _>>();
 
-        let mut infos = Vec::with_capacity(rows.len());
-        for vm in rows {
-            let mut state = state_fallback_without_runtime(vm.auto_start);
+        let vm_count = rows.len();
+        let mut fallback_states: Vec<i32> = Vec::with_capacity(vm_count);
+        let mut set = tokio::task::JoinSet::new();
+
+        for (idx, vm) in rows.iter().enumerate() {
+            fallback_states.push(state_fallback_without_runtime(vm.auto_start));
             if let Some(node_address) = node_address_by_id.get(&vm.node_id) {
                 if let Some(mut compute) = self.clients.get_compute(node_address) {
-                    match tokio::time::timeout(
-                        Duration::from_secs(3),
-                        compute.get_vm(node_proto::GetVmRequest {
-                            vm_id: vm.name.clone(),
-                        }),
-                    )
-                    .await
-                    {
-                        Ok(Ok(resp)) => {
-                            if let Some(status) = resp.into_inner().status {
-                                state = controller_state_from_node_state(status.state);
-                            }
-                        }
-                        Ok(Err(err)) => {
-                            warn!(node_id = %vm.node_id, vm_name = %vm.name, address = %node_address, error = %err, "failed to fetch runtime VM state");
-                        }
-                        Err(_) => {
-                            warn!(node_id = %vm.node_id, vm_name = %vm.name, address = %node_address, "timed out fetching runtime VM state");
-                        }
-                    }
+                    let vm_name = vm.name.clone();
+                    let node_id = vm.node_id.clone();
+                    let addr = node_address.clone();
+                    set.spawn(async move {
+                        let result = tokio::time::timeout(
+                            Duration::from_secs(3),
+                            compute.get_vm(node_proto::GetVmRequest { vm_id: vm_name.clone() }),
+                        )
+                        .await;
+                        (idx, vm_name, node_id, addr, result)
+                    });
                 }
             }
-            infos.push(controller_proto::VmInfo {
-                id: vm.id,
-                name: vm.name,
-                state,
-                cpu: vm.cpu,
-                memory_bytes: vm.memory_bytes,
-                node_id: vm.node_id,
-                created_at: None,
-            });
         }
+
+        let mut live_states: Vec<Option<i32>> = vec![None; vm_count];
+        while let Some(Ok((idx, vm_name, node_id, addr, result))) = set.join_next().await {
+            match result {
+                Ok(Ok(resp)) => {
+                    if let Some(status) = resp.into_inner().status {
+                        live_states[idx] = Some(controller_state_from_node_state(status.state));
+                    }
+                }
+                Ok(Err(err)) => {
+                    warn!(node_id = %node_id, vm_name = %vm_name, address = %addr, error = %err, "failed to fetch runtime VM state");
+                }
+                Err(_) => {
+                    warn!(node_id = %node_id, vm_name = %vm_name, address = %addr, "timed out fetching runtime VM state");
+                }
+            }
+        }
+
+        let infos: Vec<_> = rows
+            .into_iter()
+            .enumerate()
+            .map(|(i, vm)| {
+                let state = live_states[i].unwrap_or(fallback_states[i]);
+                controller_proto::VmInfo {
+                    id: vm.id,
+                    name: vm.name,
+                    state,
+                    cpu: vm.cpu,
+                    memory_bytes: vm.memory_bytes,
+                    node_id: vm.node_id,
+                    created_at: None,
+                }
+            })
+            .collect();
 
         Ok(Response::new(controller_proto::ListVmsResponse {
             vms: infos,
@@ -1045,6 +1098,7 @@ mod tests {
             auto_start: true,
             node_id: node_id.to_string(),
             created_at: String::new(),
+            runtime_state: "unknown".to_string(),
         }
     }
 

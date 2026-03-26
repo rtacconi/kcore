@@ -92,6 +92,12 @@ in {
               nft add table ip kcore-${netName} 2>/dev/null || true
               nft add chain ip kcore-${netName} postrouting '{ type nat hook postrouting priority srcnat; }'
               nft add rule ip kcore-${netName} postrouting oifname "${cfg.gatewayInterface}" masquerade
+              nft add chain ip kcore-${netName} prerouting '{ type nat hook prerouting priority dstnat; }'
+              nft add chain ip kcore-${netName} forward '{ type filter hook forward priority 0; }'
+              ${lib.concatMapStringsSep "\n              " (port: ''nft add rule ip kcore-${netName} prerouting ip daddr ${netCfg.externalIP} tcp dport ${toString port} dnat to ${netCfg.gatewayIP}
+              nft add rule ip kcore-${netName} forward iifname "${cfg.gatewayInterface}" tcp dport ${toString port} accept'') netCfg.allowedTCPPorts}
+              ${lib.concatMapStringsSep "\n              " (port: ''nft add rule ip kcore-${netName} prerouting ip daddr ${netCfg.externalIP} udp dport ${toString port} dnat to ${netCfg.gatewayIP}
+              nft add rule ip kcore-${netName} forward iifname "${cfg.gatewayInterface}" udp dport ${toString port} accept'') netCfg.allowedUDPPorts}
             '';
 
             preStop = ''
