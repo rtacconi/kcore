@@ -179,6 +179,9 @@ enum CreateResource {
         /// Target node (optional, controller picks if empty)
         #[arg(long = "target-node")]
         target_node: Option<String>,
+        /// 802.1Q VLAN tag (0 = no VLAN)
+        #[arg(long = "vlan-id", default_value_t = 0)]
+        vlan_id: i32,
     },
     /// Create cluster PKI and local context for mTLS
     Cluster {
@@ -522,6 +525,7 @@ async fn main() {
                     gateway_ip,
                     internal_netmask,
                     target_node,
+                    vlan_id,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
@@ -533,6 +537,7 @@ async fn main() {
                     gateway_ip: gateway_ip.clone(),
                     internal_netmask: internal_netmask.clone(),
                     target_node: target_node.clone(),
+                    vlan_id: *vlan_id,
                 },
             )
             .await

@@ -9,6 +9,7 @@ pub struct CreateArgs {
     pub gateway_ip: String,
     pub internal_netmask: String,
     pub target_node: Option<String>,
+    pub vlan_id: i32,
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
@@ -22,6 +23,7 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
             target_node: args.target_node.unwrap_or_default(),
             allowed_tcp_ports: vec![],
             allowed_udp_ports: vec![],
+            vlan_id: args.vlan_id,
         })
         .await?
         .into_inner();
@@ -65,13 +67,18 @@ pub async fn list(info: &ConnectionInfo, target_node: Option<String>) -> Result<
     }
 
     println!(
-        "{:<20}  {:<16}  {:<16}  {:<15}  {:<16}",
-        "NAME", "GATEWAY", "NETMASK", "EXTERNAL_IP", "NODE"
+        "{:<20}  {:<16}  {:<16}  {:<15}  {:>4}  {:<16}",
+        "NAME", "GATEWAY", "NETMASK", "EXTERNAL_IP", "VLAN", "NODE"
     );
     for n in &resp.networks {
+        let vlan = if n.vlan_id > 0 {
+            n.vlan_id.to_string()
+        } else {
+            "-".to_string()
+        };
         println!(
-            "{:<20}  {:<16}  {:<16}  {:<15}  {:<16}",
-            n.name, n.gateway_ip, n.internal_netmask, n.external_ip, n.node_id
+            "{:<20}  {:<16}  {:<16}  {:<15}  {:>4}  {:<16}",
+            n.name, n.gateway_ip, n.internal_netmask, n.external_ip, vlan, n.node_id
         );
     }
     Ok(())

@@ -965,6 +965,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     .map(|p| p.to_string())
                     .collect::<Vec<_>>()
                     .join(","),
+                vlan_id: req.vlan_id,
             })
             .map_err(|e| Status::internal(format!("storing network: {e}")))?;
 
@@ -1086,6 +1087,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     node_id: n.node_id,
                     allowed_tcp_ports: parse_port_list(&n.allowed_tcp_ports),
                     allowed_udp_ports: parse_port_list(&n.allowed_udp_ports),
+                    vlan_id: n.vlan_id,
                 })
                 .collect(),
         }))

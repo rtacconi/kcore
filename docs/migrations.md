@@ -26,7 +26,7 @@ schema_version
 
 ## Current schema version
 
-**4** (as of March 2026)
+**6** (as of March 2026)
 
 ## Migration history
 
@@ -36,6 +36,8 @@ schema_version
 | 1 → 2 | Added `runtime_state` column to `vms` (default `'unknown'`). | Persist actual VM state reported by nodes via `SyncVmState`, so the controller doesn't have to poll every node on every `list_vms`. |
 | 2 → 3 | Added `cpu_used`, `memory_used` to `nodes`; `allowed_tcp_ports`, `allowed_udp_ports` to `networks`; `cloud_init_user_data` to `vms`; new `node_labels` table. | Persist heartbeat resource usage for scheduler, port-forwarding rules per network, cloud-init customization per VM, and node labels for placement hints. |
 | 3 → 4 | New `ssh_keys` and `vm_ssh_keys` tables. | SSH public key management — store keys centrally, reference by name when creating VMs, inject into cloud-init. |
+| 4 → 5 | Added `storage_backend` to `nodes` and `vms`; added `storage_size_bytes` to `vms`. | Track storage backend preferences per node and VM. |
+| 5 → 6 | Added `vlan_id` to `networks`. | 802.1Q VLAN tagging — place VM networks on VLAN sub-interfaces of the upstream NIC. |
 
 ## Adding a new migration
 
@@ -52,16 +54,16 @@ schema_version
 ### Example
 
 ```rust
-// in Database::migrate(), after the version < 4 block:
+// in Database::migrate(), after the version < 6 block:
 
-if version < 5 {
+if version < 7 {
     let _ = conn.execute(
         "ALTER TABLE vms ADD COLUMN ssh_port INTEGER NOT NULL DEFAULT 0",
         [],
     );
 }
 
-const CURRENT_VERSION: i32 = 5;  // bump this
+const CURRENT_VERSION: i32 = 7;  // bump this
 ```
 
 ## Tables overview
@@ -125,6 +127,7 @@ Per-node network definitions for VM bridges.
 | internal_netmask | TEXT | `'255.255.255.0'` | Subnet mask |
 | allowed_tcp_ports | TEXT | `''` | Comma-separated TCP ports for DNAT |
 | allowed_udp_ports | TEXT | `''` | Comma-separated UDP ports for DNAT |
+| vlan_id | INTEGER | `0` | 802.1Q VLAN tag (0 = no VLAN) |
 | node_id | TEXT | PK (with name), FK → nodes | |
 
 ### node_labels

@@ -28,6 +28,12 @@
         default = [];
         description = "UDP ports to forward from external IP to VMs.";
       };
+
+      vlanId = lib.mkOption {
+        type = lib.types.int;
+        default = 0;
+        description = "802.1Q VLAN tag. When > 0, a VLAN sub-interface is created on gatewayInterface and the bridge is placed on top of it instead of the physical NIC.";
+      };
     };
   };
 

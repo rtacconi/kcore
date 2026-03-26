@@ -9,6 +9,10 @@
 
   bridgeName = name: "kbr-${name}";
   tapName = helpers.tapName;
+  upstreamIface = netName: netCfg:
+    if netCfg.vlanId > 0
+    then "${cfg.gatewayInterface}.${toString netCfg.vlanId}"
+    else cfg.gatewayInterface;
   subnetPrefix = ip: let
     match = builtins.match "([0-9]+\\.[0-9]+\\.[0-9]+)\\.[0-9]+" ip;
   in
@@ -85,19 +89,26 @@ in {
                 fi
               fi
 
+              ${lib.optionalString (netCfg.vlanId > 0) ''
+              vlan_if="${cfg.gatewayInterface}.${toString netCfg.vlanId}"
+              if ! ip link show "$vlan_if" >/dev/null 2>&1; then
+                ip link add link "${cfg.gatewayInterface}" name "$vlan_if" type vlan id ${toString netCfg.vlanId}
+                ip link set "$vlan_if" up
+              fi
+              ''}
               ip link add "$bridge" type bridge
               ip addr add ${netCfg.gatewayIP}/${netmaskToCidr netCfg.internalNetmask} dev "$bridge"
               ip link set "$bridge" up
 
               nft add table ip kcore-${netName} 2>/dev/null || true
               nft add chain ip kcore-${netName} postrouting '{ type nat hook postrouting priority srcnat; }'
-              nft add rule ip kcore-${netName} postrouting oifname "${cfg.gatewayInterface}" masquerade
+              nft add rule ip kcore-${netName} postrouting oifname "${upstreamIface netName netCfg}" masquerade
               nft add chain ip kcore-${netName} prerouting '{ type nat hook prerouting priority dstnat; }'
               nft add chain ip kcore-${netName} forward '{ type filter hook forward priority 0; }'
               ${lib.concatMapStringsSep "\n              " (port: ''nft add rule ip kcore-${netName} prerouting ip daddr ${netCfg.externalIP} tcp dport ${toString port} dnat to ${netCfg.gatewayIP}
-              nft add rule ip kcore-${netName} forward iifname "${cfg.gatewayInterface}" tcp dport ${toString port} accept'') netCfg.allowedTCPPorts}
+              nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" tcp dport ${toString port} accept'') netCfg.allowedTCPPorts}
               ${lib.concatMapStringsSep "\n              " (port: ''nft add rule ip kcore-${netName} prerouting ip daddr ${netCfg.externalIP} udp dport ${toString port} dnat to ${netCfg.gatewayIP}
-              nft add rule ip kcore-${netName} forward iifname "${cfg.gatewayInterface}" udp dport ${toString port} accept'') netCfg.allowedUDPPorts}
+              nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" udp dport ${toString port} accept'') netCfg.allowedUDPPorts}
             '';
 
             preStop = ''
@@ -105,6 +116,9 @@ in {
               nft delete table ip kcore-${netName} 2>/dev/null || true
               ip link set "$bridge" down 2>/dev/null || true
               ip link delete "$bridge" 2>/dev/null || true
+              ${lib.optionalString (netCfg.vlanId > 0) ''
+              ip link delete "${cfg.gatewayInterface}.${toString netCfg.vlanId}" 2>/dev/null || true
+              ''}
             '';
           }
       )

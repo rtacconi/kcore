@@ -118,6 +118,12 @@ pub fn generate_node_config(
                 ));
             }
         }
+        if net.vlan_id > 0 {
+            out.push_str(&format!(
+                "      vlanId = {};\n",
+                net.vlan_id
+            ));
+        }
         out.push_str("    };\n");
     }
 
@@ -350,6 +356,7 @@ mod tests {
             node_id: "node-1".into(),
             allowed_tcp_ports: String::new(),
             allowed_udp_ports: String::new(),
+            vlan_id: 0,
         }];
         let config = generate_node_config(
             &[],
@@ -372,6 +379,7 @@ mod tests {
             node_id: "node-1".into(),
             allowed_tcp_ports: "80,443,8080".into(),
             allowed_udp_ports: "53".into(),
+            vlan_id: 0,
         }];
         let config = generate_node_config(
             &[],
@@ -382,6 +390,30 @@ mod tests {
         );
         assert!(config.contains("allowedTCPPorts = [ 80 443 8080 ];"));
         assert!(config.contains("allowedUDPPorts = [ 53 ];"));
+    }
+
+    #[test]
+    fn renders_network_with_vlan_id() {
+        let v = vm(true, "web-01");
+        let net = NetworkRow {
+            name: "production".to_string(),
+            external_ip: "203.0.113.10".to_string(),
+            gateway_ip: "10.100.0.1".to_string(),
+            internal_netmask: "255.255.255.0".to_string(),
+            node_id: "node-1".to_string(),
+            allowed_tcp_ports: String::new(),
+            allowed_udp_ports: String::new(),
+            vlan_id: 100,
+        };
+        let config = generate_node_config(
+            &[v],
+            "eno1",
+            &default_net(),
+            &[net],
+            &std::collections::HashMap::new(),
+        );
+        assert!(config.contains("vlanId = 100"), "should contain vlanId");
+        assert!(config.contains("production"), "should contain network name");
     }
 
     #[test]

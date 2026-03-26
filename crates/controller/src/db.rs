@@ -54,6 +54,7 @@ pub struct NetworkRow {
     pub node_id: String,
     pub allowed_tcp_ports: String,
     pub allowed_udp_ports: String,
+    pub vlan_id: i32,
 }
 
 impl Database {
@@ -125,6 +126,7 @@ impl Database {
                 node_id TEXT NOT NULL REFERENCES nodes(id),
                 allowed_tcp_ports TEXT NOT NULL DEFAULT '',
                 allowed_udp_ports TEXT NOT NULL DEFAULT '',
+                vlan_id INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (name, node_id)
             );
             CREATE TABLE IF NOT EXISTS node_labels (
@@ -232,7 +234,14 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 5;
+        if version < 6 {
+            let _ = conn.execute(
+                "ALTER TABLE networks ADD COLUMN vlan_id INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 6;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -380,8 +389,8 @@ impl Database {
     pub fn insert_network(&self, network: &NetworkRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO networks (name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            "INSERT INTO networks (name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports, vlan_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 network.name,
                 network.external_ip,
@@ -389,7 +398,8 @@ impl Database {
                 network.internal_netmask,
                 network.node_id,
                 network.allowed_tcp_ports,
-                network.allowed_udp_ports
+                network.allowed_udp_ports,
+                network.vlan_id
             ],
         )?;
         Ok(())
@@ -402,7 +412,7 @@ impl Database {
     ) -> Result<Option<NetworkRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports
+            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports, vlan_id
              FROM networks
              WHERE node_id = ?1 AND name = ?2",
         )?;
@@ -413,7 +423,7 @@ impl Database {
     pub fn list_networks(&self) -> Result<Vec<NetworkRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports
+            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports, vlan_id
              FROM networks",
         )?;
         let rows = stmt.query_map([], row_to_network)?;
@@ -426,7 +436,7 @@ impl Database {
     ) -> Result<Vec<NetworkRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports
+            "SELECT name, external_ip, gateway_ip, internal_netmask, node_id, allowed_tcp_ports, allowed_udp_ports, vlan_id
              FROM networks
              WHERE node_id = ?1",
         )?;
@@ -698,6 +708,7 @@ fn row_to_network(row: &rusqlite::Row) -> Result<NetworkRow, rusqlite::Error> {
         node_id: row.get(4)?,
         allowed_tcp_ports: row.get(5)?,
         allowed_udp_ports: row.get(6)?,
+        vlan_id: row.get(7)?,
     })
 }
 
@@ -829,6 +840,7 @@ mod tests {
             node_id: node.id.clone(),
             allowed_tcp_ports: String::new(),
             allowed_udp_ports: String::new(),
+            vlan_id: 0,
         })
         .expect("insert network");
 

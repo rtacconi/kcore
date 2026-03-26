@@ -172,6 +172,7 @@ message CreateNetworkRequest {
   string target_node = 5;  // Optional - controller picks if empty
   repeated int32 allowed_tcp_ports = 6;  // TCP ports to DNAT-forward from external IP
   repeated int32 allowed_udp_ports = 7;  // UDP ports to DNAT-forward from external IP
+  int32 vlan_id = 8;  // Optional VLAN tag (0 = no VLAN, bridges directly on gatewayInterface)
 }
 
 message CreateNetworkResponse {
@@ -205,6 +206,7 @@ message NetworkInfo {
   string node_id = 5;
   repeated int32 allowed_tcp_ports = 6;
   repeated int32 allowed_udp_ports = 7;
+  int32 vlan_id = 8;
 }
 
 message VmInfo {
