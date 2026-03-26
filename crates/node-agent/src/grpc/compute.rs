@@ -140,7 +140,33 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         request: Request<proto::ListImagesRequest>,
     ) -> Result<Response<proto::ListImagesResponse>, Status> {
         auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
-        Err(Status::unimplemented(DECLARATIVE_MSG))
+        let cache_dir = std::path::Path::new("/var/lib/kcore/images");
+        let mut images = Vec::new();
+        if let Ok(entries) = std::fs::read_dir(cache_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if !path.is_file() {
+                    continue;
+                }
+                let meta = match std::fs::metadata(&path) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                let name = path
+                    .file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string();
+                images.push(proto::ImageInfo {
+                    name,
+                    path: path.display().to_string(),
+                    size_bytes: meta.len() as i64,
+                    created_at: None,
+                });
+            }
+        }
+        images.sort_by(|a, b| a.name.cmp(&b.name));
+        Ok(Response::new(proto::ListImagesResponse { images }))
     }
 
     async fn delete_image(
@@ -148,7 +174,39 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         request: Request<proto::DeleteImageRequest>,
     ) -> Result<Response<proto::DeleteImageResponse>, Status> {
         auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
-        Err(Status::unimplemented(DECLARATIVE_MSG))
+        let req = request.into_inner();
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+
+        let path = if name.starts_with('/') {
+            std::path::PathBuf::from(name)
+        } else {
+            std::path::PathBuf::from("/var/lib/kcore/images").join(name)
+        };
+
+        if !path.starts_with("/var/lib/kcore/images") {
+            return Err(Status::invalid_argument(
+                "image path must be under /var/lib/kcore/images",
+            ));
+        }
+
+        if !path.exists() {
+            return Err(Status::not_found(format!(
+                "image not found: {}",
+                path.display()
+            )));
+        }
+
+        std::fs::remove_file(&path).map_err(|e| {
+            Status::internal(format!("deleting {}: {e}", path.display()))
+        })?;
+
+        Ok(Response::new(proto::DeleteImageResponse {
+            success: true,
+            message: format!("image deleted: {}", path.display()),
+        }))
     }
 }
 

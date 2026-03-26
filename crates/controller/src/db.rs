@@ -125,6 +125,16 @@ impl Database {
                 node_id TEXT NOT NULL REFERENCES nodes(id),
                 label TEXT NOT NULL,
                 PRIMARY KEY (node_id, label)
+            );
+            CREATE TABLE IF NOT EXISTS ssh_keys (
+                name TEXT PRIMARY KEY,
+                public_key TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS vm_ssh_keys (
+                vm_id TEXT NOT NULL REFERENCES vms(id) ON DELETE CASCADE,
+                key_name TEXT NOT NULL REFERENCES ssh_keys(name),
+                PRIMARY KEY (vm_id, key_name)
             );",
         )?;
 
@@ -186,7 +196,22 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 3;
+        if version < 4 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS ssh_keys (
+                    name TEXT PRIMARY KEY,
+                    public_key TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS vm_ssh_keys (
+                    vm_id TEXT NOT NULL REFERENCES vms(id) ON DELETE CASCADE,
+                    key_name TEXT NOT NULL REFERENCES ssh_keys(name),
+                    PRIMARY KEY (vm_id, key_name)
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 4;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -509,18 +534,90 @@ impl Database {
         rows.collect()
     }
 
-    pub fn allocated_resources_per_node(&self) -> Result<Vec<(String, i64, i64)>, rusqlite::Error> {
+    pub fn insert_ssh_key(&self, name: &str, public_key: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO ssh_keys (name, public_key) VALUES (?1, ?2)",
+            params![name, public_key],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_ssh_key(&self, name: &str) -> Result<Option<(String, String, String)>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT node_id, COALESCE(SUM(cpu), 0), COALESCE(SUM(memory_bytes), 0) FROM vms GROUP BY node_id",
+            "SELECT name, public_key, created_at FROM ssh_keys WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![name], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn list_ssh_keys(&self) -> Result<Vec<(String, String, String)>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, public_key, created_at FROM ssh_keys ORDER BY name",
         )?;
         let rows = stmt.query_map([], |row| {
             Ok((
                 row.get::<_, String>(0)?,
-                row.get::<_, i64>(1)?,
-                row.get::<_, i64>(2)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
             ))
         })?;
+        rows.collect()
+    }
+
+    pub fn delete_ssh_key(&self, name: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute("DELETE FROM ssh_keys WHERE name = ?1", params![name])?;
+        Ok(rows > 0)
+    }
+
+    pub fn associate_vm_ssh_keys(
+        &self,
+        vm_id: &str,
+        key_names: &[String],
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        for key_name in key_names {
+            conn.execute(
+                "INSERT OR IGNORE INTO vm_ssh_keys (vm_id, key_name) VALUES (?1, ?2)",
+                params![vm_id, key_name],
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn get_vm_ssh_keys(&self, vm_id: &str) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT sk.public_key FROM vm_ssh_keys vsk JOIN ssh_keys sk ON vsk.key_name = sk.name WHERE vsk.vm_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![vm_id], |row| row.get::<_, String>(0))?;
+        rows.collect()
+    }
+
+    pub fn update_node_status(&self, node_id: &str, status: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "UPDATE nodes SET status = ?1 WHERE id = ?2",
+            params![status, node_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    pub fn get_stale_nodes(&self, timeout_seconds: i64) -> Result<Vec<NodeRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used FROM nodes WHERE status = 'ready' AND last_heartbeat != '' AND (julianday('now') - julianday(last_heartbeat)) * 86400 > ?1",
+        )?;
+        let rows = stmt.query_map(params![timeout_seconds], row_to_node)?;
         rows.collect()
     }
 }

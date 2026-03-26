@@ -81,6 +81,17 @@ enum Command {
         #[command(subcommand)]
         resource: PullResource,
     },
+    /// Manage SSH keys
+    #[command(alias = "ssh-key")]
+    SshKey {
+        #[command(subcommand)]
+        action: SshKeyAction,
+    },
+    /// Drain a node (migrate all VMs to other nodes)
+    Drain {
+        #[command(subcommand)]
+        resource: DrainResource,
+    },
     /// Apply a NixOS configuration to the controller
     Apply {
         /// Path to the NixOS configuration file
@@ -142,6 +153,9 @@ enum CreateResource {
         /// SSH TCP probe timeout (milliseconds) when using --wait-for-ssh
         #[arg(long = "ssh-probe-timeout-ms", default_value_t = 1500)]
         ssh_probe_timeout_ms: i32,
+        /// SSH key names to inject (can specify multiple times)
+        #[arg(long = "ssh-key")]
+        ssh_keys: Vec<String>,
     },
     /// Create a network on a node (declarative)
     Network {
@@ -348,8 +362,47 @@ enum NodeAction {
 enum PullResource {
     /// Pull an image to a node
     Image {
-        /// Image URI (HTTP/HTTPS)
+        /// Image URI (HTTPS)
         uri: String,
+        /// Required SHA256 checksum for integrity verification
+        #[arg(long)]
+        sha256: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SshKeyAction {
+    /// Create an SSH key
+    Create {
+        /// Key name
+        name: String,
+        /// Public key content (e.g., "ssh-rsa AAAA... user@host")
+        #[arg(long = "public-key")]
+        public_key: String,
+    },
+    /// Delete an SSH key
+    Delete {
+        /// Key name
+        name: String,
+    },
+    /// List all SSH keys
+    List,
+    /// Get SSH key details
+    Get {
+        /// Key name
+        name: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum DrainResource {
+    /// Drain a node
+    Node {
+        /// Node ID to drain
+        node_id: String,
+        /// Target node to move VMs to (optional; auto-schedules if empty)
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
     },
 }
 
@@ -398,6 +451,7 @@ async fn main() {
                     wait_timeout_seconds,
                     ssh_port,
                     ssh_probe_timeout_ms,
+                    ssh_keys,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
@@ -419,6 +473,7 @@ async fn main() {
                     wait_timeout_seconds: *wait_timeout_seconds,
                     ssh_port: *ssh_port,
                     ssh_probe_timeout_ms: *ssh_probe_timeout_ms,
+                    ssh_keys: ssh_keys.clone(),
                 },
             )
             .await
@@ -629,10 +684,66 @@ async fn main() {
         }
 
         Command::Pull {
-            resource: PullResource::Image { uri },
+            resource: PullResource::Image { uri, sha256 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
-            commands::image::pull(&info, uri).await
+            commands::image::pull(&info, uri, sha256.as_deref()).await
+        }
+
+        Command::SshKey {
+            action: SshKeyAction::Create { name, public_key },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::ssh_key::create(&info, name, public_key).await
+        }
+        Command::SshKey {
+            action: SshKeyAction::Delete { name },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::ssh_key::delete(&info, name).await
+        }
+        Command::SshKey {
+            action: SshKeyAction::List,
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::ssh_key::list(&info).await
+        }
+        Command::SshKey {
+            action: SshKeyAction::Get { name },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::ssh_key::get(&info, name).await
+        }
+
+        Command::Drain {
+            resource:
+                DrainResource::Node {
+                    node_id,
+                    target_node,
+                },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            let mut client = client::controller_client(&info)
+                .await
+                .unwrap_or_else(|e| fatal(&format!("{e}")));
+            let resp = client
+                .drain_node(client::controller_proto::DrainNodeRequest {
+                    node_id: node_id.to_string(),
+                    target_node: target_node.clone().unwrap_or_default(),
+                })
+                .await;
+            match resp {
+                Ok(r) => {
+                    let r = r.into_inner();
+                    println!("{}", r.message);
+                    if r.success {
+                        Ok(())
+                    } else {
+                        Err(anyhow::anyhow!("drain had errors"))
+                    }
+                }
+                Err(e) => Err(anyhow::anyhow!("drain failed: {e}")),
+            }
         }
 
         Command::Apply { file, dry_run } => {

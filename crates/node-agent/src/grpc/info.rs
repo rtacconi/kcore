@@ -21,15 +21,16 @@ impl proto::node_info_server::NodeInfo for InfoService {
     ) -> Result<Response<proto::GetNodeInfoResponse>, Status> {
         auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
 
-        let (hostname, cpu_cores, memory_bytes) = tokio::task::spawn_blocking(|| {
-            let hostname = hostname::get()
-                .map(|h| h.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| "unknown".into());
-            let (cpu, mem) = read_capacity();
-            (hostname, cpu, mem)
-        })
-        .await
-        .map_err(|e| Status::internal(format!("task join: {e}")))?;
+        let (hostname, cpu_cores, memory_bytes, cpu_used, memory_used) =
+            tokio::task::spawn_blocking(|| {
+                let hostname = hostname::get()
+                    .map(|h| h.to_string_lossy().into_owned())
+                    .unwrap_or_else(|_| "unknown".into());
+                let (cpu, mem, cpu_used, mem_used) = read_capacity_and_usage();
+                (hostname, cpu, mem, cpu_used, mem_used)
+            })
+            .await
+            .map_err(|e| Status::internal(format!("task join: {e}")))?;
 
         Ok(Response::new(proto::GetNodeInfoResponse {
             node_id: self.node_id.clone(),
@@ -39,34 +40,40 @@ impl proto::node_info_server::NodeInfo for InfoService {
                 memory_bytes,
             }),
             usage: Some(proto::NodeUsage {
-                cpu_cores_used: 0,
-                memory_bytes_used: 0,
+                cpu_cores_used: cpu_used,
+                memory_bytes_used: memory_used,
             }),
             storage_backends: Vec::new(),
         }))
     }
 }
 
-fn read_capacity() -> (i32, i64) {
+fn read_capacity_and_usage() -> (i32, i64, i32, i64) {
     let cpu_cores = std::fs::read_to_string("/proc/cpuinfo")
         .map(|s| s.matches("processor\t:").count() as i32)
         .unwrap_or(0);
 
-    let memory_bytes = std::fs::read_to_string("/proc/meminfo")
+    let meminfo = std::fs::read_to_string("/proc/meminfo").unwrap_or_default();
+    let parse_kb = |prefix: &str| -> i64 {
+        meminfo
+            .lines()
+            .find(|l| l.starts_with(prefix))
+            .and_then(|l| l.split_whitespace().nth(1))
+            .and_then(|v| v.parse::<i64>().ok())
+            .map(|kb| kb * 1024)
+            .unwrap_or(0)
+    };
+    let memory_total = parse_kb("MemTotal:");
+    let memory_available = parse_kb("MemAvailable:");
+    let memory_used = (memory_total - memory_available).max(0);
+
+    let cpu_used = std::fs::read_to_string("/proc/loadavg")
         .ok()
-        .and_then(|s| {
-            s.lines()
-                .find(|l| l.starts_with("MemTotal:"))
-                .and_then(|l| {
-                    l.split_whitespace()
-                        .nth(1)
-                        .and_then(|v| v.parse::<i64>().ok())
-                })
-                .map(|kb| kb * 1024)
-        })
+        .and_then(|s| s.split_whitespace().next().and_then(|v| v.parse::<f64>().ok()))
+        .map(|load| load.round() as i32)
         .unwrap_or(0);
 
-    (cpu_cores, memory_bytes)
+    (cpu_cores, memory_total, cpu_used, memory_used)
 }
 
 #[cfg(test)]

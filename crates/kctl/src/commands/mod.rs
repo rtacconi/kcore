@@ -3,4 +3,5 @@ pub mod cluster;
 pub mod image;
 pub mod network;
 pub mod node;
+pub mod ssh_key;
 pub mod vm;

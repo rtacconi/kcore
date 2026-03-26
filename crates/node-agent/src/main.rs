@@ -8,6 +8,7 @@ mod vmm;
 use clap::Parser;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
+use tokio::signal;
 
 pub mod proto {
     tonic::include_proto!("kcore.node");
@@ -65,6 +66,11 @@ async fn main() -> anyhow::Result<()> {
         grpc::StorageService::new_with_storage(storage),
     );
 
+    let (mut health_reporter, health_svc) = tonic_health::server::health_reporter();
+    health_reporter
+        .set_serving::<proto::node_compute_server::NodeComputeServer<grpc::ComputeService>>()
+        .await;
+
     let mut server = Server::builder();
     if let Some(tls) = cfg.tls.as_ref() {
         let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
@@ -80,12 +86,29 @@ async fn main() -> anyhow::Result<()> {
     }
 
     server
+        .add_service(health_svc)
         .add_service(compute_svc)
         .add_service(info_svc)
         .add_service(admin_svc)
         .add_service(storage_svc)
-        .serve(addr)
+        .serve_with_shutdown(addr, shutdown_signal())
         .await?;
 
     Ok(())
+}
+
+async fn shutdown_signal() {
+    let ctrl_c = signal::ctrl_c();
+    #[cfg(unix)]
+    let mut sigterm = signal::unix::signal(signal::unix::SignalKind::terminate())
+        .expect("failed to register SIGTERM handler");
+    #[cfg(unix)]
+    let terminate = sigterm.recv();
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => { info!("received Ctrl+C, shutting down"); },
+        _ = terminate => { info!("received SIGTERM, shutting down"); },
+    }
 }

@@ -120,10 +120,41 @@ CPU used:  3 cores
 Mem used:  12 GiB
 ```
 
-## Staleness detection (future)
+## Staleness detection
 
-There is currently no automatic mechanism to mark a node as `not-ready` if
-heartbeats stop arriving. This is a planned improvement — a background task in
-the controller would periodically check `last_heartbeat` and downgrade nodes
-that haven't reported within a configurable timeout (e.g. 90 seconds). Once
-marked `not-ready`, the scheduler would skip them for new VM placement.
+A background tokio task runs inside the controller process, checking every
+**30 seconds** for nodes whose `last_heartbeat` is older than **90 seconds**.
+
+When a node exceeds the deadline:
+
+1. Its status is set to `not-ready` via `UPDATE nodes SET status = 'not-ready'`.
+2. A warning is logged: `node missed heartbeat deadline, marked not-ready`.
+3. The scheduler will no longer place new VMs on that node.
+
+If the node comes back and sends a heartbeat, the heartbeat handler sets
+`status = 'ready'` again automatically.
+
+```
+┌─────────────┐   heartbeat   ┌────────────┐
+│  not-ready  │ ─────────────►│   ready    │
+└─────────────┘               └────────────┘
+      ▲                             │
+      │  90s without heartbeat      │
+      └─────────────────────────────┘
+```
+
+## Node drain
+
+Nodes can be drained to evacuate all VMs before maintenance:
+
+```bash
+kctl drain node <node-id>                    # auto-schedule to other nodes
+kctl drain node <node-id> --target-node X    # send all VMs to node X
+```
+
+The drain process:
+
+1. Sets the source node status to `draining`.
+2. For each VM, selects a target node (explicit or via scheduler) and moves it.
+3. Pushes updated NixOS configs to both source and target nodes.
+4. Sets the source node status to `drained`.

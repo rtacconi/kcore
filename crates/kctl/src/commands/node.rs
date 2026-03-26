@@ -34,6 +34,30 @@ pub async fn get_node(info: &ConnectionInfo, node_id: &str) -> Result<()> {
 
     let node = resp.node.as_ref().context("node not found")?;
     output::print_node_detail(node);
+
+    let vms_resp = client
+        .list_vms(controller_proto::ListVmsRequest {
+            target_node: node_id.to_string(),
+        })
+        .await?
+        .into_inner();
+
+    if !vms_resp.vms.is_empty() {
+        println!("\nVMs on this node ({}):", vms_resp.vms.len());
+        for vm in &vms_resp.vms {
+            let state = match vm.state {
+                1 => "Stopped",
+                2 => "Running",
+                3 => "Paused",
+                4 => "Error",
+                _ => "Unknown",
+            };
+            println!(
+                "  {:<36}  {:<20}  {:<10}",
+                vm.id, vm.name, state
+            );
+        }
+    }
     Ok(())
 }
 

@@ -23,6 +23,7 @@ pub struct CreateArgs {
     pub wait_timeout_seconds: u64,
     pub ssh_port: i32,
     pub ssh_probe_timeout_ms: i32,
+    pub ssh_keys: Vec<String>,
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
@@ -100,6 +101,7 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         cloud_init_user_data: String::new(),
         image_path: image.path,
         image_format: image.format,
+        ssh_key_names: args.ssh_keys,
     };
 
     let resp = client.create_vm(req).await?.into_inner();
