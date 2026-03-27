@@ -190,6 +190,7 @@ async fn wait_for_vm_readiness(
             if let Some(node_address) = node_address_cache.clone() {
                 let node_info = ConnectionInfo {
                     address: node_address,
+                    addresses: vec![],
                     insecure: info.insecure,
                     cert: info.cert.clone(),
                     key: info.key.clone(),

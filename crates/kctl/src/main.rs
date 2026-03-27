@@ -416,6 +416,9 @@ enum NodeAction {
         /// Disable VXLAN overlay networking on this node
         #[arg(long = "disable-vxlan")]
         disable_vxlan: bool,
+        /// Datacenter identity for the installed node (default: DC1)
+        #[arg(long = "dc-id", default_value = "DC1")]
+        dc_id: String,
     },
     /// Approve a pending node to join the cluster
     Approve {
@@ -780,6 +783,7 @@ async fn main() {
                     zfs_pool_name,
                     zfs_dataset_prefix,
                     disable_vxlan,
+                    dc_id,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
@@ -808,6 +812,7 @@ async fn main() {
                 zfs_dataset_prefix.as_deref(),
                 &certs_dir,
                 *disable_vxlan,
+                dc_id,
             )
             .await
         }

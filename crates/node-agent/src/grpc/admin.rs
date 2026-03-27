@@ -555,6 +555,10 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
     if req.disable_vxlan {
         args.push("--disable-vxlan".to_string());
     }
+    if !req.dc_id.trim().is_empty() {
+        args.push("--dc-id".to_string());
+        args.push(req.dc_id.trim().to_string());
+    }
     Ok(args)
 }
 
@@ -996,6 +1000,7 @@ mod tests {
             disable_vxlan: false,
             sub_ca_cert_pem: String::new(),
             sub_ca_key_pem: String::new(),
+            dc_id: String::new(),
         };
 
         write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
@@ -1065,6 +1070,7 @@ mod tests {
             disable_vxlan: false,
             sub_ca_cert_pem: String::new(),
             sub_ca_key_pem: String::new(),
+            dc_id: String::new(),
         };
         write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
         assert!(
@@ -1212,6 +1218,7 @@ mod tests {
                 disable_vxlan: false,
                 sub_ca_cert_pem: String::new(),
                 sub_ca_key_pem: String::new(),
+                dc_id: String::new(),
             }),
         )
         .await
@@ -1248,6 +1255,7 @@ mod tests {
                 disable_vxlan: false,
                 sub_ca_cert_pem: String::new(),
                 sub_ca_key_pem: String::new(),
+                dc_id: String::new(),
             }),
         )
         .await
@@ -1277,6 +1285,7 @@ mod tests {
                 disable_vxlan: false,
                 sub_ca_cert_pem: String::new(),
                 sub_ca_key_pem: String::new(),
+                dc_id: String::new(),
             }),
         )
         .await
@@ -1307,6 +1316,7 @@ mod tests {
             disable_vxlan: false,
             sub_ca_cert_pem: String::new(),
             sub_ca_key_pem: String::new(),
+            dc_id: "DC1".to_string(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--controller".to_string()));
@@ -1314,6 +1324,8 @@ mod tests {
         assert!(!args.contains(&"--run-controller".to_string()));
         assert!(args.contains(&"--data-disk".to_string()));
         assert!(args.contains(&"/dev/nvme0n1".to_string()));
+        assert!(args.contains(&"--dc-id".to_string()));
+        assert!(args.contains(&"DC1".to_string()));
     }
 
     #[test]
@@ -1339,6 +1351,7 @@ mod tests {
             disable_vxlan: false,
             sub_ca_cert_pem: String::new(),
             sub_ca_key_pem: String::new(),
+            dc_id: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--run-controller".to_string()));
@@ -1375,6 +1388,7 @@ mod tests {
             disable_vxlan: true,
             sub_ca_cert_pem: String::new(),
             sub_ca_key_pem: String::new(),
+            dc_id: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--disable-vxlan".to_string()));

@@ -365,6 +365,7 @@ message InstallToDiskRequest {
   bool disable_vxlan = 18;       // when true, node rejects VXLAN network creation
   string sub_ca_cert_pem = 19;   // Sub-CA certificate for node cert renewal (controller nodes only)
   string sub_ca_key_pem = 20;    // Sub-CA private key for node cert renewal (controller nodes only)
+  string dc_id = 21;             // Datacenter identity for installed node (default DC1)
 }
 
 enum StorageBackendType {

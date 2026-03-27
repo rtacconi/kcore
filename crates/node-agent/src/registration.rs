@@ -374,13 +374,14 @@ fn endpoint_host(endpoint: &str) -> Option<&str> {
 }
 
 fn controller_endpoints(cfg: &Config) -> Vec<String> {
+    let default_scheme = if cfg.tls.is_some() { "https" } else { "http" };
     cfg.controller_endpoints()
         .into_iter()
         .map(|addr| {
             if addr.contains("://") {
                 addr
             } else {
-                format!("https://{addr}")
+                format!("{default_scheme}://{addr}")
             }
         })
         .collect()
@@ -455,7 +456,7 @@ mod tests {
             storage: crate::config::StorageConfig::default(),
         };
         let endpoints = super::controller_endpoints(&cfg);
-        assert_eq!(endpoints, vec!["https://10.0.0.2:9090", "https://10.0.0.3:9090"]);
+        assert_eq!(endpoints, vec!["http://10.0.0.2:9090", "http://10.0.0.3:9090"]);
     }
 
     #[test]
