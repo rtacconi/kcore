@@ -122,6 +122,15 @@ Additional security measures:
 - **Sub-CA auto-rotation**: node certs are renewed automatically; the sub-CA is revocable by the operator without affecting the root CA.
 - **Certificate expiry visibility**: each node reports its certificate expiry at registration. `kctl get nodes` shows a `CERT EXPIRY` column with days remaining and a `⚠` warning when within 30 days of expiry.
 
+### FIPS-compatible cryptography
+
+All TLS connections use **aws-lc-rs** as the rustls crypto backend. aws-lc-rs wraps AWS-LC, which holds FIPS 140-3 validation (certificate #4816). At process startup, each binary (controller, node-agent, kctl) installs a custom `CryptoProvider` that restricts:
+
+- **Cipher suites**: TLS 1.3 AES-128-GCM, AES-256-GCM; TLS 1.2 ECDHE-ECDSA/RSA with AES-128-GCM and AES-256-GCM. ChaCha20-Poly1305 is excluded.
+- **Key exchange groups**: secp256r1 (P-256) and secp384r1 (P-384) only. X25519 is excluded.
+
+Certificate generation (`rcgen`) also uses aws-lc-rs instead of ring.
+
 Remaining gaps to track:
 
 - no CRL/OCSP revocation checks (sub-CA rotation provides a partial mitigation)

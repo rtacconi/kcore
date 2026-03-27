@@ -11,6 +11,30 @@ use tokio::signal;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
 
+fn install_fips_crypto_provider() {
+    let mut provider = rustls::crypto::aws_lc_rs::default_provider();
+
+    provider.cipher_suites.retain(|suite| {
+        matches!(
+            suite.suite(),
+            rustls::CipherSuite::TLS13_AES_256_GCM_SHA384
+                | rustls::CipherSuite::TLS13_AES_128_GCM_SHA256
+                | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384
+                | rustls::CipherSuite::TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256
+                | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384
+                | rustls::CipherSuite::TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256
+        )
+    });
+
+    provider
+        .kx_groups
+        .retain(|group| matches!(group.name(), rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1));
+
+    provider
+        .install_default()
+        .expect("failed to install FIPS crypto provider");
+}
+
 pub mod proto {
     tonic::include_proto!("kcore.node");
 }
@@ -33,6 +57,8 @@ struct Cli {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    install_fips_crypto_provider();
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),

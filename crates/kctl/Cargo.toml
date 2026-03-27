@@ -8,7 +8,8 @@ clap = { version = "4", features = ["derive"] }
 dirs = "6"
 prost = "0.13"
 prost-types = "0.13"
-rcgen = { version = "0.14", features = ["x509-parser"] }
+rcgen = { version = "0.14", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
+rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "std", "tls12"] }
 serde = { version = "1", features = ["derive"] }
 time = "0.3"
 serde_yaml = "0.9"

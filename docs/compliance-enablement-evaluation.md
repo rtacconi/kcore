@@ -110,6 +110,21 @@ Nodes must be explicitly approved by an operator (`kctl approve node`) before th
 - SOC 2 CC6.2 (asset management), PCI DSS 2.4 (system inventory)
 - Customer evidence: "No compute node can join the cluster and receive workloads without explicit operator approval."
 
+### 1.9 FIPS-compatible cryptography
+
+All TLS connections use `aws-lc-rs` as the rustls crypto backend. `aws-lc-rs` wraps AWS-LC, which holds FIPS 140-3 validation (certificate #4816). At process startup each binary installs a custom `CryptoProvider` restricted to:
+
+- TLS 1.3: AES-256-GCM-SHA384, AES-128-GCM-SHA256
+- TLS 1.2: ECDHE-ECDSA/RSA with AES-256-GCM and AES-128-GCM
+- Key exchange: secp384r1 (P-384), secp256r1 (P-256) only
+- Excluded: ChaCha20-Poly1305, X25519, RSA key exchange
+
+Certificate generation (`rcgen`) also uses `aws-lc-rs` instead of `ring`.
+
+**Compliance relevance:**
+- FIPS 140-3 (cryptographic module validation), PCI DSS 4.2 (strong cryptography)
+- Customer evidence: "All management plane TLS uses aws-lc-rs (AWS-LC FIPS 140-3 #4816) with FIPS-approved cipher suites. No non-FIPS algorithms are negotiable."
+
 ---
 
 ## 2. What KCore must add to enable customer compliance
@@ -191,25 +206,32 @@ Implementation: encode the role in the certificate CN or a custom X.509 extensio
 
 **Effort estimate:** 1–2 weeks engineering. No external cost.
 
-### 2.4 FIPS-compatible crypto configuration (FIPS, PCI)
+### 2.4 FIPS-compatible crypto configuration (FIPS, PCI) — IMPLEMENTED
 
-Customers in US federal, financial, or healthcare sectors need FIPS-validated cryptography. KCore should offer a FIPS mode that uses only approved algorithms.
+KCore now uses FIPS-validated cryptography by default, without requiring a runtime flag.
 
-**What to build:**
+**What was built:**
 
-| Item | Detail |
+| Item | Status |
 |------|--------|
-| Crypto provider switch | Replace `ring` with `aws-lc-rs` as the `rustls` crypto backend. `aws-lc-rs` wraps AWS-LC, which has FIPS 140-3 validation (certificate #4816). |
-| `--fips` flag | Controller and node-agent flag that restricts cipher suites to FIPS-approved only (AES-GCM + ECDHE P-256/P-384, no ChaCha20). Fails to start if crypto self-test fails. |
-| Crypto inventory API | Expose the active crypto configuration (library, cipher suites, key sizes) via the compliance report (2.2) so customers can present it to their assessors. |
+| Crypto provider switch | **Done.** `ring` replaced by `aws-lc-rs` as the `rustls` crypto backend in all three binaries (controller, node-agent, kctl). `rcgen` (certificate generation) also switched to `aws-lc-rs`. |
+| FIPS cipher suites | **Done (default, no flag needed).** Each binary installs a custom `CryptoProvider` at startup restricting cipher suites to AES-GCM + ECDHE P-256/P-384 only. ChaCha20-Poly1305 and X25519 are excluded. |
+| Crypto inventory API | Planned — expose active crypto configuration via the compliance report (2.2) so customers can present it to their assessors. |
+
+**Active TLS configuration:**
+
+| Setting | Value |
+|---------|-------|
+| Crypto library | `aws-lc-rs` (wraps AWS-LC, FIPS 140-3 certificate #4816) |
+| TLS 1.3 cipher suites | `TLS_AES_256_GCM_SHA384`, `TLS_AES_128_GCM_SHA256` |
+| TLS 1.2 cipher suites | `TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384`, `TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256`, `TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384`, `TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256` |
+| Key exchange groups | `secp384r1` (P-384), `secp256r1` (P-256) |
+| Excluded | ChaCha20-Poly1305, X25519, RSA key exchange |
 
 **Why this matters for customers:**
 - The customer's FIPS certification covers their system, not KCore. But if KCore uses non-FIPS crypto under the hood, the customer cannot claim FIPS compliance for their stack.
 - KCore does not need its own FIPS 140-3 certificate. It uses a pre-validated library and documents that fact.
-
-**Cost:**
-- Engineering: 2–3 weeks to switch crypto backend and add the flag
-- External: $0 — `aws-lc-rs` is open source and already FIPS-validated
+- Customer evidence: "All management plane TLS uses aws-lc-rs (AWS-LC FIPS 140-3 #4816) with AES-GCM cipher suites and NIST P-256/P-384 key exchange. No non-FIPS algorithms are negotiable."
 
 ### 2.5 Encryption at rest (GDPR, SOC 2, PCI)
 

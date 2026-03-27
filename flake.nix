@@ -43,7 +43,7 @@
           pname = "kcore-workspace";
           version = kcoreVersion;
           strictDeps = true;
-          nativeBuildInputs = [pkgs.protobuf];
+          nativeBuildInputs = [pkgs.protobuf pkgs.cmake pkgs.perl];
         };
 
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
@@ -98,6 +98,8 @@
               pkgs.cargo-audit
               pkgs.protobuf
               pkgs.grpcurl
+              pkgs.cmake
+              pkgs.perl
             ]
             ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isLinux [
               pkgs.cloud-hypervisor

@@ -168,8 +168,13 @@ mod tests {
         (addr.to_string(), tx)
     }
 
+    fn ensure_crypto_provider() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+
     #[tokio::test]
     async fn mtls_connect_succeeds_with_valid_client_cert() {
+        ensure_crypto_provider();
         let temp = tempfile::tempdir().expect("tempdir");
         let certs_dir = temp.path().join("certs");
         pki::create_cluster_pki(&certs_dir, "127.0.0.1", false).expect("create pki");
@@ -196,6 +201,7 @@ mod tests {
 
     #[tokio::test]
     async fn mtls_connect_fails_with_untrusted_client_cert() {
+        ensure_crypto_provider();
         let good = tempfile::tempdir().expect("tempdir");
         let good_dir = good.path().join("certs");
         pki::create_cluster_pki(&good_dir, "127.0.0.1", false).expect("create pki");

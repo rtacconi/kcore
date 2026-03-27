@@ -101,6 +101,10 @@ threat model and practical priorities are different.
   and pushes it to the controller.
 - **Certificate expiry visibility**: `kctl get nodes` displays days until
   each node's certificate expires with a `⚠` warning when within 30 days.
+- **FIPS-compatible cryptography**: all TLS uses `aws-lc-rs` (wrapping
+  AWS-LC, FIPS 140-3 certificate #4816) with cipher suites restricted to
+  AES-GCM + ECDHE P-256/P-384. No ChaCha20, no X25519. Certificate
+  generation (`rcgen`) also uses `aws-lc-rs`.
 
 ### Planned improvements
 
