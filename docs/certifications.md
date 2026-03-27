@@ -1,6 +1,6 @@
 # Certifications and Compliance Roadmap
 
-This document lays out a practical roadmap for achieving GDPR, SOC 2 Type II, PCI DSS, FIPS 140-3, and SBOM compliance in kcore. Each section describes what the standard requires, what kcore already provides, the gaps, and the concrete work items to close them.
+This document lays out a practical roadmap for achieving GDPR, SOC 2 Type II, PCI DSS, FIPS 140-3, VS-NfD, and SBOM compliance in kcore. Each section describes what the standard requires, what kcore already provides, the gaps, and the concrete work items to close them.
 
 ## Current baseline
 
@@ -184,6 +184,81 @@ kcore itself does not handle cardholder data, but as the hypervisor management l
 
 ---
 
+## 6. VS-NfD — Verschlusssache, Nur für den Dienstgebrauch
+
+**Goal:** Enable kcore to be approved by the BSI (Bundesamt für Sicherheit in der Informationstechnik) for processing data classified as VS-NfD under the German Verschlusssachenanweisung (VSA), opening the door to German federal government, defense, and critical infrastructure deployments.
+
+### What VS-NfD is
+
+VS-NfD ("Classified — For Official Use Only") is the lowest German government classification level. Any IT system that processes, stores, or transmits VS-NfD data must meet BSI requirements and undergo either a conventional approval procedure or the BSI's qualified approval procedure. For hypervisors specifically, BSI-VS-AP-0019-2020 defines the requirements profile.
+
+### Why it matters for kcore
+
+kcore is a hypervisor management layer built on cloud-hypervisor and NixOS. If kcore-managed VMs process VS-NfD data, both the hypervisor (cloud-hypervisor) and its management plane (kcore) fall within the approval boundary. The BSI hypervisor profile requires strict VM isolation, minimal attack surface, auditability, and BSI-approved cryptography — requirements that align closely with kcore's existing architecture but need formal evidence and hardening.
+
+### Cyberus Hypervisor (under evaluation)
+
+[Cyberus Technology](https://cyberus-technology.de/en/products/hypervisor) offers the Cyberus Hypervisor, a hardened distribution of cloud-hypervisor and KVM that is currently in the BSI accreditation process for VS-NfD. Since kcore already uses cloud-hypervisor, the Cyberus Hypervisor is being evaluated as a potential drop-in replacement for VS-NfD deployments. No integration decision has been made yet.
+
+### Current state
+
+kcore has several properties the BSI values:
+
+- **Rust with no unsafe code** — eliminates memory-safety vulnerabilities (buffer overflows, use-after-free) that are a primary concern in the hypervisor profile
+- **Declarative NixOS base** — reproducible builds, minimal attack surface, auditable system configuration
+- **mTLS with certificate-based identity** — strong authentication on all management interfaces
+- **No telemetry, no phone-home** — data stays within the operator's boundary
+
+What is missing: BSI-approved cryptography, formal VM isolation evidence, BSI-mandated audit logging, and the accreditation process itself.
+
+### Work items
+
+#### Cryptography (BSI TR-02102 compliance)
+
+| # | Task | Detail |
+|---|------|--------|
+| 6.1 | Align TLS with BSI TR-02102-2 | BSI's technical guideline for TLS mandates specific cipher suites. Restrict kcore to: TLS 1.2 with ECDHE (brainpoolP256r1 or P-256) + AES-GCM, TLS 1.3 with AES-256-GCM. BSI prefers brainpool curves over NIST curves where possible. |
+| 6.2 | Evaluate BSI-approved crypto libraries | The BSI maintains a list of approved crypto modules. Evaluate whether `aws-lc-rs` (from FIPS work item 2.1) or an OpenSSL-based variant with a BSI-evaluated configuration meets the requirement. If not, consider `botan-rs` (Botan has BSI evaluations). |
+| 6.3 | Key management per BSI requirements | Document key generation, storage, distribution, rotation, and destruction procedures aligned with BSI TR-02102-1. Ensure key lengths meet BSI minimums (RSA >= 3000 bit, ECDSA >= 250 bit, AES >= 128 bit). |
+
+#### VM isolation and hypervisor hardening
+
+| # | Task | Detail |
+|---|------|--------|
+| 6.4 | Document cloud-hypervisor isolation properties | BSI-VS-AP-0019 requires evidence that the hypervisor enforces strict separation between VMs. Document cloud-hypervisor's isolation model: virtio device separation, memory isolation via KVM, no shared filesystem by default, separate TAP devices per VM. |
+| 6.5 | Minimize hypervisor attack surface | Audit cloud-hypervisor features enabled by kcore. Disable any unnecessary device emulation, paravirtual interfaces, or debug features. Document the resulting attack surface. |
+| 6.6 | Prevent information flow between VMs | Verify and document that no side-channel or covert channel exists through kcore's management plane. Ensure VM names, states, and metadata from one VM are not observable by another VM's guest OS. |
+| 6.7 | Memory scrubbing on VM termination | Ensure that when a VM is destroyed, its memory pages are zeroed before being returned to the host or allocated to another VM. Verify cloud-hypervisor and KVM behavior; add a kcore-level check if needed. |
+
+#### Audit and accountability
+
+| # | Task | Detail |
+|---|------|--------|
+| 6.8 | BSI-compliant audit logging | Extend audit logging (item 3.2) to meet BSI requirements: log all administrative actions, authentication events (success and failure), configuration changes, and VM lifecycle events. Logs must be tamper-evident and retained for a defined period. |
+| 6.9 | Audit log export in BSI-compatible format | Provide log export in a format consumable by BSI-approved SIEM systems. Structured JSON with fields aligned to BSI IT-Grundschutz OPS.1.1.5 (logging). |
+
+#### Self-accreditation and documentation
+
+| # | Task | Detail |
+|---|------|--------|
+| 6.10 | IT-Grundschutz baseline mapping | Map kcore's controls to the BSI IT-Grundschutz Compendium modules: SYS.1.5 (Virtualization), APP.6 (General Software), OPS.1.1.5 (Logging), CON.1 (Crypto Concept). Identify and document coverage vs. gaps. |
+| 6.11 | Prepare VS-NfD self-accreditation package | Since September 2025, organizations processing VS-NfD must perform self-accreditation every three years. Produce the required documentation: security concept, risk assessment, list of technical and organizational measures, and the written confirmation from the IT security officer. |
+| 6.12 | Engage BSI for qualified approval | Contact the BSI to initiate either the conventional or qualified approval procedure for kcore as a hypervisor management component. The qualified procedure evaluates development processes (based on Common Criteria) rather than only the final product. |
+| 6.13 | Common Criteria evaluation preparation | The BSI qualified procedure requires development process evidence aligned with Common Criteria. Document: security target (ST), functional specification, design documentation, test documentation, and vulnerability analysis. The Rust + NixOS toolchain provides strong evidence for development environment security. |
+
+#### NixOS-level hardening
+
+| # | Task | Detail |
+|---|------|--------|
+| 6.14 | Hardened NixOS profile for VS-NfD | Create a NixOS configuration profile that meets BSI SiM-08202 (minimum security requirements for federal workstations). Includes: mandatory access control (SELinux or AppArmor), disabled USB mass storage, locked bootloader, kernel hardening (`lockdown=confidentiality`), no network services except kcore. |
+| 6.15 | Verified boot chain | Implement Secure Boot with a custom Machine Owner Key (MOK) for the kcore NixOS image. The BSI requires boot integrity verification to prevent rootkits and boot-time tampering. |
+
+### Priority
+
+**Medium.** Required for any German government or defense-adjacent deployment. Significant overlap with FIPS (cryptography) and SOC 2 (audit logging, access control). The BSI approval process itself can take 12–24 months, so early engagement (6.12) is critical path. The self-accreditation requirement (6.11) is mandatory since September 2025 and should be addressed promptly if kcore is already deployed in a VS-NfD environment.
+
+---
+
 ## Implementation order
 
 The roadmap is ordered to maximize reuse — earlier phases produce artifacts and controls that later phases depend on.
@@ -191,13 +266,16 @@ The roadmap is ordered to maximize reuse — earlier phases produce artifacts an
 ```
 Phase 1: Foundation (months 1–2)
 ├── SBOM generation (1.1–1.7)
-├── Audit logging (3.2, 4.13)
-└── Data inventory (3.1)
+├── Audit logging (3.2, 4.13, 6.8)
+├── Data inventory (3.1)
+└── IT-Grundschutz baseline mapping (6.10)
 
 Phase 2: Cryptographic hardening (months 2–4)
 ├── FIPS 140-3 crypto provider switch (2.1–2.2)
+├── BSI TR-02102 TLS alignment (6.1–6.2)
 ├── FIPS kernel mode (2.3)
 ├── Cipher suite restriction (2.4–2.5)
+├── Key management documentation (6.3)
 └── Encryption at rest (3.5)
 
 Phase 3: Access control and lifecycle (months 3–5)
@@ -210,24 +288,39 @@ Phase 4: Integrity and change management (months 4–6)
 ├── Config checksums and generation counters (4.7–4.8)
 ├── Signed releases (4.11)
 ├── SBOM diff and changelog automation (1.6, 4.12)
-└── File integrity monitoring (5.4)
+├── File integrity monitoring (5.4)
+└── Verified boot chain (6.15)
 
-Phase 5: SOC 2 audit period begins (month 6)
+Phase 5: VS-NfD hypervisor hardening (months 4–7)
+├── Cloud-hypervisor isolation documentation (6.4)
+├── Attack surface minimization (6.5–6.6)
+├── Memory scrubbing verification (6.7)
+├── Hardened NixOS profile (6.14)
+└── Engage BSI for qualified approval (6.12)
+
+Phase 6: SOC 2 audit period begins (month 6)
 ├── All CC6/CC7/CC8 controls operating
 ├── Evidence collection running
 └── 6–12 month observation period
 
-Phase 6: PCI-specific controls (months 6–9, if needed)
+Phase 7: PCI-specific controls (months 6–9, if needed)
 ├── Network segmentation for PCI VMs (5.1)
 ├── MFA integration (5.2)
 ├── Tamper-evident audit trail (5.6)
 └── Penetration testing documentation (5.5)
 
-Phase 7: Certification (months 12–18)
+Phase 8: VS-NfD accreditation (months 6–12)
+├── VS-NfD self-accreditation package (6.11)
+├── Common Criteria evaluation preparation (6.13)
+├── Audit log BSI-compatible export (6.9)
+└── BSI approval procedure (ongoing, 12–24 months)
+
+Phase 9: Certification (months 12–24)
 ├── SOC 2 Type II report issued
 ├── PCI DSS SAQ or ROC (if applicable)
 ├── FIPS 140-3 security policy published
-└── GDPR documentation package complete
+├── GDPR documentation package complete
+└── BSI VS-NfD approval (may extend to month 24+)
 ```
 
 ## Dependencies between standards
@@ -235,21 +328,33 @@ Phase 7: Certification (months 12–18)
 ```
 SBOM ──────────────► PCI 6.3 (vulnerability management)
                  └─► SOC 2 CC8 (change management)
+                 └─► VS-NfD Common Criteria evidence (6.13)
 
 Audit logging ─────► SOC 2 CC7 (monitoring)
                  └─► PCI 10 (audit trails)
                  └─► GDPR Art. 30 (records of processing)
+                 └─► VS-NfD BSI IT-Grundschutz OPS.1.1.5 (6.8)
 
 FIPS crypto ───────► PCI 4.2 (strong cryptography)
                  └─► SOC 2 CC6.1 (encryption)
+                 └─► VS-NfD BSI TR-02102 (6.1–6.2)
 
 RBAC ──────────────► SOC 2 CC6.3 (access control)
                  └─► PCI 7 (restrict access)
                  └─► GDPR Art. 32 (security of processing)
+                 └─► VS-NfD IT-Grundschutz ORP.4 (access control)
 
 Encryption at rest ► SOC 2 C1 (confidentiality)
                  └─► PCI 3.5 (protect stored data)
                  └─► GDPR Art. 32 (encryption)
+                 └─► VS-NfD data-at-rest protection (6.3)
+
+
+VM isolation ──────► VS-NfD BSI-VS-AP-0019 (6.4–6.7)
+                 └─► PCI 2.2 (system hardening)
+
+Secure boot ───────► VS-NfD boot integrity (6.15)
+                 └─► PCI 11.5 (file integrity)
 ```
 
 ## Estimated total effort
@@ -260,8 +365,10 @@ Encryption at rest ► SOC 2 C1 (confidentiality)
 | 2 — Crypto hardening | 3–4 weeks | Phase 1 |
 | 3 — Access & lifecycle | 3–4 weeks | Phase 1 |
 | 4 — Integrity & change mgmt | 2–3 weeks | Phases 2, 3 |
-| 5 — SOC 2 audit period | 6–12 months (elapsed) | Phase 4 |
-| 6 — PCI-specific | 3–4 weeks | Phase 4 |
-| 7 — Certification | 2–4 months (elapsed) | Phases 5, 6 |
+| 5 — VS-NfD hypervisor hardening | 3–4 weeks | Phases 2, 4 |
+| 6 — SOC 2 audit period | 6–12 months (elapsed) | Phase 4 |
+| 7 — PCI-specific | 3–4 weeks | Phase 4 |
+| 8 — VS-NfD accreditation | 4–6 weeks + BSI lead time | Phase 5 |
+| 9 — Certification | 2–6 months (elapsed) | Phases 6, 7, 8 |
 
-Total engineering effort: approximately 3–4 months of focused work, spread across a 12–18 month calendar timeline driven by the SOC 2 observation period.
+Total engineering effort: approximately 5–6 months of focused work, spread across a 12–24 month calendar timeline driven by the SOC 2 observation period and the BSI approval process (which can take 12–24 months on its own).
