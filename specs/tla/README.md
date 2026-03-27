@@ -10,9 +10,9 @@ The intent is to check protocol-level safety/liveness properties with TLC.
 ## Files
 
 - `ControllerNodeReconcile.tla` + `ControllerNodeReconcile.cfg`
-  - Node-agent picks an active controller from an ordered list.
-  - If active controller is down, it rotates to another reachable controller.
-  - Heartbeats only target the active controller.
+  - Node-agent picks an active controller by deterministic priority.
+  - If active controller becomes unreachable, failover switches to best reachable peer.
+  - Heartbeat progression is checked under fair failover/heartbeat scheduling.
 
 - `ControllerReplication.tla` + `ControllerReplication.cfg`
   - Controller-to-controller replication model.

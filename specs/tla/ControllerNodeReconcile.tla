@@ -1,59 +1,71 @@
 ------------------------------- MODULE ControllerNodeReconcile -------------------------------
-EXTENDS Naturals, Sequences, TLC
+EXTENDS Naturals, TLC
 
-CONSTANTS Controllers, NodeId
+CONSTANTS Controllers, Priority
 
-ASSUME Controllers /= {}
+ASSUME /\ Controllers # {}
+       /\ Priority \in [Controllers -> Nat]
+       /\ \A a, b \in Controllers : (Priority[a] = Priority[b]) => (a = b)
 
-VARIABLES up, order, active, heartbeatCount
+VARIABLES Up, Active, HeartbeatCount
+
+Vars == <<Up, Active, HeartbeatCount>>
+
+ReachableControllers(u) == {c \in Controllers : u[c]}
+
+BestReachable(u) ==
+  CHOOSE c \in ReachableControllers(u) :
+    \A d \in ReachableControllers(u) : Priority[c] <= Priority[d]
 
 Init ==
-  /\ up \in [Controllers -> BOOLEAN]
-  /\ order \in Seq(Controllers)
-  /\ Len(order) > 0
-  /\ active = Head(order)
-  /\ heartbeatCount \in [Controllers -> Nat]
-
-IsReachable(c) == up[c] = TRUE
-
-FirstReachable(seq) ==
-  CHOOSE c \in SeqToSet(seq) : IsReachable(c)
-
-NeedFailover ==
-  ~IsReachable(active) /\ (\E c \in SeqToSet(order) : IsReachable(c))
+  /\ Up = [c \in Controllers |-> TRUE]
+  /\ Active = BestReachable(Up)
+  /\ HeartbeatCount = [c \in Controllers |-> 0]
 
 Failover ==
-  /\ NeedFailover
-  /\ active' = FirstReachable(order)
-  /\ UNCHANGED <<up, order, heartbeatCount>>
+  /\ ~Up[Active]
+  /\ ReachableControllers(Up) # {}
+  /\ Active' = BestReachable(Up)
+  /\ UNCHANGED <<Up, HeartbeatCount>>
 
 Heartbeat ==
-  /\ IsReachable(active)
-  /\ heartbeatCount' = [heartbeatCount EXCEPT ![active] = @ + 1]
-  /\ UNCHANGED <<up, order, active>>
+  /\ Up[Active]
+  /\ HeartbeatCount' = [HeartbeatCount EXCEPT ![Active] = @ + 1]
+  /\ UNCHANGED <<Up, Active>>
 
 ToggleReachability ==
   /\ \E c \in Controllers :
-      up' = [up EXCEPT ![c] = ~@]
-  /\ UNCHANGED <<order, active, heartbeatCount>>
+      Up' = [Up EXCEPT ![c] = ~@]
+  /\ UNCHANGED <<Active, HeartbeatCount>>
 
 Noop ==
-  UNCHANGED <<up, order, active, heartbeatCount>>
+  UNCHANGED Vars
 
 Next ==
   Failover \/ Heartbeat \/ ToggleReachability \/ Noop
 
-Spec == Init /\ [][Next]_<<up, order, active, heartbeatCount>>
+Spec ==
+  Init /\ [][Next]_Vars
+       /\ WF_Vars(Failover)
+       /\ WF_Vars(Heartbeat)
 
-Safety_ActiveInControllers == active \in Controllers
+TypeOK ==
+  /\ Up \in [Controllers -> BOOLEAN]
+  /\ Active \in Controllers
+  /\ HeartbeatCount \in [Controllers -> Nat]
 
-Safety_HeartbeatMonotonic ==
-  \A c \in Controllers : heartbeatCount[c] \in Nat
+Safety_ActiveReachableOrNoReachable ==
+  Up[Active] \/ ReachableControllers(Up) = {}
 
-\* If there exists at least one reachable controller forever, failover/heartbeat
-\* should keep active controller reachable infinitely often in bounded traces.
+Safety_HeartbeatCountersNatural ==
+  \A c \in Controllers : HeartbeatCount[c] \in Nat
+
 Liveness_IfAnyReachableThenEventuallyReachableActive ==
-  (\A i \in Nat : \E c \in Controllers : up[c]) ~>
-  (\A n \in Nat : <>IsReachable(active))
+  []((ReachableControllers(Up) # {}) => <>Up[Active])
+
+Liveness_HeartbeatsProgressWhenReachable ==
+  []((ReachableControllers(Up) # {}) => <>(
+      \E c \in Controllers : HeartbeatCount[c] > 0
+  ))
 
 ==============================================================================================
