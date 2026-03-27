@@ -4,6 +4,7 @@ mod db;
 mod grpc;
 mod nixgen;
 mod node_client;
+mod replication;
 mod scheduler;
 
 use std::sync::{Arc, Mutex};
@@ -88,6 +89,12 @@ async fn main() -> anyhow::Result<()> {
 
     let sub_ca_state = load_sub_ca(&cfg);
     let sub_ca = Arc::new(Mutex::new(sub_ca_state));
+
+    replication::spawn_replication_pollers(
+        database.clone(),
+        cfg.replication.clone(),
+        cfg.tls.clone(),
+    );
 
     let staleness_db = database.clone();
     tokio::spawn(async move {

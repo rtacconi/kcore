@@ -31,7 +31,7 @@ fn default_dc_id() -> String {
     "DC1".to_string()
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TlsConfig {
     pub ca_file: String,
@@ -101,6 +101,17 @@ impl Config {
         if self.default_network.gateway_ip.trim().is_empty() {
             anyhow::bail!("defaultNetwork.gatewayIp is required");
         }
+        if let Some(replication) = &self.replication {
+            if replication.dc_id.trim().is_empty() {
+                anyhow::bail!("replication.dcId must not be empty");
+            }
+            if !replication.peers.is_empty() && replication.controller_id.trim().is_empty() {
+                anyhow::bail!("replication.controllerId is required when replication.peers is set");
+            }
+            if replication.peers.iter().any(|p| p.trim().is_empty()) {
+                anyhow::bail!("replication.peers must not contain empty endpoints");
+            }
+        }
         Ok(())
     }
 }
@@ -164,6 +175,30 @@ replication:
         assert_eq!(rep.controller_id, "ctrl-a");
         assert_eq!(rep.dc_id, "DC2");
         assert_eq!(rep.peers, vec!["10.0.0.11:9090"]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_rejects_replication_peers_without_controller_id() {
+        let path = temp_config_path("repl-invalid");
+        std::fs::write(
+            &path,
+            r#"
+defaultNetwork:
+  gatewayInterface: eno1
+  externalIp: 203.0.113.10
+  gatewayIp: 10.0.0.1
+replication:
+  dcId: DC1
+  peers:
+    - 10.0.0.11:9090
+"#,
+        )
+        .expect("write config");
+        let err = Config::load(path.to_str().expect("path str")).expect_err("must fail");
+        assert!(err
+            .to_string()
+            .contains("replication.controllerId is required"));
         let _ = std::fs::remove_file(path);
     }
 
