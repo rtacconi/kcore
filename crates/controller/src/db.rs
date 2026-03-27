@@ -23,6 +23,7 @@ pub struct NodeRow {
     pub storage_backend: String,
     pub disable_vxlan: bool,
     pub approval_status: String,
+    pub cert_expiry_days: i32,
 }
 
 #[derive(Debug, Clone)]
@@ -106,7 +107,8 @@ impl Database {
                 memory_used INTEGER NOT NULL DEFAULT 0,
                 storage_backend TEXT NOT NULL DEFAULT 'filesystem',
                 disable_vxlan INTEGER NOT NULL DEFAULT 0,
-                approval_status TEXT NOT NULL DEFAULT 'approved'
+                approval_status TEXT NOT NULL DEFAULT 'approved',
+                cert_expiry_days INTEGER NOT NULL DEFAULT -1
             );
             CREATE TABLE IF NOT EXISTS vms (
                 id TEXT PRIMARY KEY,
@@ -292,7 +294,14 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 9;
+        if version < 10 {
+            let _ = conn.execute(
+                "ALTER TABLE nodes ADD COLUMN cert_expiry_days INTEGER NOT NULL DEFAULT -1",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 10;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -312,8 +321,8 @@ impl Database {
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)
              ON CONFLICT(id) DO UPDATE SET
                 hostname=excluded.hostname,
                 address=excluded.address,
@@ -325,7 +334,8 @@ impl Database {
                 cpu_used=excluded.cpu_used,
                 memory_used=excluded.memory_used,
                 storage_backend=excluded.storage_backend,
-                disable_vxlan=excluded.disable_vxlan",
+                disable_vxlan=excluded.disable_vxlan,
+                cert_expiry_days=excluded.cert_expiry_days",
             params![
                 node.id,
                 node.hostname,
@@ -340,6 +350,7 @@ impl Database {
                 node.storage_backend,
                 node.disable_vxlan as i32,
                 node.approval_status,
+                node.cert_expiry_days,
             ],
         )?;
         Ok(())
@@ -359,11 +370,12 @@ impl Database {
         node_id: &str,
         cpu_used: i32,
         mem_used: i64,
+        cert_expiry_days: i32,
     ) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let rows = conn.execute(
-            "UPDATE nodes SET last_heartbeat = datetime('now'), status = 'ready', cpu_used = ?2, memory_used = ?3 WHERE id = ?1 AND approval_status = 'approved'",
-            params![node_id, cpu_used, mem_used],
+            "UPDATE nodes SET last_heartbeat = datetime('now'), status = 'ready', cpu_used = ?2, memory_used = ?3, cert_expiry_days = ?4 WHERE id = ?1 AND approval_status = 'approved'",
+            params![node_id, cpu_used, mem_used, cert_expiry_days],
         )?;
         Ok(rows > 0)
     }
@@ -371,7 +383,7 @@ impl Database {
     pub fn get_node(&self, node_id: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status FROM nodes WHERE id = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days FROM nodes WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![node_id], row_to_node)?;
         rows.next().transpose()
@@ -380,7 +392,7 @@ impl Database {
     pub fn list_nodes(&self) -> Result<Vec<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status FROM nodes",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days FROM nodes",
         )?;
         let rows = stmt.query_map([], row_to_node)?;
         rows.collect()
@@ -389,7 +401,7 @@ impl Database {
     pub fn get_node_by_address(&self, address: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status FROM nodes WHERE address = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days FROM nodes WHERE address = ?1",
         )?;
         let mut rows = stmt.query_map(params![address], row_to_node)?;
         rows.next().transpose()
@@ -775,6 +787,7 @@ fn row_to_node(row: &rusqlite::Row) -> Result<NodeRow, rusqlite::Error> {
         storage_backend: row.get(10)?,
         disable_vxlan: disable_vxlan_int != 0,
         approval_status: row.get(12)?,
+        cert_expiry_days: row.get(13)?,
     })
 }
 
@@ -865,6 +878,7 @@ mod tests {
             storage_backend: "filesystem".to_string(),
             disable_vxlan: false,
             approval_status: "approved".to_string(),
+            cert_expiry_days: -1,
         }
     }
 
@@ -1058,7 +1072,7 @@ mod tests {
         node.status = "pending".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let updated = db.update_heartbeat(&node.id, 1, 1000).expect("heartbeat");
+        let updated = db.update_heartbeat(&node.id, 1, 1000, -1).expect("heartbeat");
         assert!(
             !updated,
             "heartbeat should not update a non-approved node"

@@ -720,6 +720,7 @@ mod tests {
                 storage_backend: proto::StorageBackendType::Filesystem as i32,
                 disable_vxlan: false,
                 approval_status: "approved".to_string(),
+                cert_expiry_days: -1,
             },
             proto::NodeInfo {
                 node_id: "node-b".to_string(),
@@ -733,6 +734,7 @@ mod tests {
                 storage_backend: proto::StorageBackendType::Filesystem as i32,
                 disable_vxlan: false,
                 approval_status: "approved".to_string(),
+                cert_expiry_days: -1,
             },
         ];
         let addr = node_address_for_vm_node_id(&nodes, "node-b");

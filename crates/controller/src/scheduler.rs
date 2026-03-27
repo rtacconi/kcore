@@ -55,6 +55,7 @@ mod tests {
             storage_backend: "filesystem".into(),
             disable_vxlan: false,
             approval_status: "approved".into(),
+            cert_expiry_days: -1,
         }
     }
 

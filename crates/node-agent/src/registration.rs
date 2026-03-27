@@ -128,6 +128,13 @@ async fn connect_and_register(
             .await?
     };
 
+    let cert_expiry = cfg
+        .tls
+        .as_ref()
+        .and_then(|tls| std::fs::read_to_string(&tls.cert_file).ok())
+        .and_then(|pem| cert_days_remaining(&pem).ok())
+        .unwrap_or(-1) as i32;
+
     let listen_addr = &cfg.listen_addr;
     let external_addr = derive_external_address(listen_addr);
 
@@ -145,6 +152,7 @@ async fn connect_and_register(
             labels: Vec::new(),
             storage_backend,
             disable_vxlan,
+            cert_expiry_days: cert_expiry,
         })
         .await?;
     Ok(())
