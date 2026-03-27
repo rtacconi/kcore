@@ -299,3 +299,4 @@ Status (incremental):
 - Generated trace rows now include reservation and compensation branch signals (`reservation_status`, `compensation_status`) so drift checks cover zero-manual rejection/compensation paths explicitly.
 - Generated traces now exercise both compensation lifecycle states (`queued` and `completed`) by processing one compensation job during export.
 - VM create now performs reservation-style preflight checks on target node readiness/approval/capacity before persisting intent, reducing avoidable reservation failures downstream.
+- Preflight capacity/readiness failures now include deterministic scheduling hints (up to three alternative compatible nodes), reducing operator trial-and-error.

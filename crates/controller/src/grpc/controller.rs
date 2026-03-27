@@ -276,17 +276,41 @@ impl ControllerService {
         &self,
         node: &NodeRow,
         spec: &controller_proto::VmSpec,
+        requested_storage_backend: &str,
     ) -> Result<(), Status> {
+        let alternative_nodes = self
+            .db
+            .list_nodes()
+            .ok()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|n| {
+                n.id != node.id
+                    && n.storage_backend == requested_storage_backend
+                    && n.approval_status == "approved"
+                    && n.status == "ready"
+                    && (n.cpu_cores - n.cpu_used) >= spec.cpu
+                    && (n.memory_bytes - n.memory_used) >= spec.memory_bytes
+            })
+            .map(|n| n.id)
+            .take(3)
+            .collect::<Vec<_>>();
+        let hint = if alternative_nodes.is_empty() {
+            String::new()
+        } else {
+            format!("; try target_node one of: {}", alternative_nodes.join(", "))
+        };
+
         if node.approval_status != "approved" {
             return Err(Status::failed_precondition(format!(
-                "node '{}' is not approved",
-                node.id
+                "node '{}' is not approved{}",
+                node.id, hint
             )));
         }
         if node.status != "ready" {
             return Err(Status::unavailable(format!(
-                "node '{}' is not ready",
-                node.id
+                "node '{}' is not ready{}",
+                node.id, hint
             )));
         }
 
@@ -294,8 +318,8 @@ impl ControllerService {
         let available_memory = node.memory_bytes - node.memory_used;
         if available_cpu < spec.cpu || available_memory < spec.memory_bytes {
             return Err(Status::unavailable(format!(
-                "node '{}' lacks capacity for request (need cpu={} mem={}, available cpu={} mem={})",
-                node.id, spec.cpu, spec.memory_bytes, available_cpu, available_memory
+                "node '{}' lacks capacity for request (need cpu={} mem={}, available cpu={} mem={}){}",
+                node.id, spec.cpu, spec.memory_bytes, available_cpu, available_memory, hint
             )));
         }
         Ok(())
@@ -603,7 +627,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 requested_storage_backend, node.id, node.storage_backend
             )));
         }
-        self.preflight_vm_create_on_node(&node, &spec)?;
+        self.preflight_vm_create_on_node(&node, &spec, &requested_storage_backend)?;
 
         let vm_id = if spec.id.is_empty() {
             let mut selected: Option<String> = None;
@@ -2665,6 +2689,60 @@ mod tests {
             .expect_err("preflight capacity check should fail");
         assert_eq!(err.code(), tonic::Code::Unavailable);
         assert!(err.message().contains("lacks capacity"));
+    }
+
+    #[tokio::test]
+    async fn create_vm_preflight_suggests_alternative_node() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut overloaded = test_node();
+        overloaded.id = "node-overloaded".to_string();
+        overloaded.cpu_used = 4;
+        overloaded.memory_used = 8 * 1024 * 1024 * 1024;
+        db.upsert_node(&overloaded).expect("insert overloaded node");
+
+        let mut candidate = test_node();
+        candidate.id = "node-candidate".to_string();
+        candidate.address = "127.0.0.2:9091".to_string();
+        db.upsert_node(&candidate).expect("insert candidate node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db,
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: "node-overloaded".to_string(),
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-hint".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            cloud_init_user_data: String::new(),
+            image_path: "/var/lib/kcore/images/base.raw".to_string(),
+            image_format: "raw".to_string(),
+            ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
+        };
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("preflight should fail and suggest alternative");
+        assert_eq!(err.code(), tonic::Code::Unavailable);
+        assert!(err.message().contains("try target_node one of: node-candidate"));
     }
 
     #[tokio::test]
