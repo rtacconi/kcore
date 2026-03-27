@@ -91,6 +91,16 @@ kcore-rust/
 ├── tests/
 │   └── vm-module.nix                NixOS VM test: imports ch-vm, exercises network/VM config
 │
+├── specs/
+│   └── tla/                         TLA+ starter specs for HA/replication invariants
+│       ├── README.md                run instructions and scope for bounded model checks
+│       ├── ControllerNodeReconcile.tla  node-agent/controller failover + heartbeat model
+│       ├── ControllerNodeReconcile.cfg  TLC configuration for node reconciliation model
+│       ├── ControllerReplication.tla     controller-to-controller replication convergence model
+│       ├── ControllerReplication.cfg     TLC configuration for controller replication model
+│       ├── CrossDcReplication.tla        cross-DC replication and anti-entropy model
+│       └── CrossDcReplication.cfg        TLC configuration for cross-DC replication model
+│
 ├── scripts/
 │   └── build-iso-remote.sh          SSH helper to build the kcore ISO on a remote Linux host
 │
@@ -232,6 +242,13 @@ For each file: purpose + where it is used in runtime/operator flows.
 ### Tests & Scripts
 
 - `tests/vm-module.nix` — NixOS integration test; validates module wiring, generated units, and essential network/service behavior.
+- `specs/tla/README.md` — TLA+ quickstart and bounded-model scope for HA protocol checks.
+- `specs/tla/ControllerNodeReconcile.tla` — model for node-agent controller selection, failover, and heartbeat behavior.
+- `specs/tla/ControllerNodeReconcile.cfg` — TLC constants/properties for node reconciliation model.
+- `specs/tla/ControllerReplication.tla` — two-controller replication and anti-entropy convergence model.
+- `specs/tla/ControllerReplication.cfg` — TLC constants/properties for controller replication model.
+- `specs/tla/CrossDcReplication.tla` — multi-DC replication convergence model with link failures.
+- `specs/tla/CrossDcReplication.cfg` — TLC constants/properties for cross-DC replication model.
 - `scripts/build-iso-remote.sh` — remote build automation script; orchestrates ISO build steps on a remote Linux builder host.
 
 ### Documentation

@@ -230,6 +230,12 @@ This keeps the model and implementation aligned without claiming direct code gen
 - Add multi-controller endpoint list to node-agent and `kctl`.
 - Implement failover retries for `kctl` and node-agent registration/heartbeat.
 
+Status: baseline implementation in progress and partially delivered:
+
+- `kctl` supports ordered fallback controllers from context and repeatable `--controller`.
+- node-agent supports controller endpoint lists, heartbeat fallback, and renewal fallback.
+- install flow supports repeatable `--join-controller` and `--dc-id`, persisting `controllers` and `dcId` in node-agent config.
+
 ### Phase 2: replication event log and merge engine
 
 - Add replication tables and event emitters around controller mutations.

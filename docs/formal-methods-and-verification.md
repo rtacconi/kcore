@@ -74,6 +74,7 @@ This is a form of lightweight formal verification. Every `cargo build` is a proo
 For the HA-specific replication and datacenter plan that will be modeled with TLA+, see:
 
 - `docs/ha-crdt-replication.md`
+- `specs/tla/` (starter Phase 1 model files and TLC configs)
 
 ### Prusti and Creusot (deductive verification)
 

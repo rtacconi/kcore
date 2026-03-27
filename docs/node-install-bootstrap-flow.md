@@ -31,11 +31,12 @@ Expected local layout on the operator machine:
 4. Run `node install` with:
    - OS disk (required)
    - optional data disks
-   - join controller endpoint
+   - one or more join controller endpoints (ordered)
+   - optional datacenter id (`dcId`, default `DC1`)
 5. `kctl` prepares install PKI payload:
    - loads cluster CA and existing cert/key material
    - generates node cert/key signed by cluster CA (SAN = node host/IP)
-6. `kctl` sends `InstallToDiskRequest` including cert PEM payload.
+6. `kctl` sends `InstallToDiskRequest` including cert PEM payload, ordered `controllers`, and `dc_id`.
 7. Live `node-agent` writes certs to `/etc/kcore/certs` and starts `install-to-disk`.
 8. Installer copies `/etc/kcore/*` into `/mnt/etc/kcore` on target disk.
 9. `nixos-install` completes and host reboots from installed disk.
@@ -53,16 +54,16 @@ flowchart TD
   bootIso --> nodeAgentLive["Live node-agent on host:9091"]
 
   user --> discover["kctl --node host:9091 node disks/nics"]
-  discover --> installCmd["kctl node install --os-disk --data-disk --join-controller"]
+  discover --> installCmd["kctl node install --os-disk --data-disk --join-controller (repeatable) --dc-id"]
 
   installCmd --> loadCtx["Resolve current context and cluster cert dir"]
   loadCtx --> loadClusterPki["Load ca/controller/kctl certs and keys"]
   loadClusterPki --> genNodeCert["Generate node cert/key signed by cluster CA"]
   genNodeCert --> buildReq["Build InstallToDiskRequest with PEM payload"]
-  buildReq --> sendRpc["Send NodeAdmin.InstallToDisk RPC"]
+  buildReq --> sendRpc["Send NodeAdmin.InstallToDisk RPC with controllers and dc_id"]
 
   sendRpc --> writeBootstrap["Live node-agent writes /etc/kcore/certs/*"]
-  writeBootstrap --> runInstaller["Spawn install-to-disk and log output"]
+  writeBootstrap --> runInstaller["Spawn install-to-disk with repeated --controller and --dc-id"]
   runInstaller --> partitionDisk["Partition/format/mount target disk"]
   partitionDisk --> copyKcore["Copy /etc/kcore and binaries to /mnt"]
   copyKcore --> writeNixos["Write /mnt/etc/nixos/configuration.nix"]

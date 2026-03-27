@@ -39,7 +39,9 @@ to the new node.
 ```bash
 kctl --node <NEW_NODE_IP>:9091 node install \
   --os-disk /dev/sda \
-  --join-controller 192.168.40.105:9090
+  --join-controller 192.168.40.105:9090 \
+  --join-controller 192.168.40.106:9090 \
+  --dc-id DC1
 ```
 
 ### Common options
@@ -47,7 +49,8 @@ kctl --node <NEW_NODE_IP>:9091 node install \
 | Flag | Description |
 |------|-------------|
 | `--os-disk /dev/sda` | Target disk for the OS install (required) |
-| `--join-controller <host:port>` | Controller address to join (required for agent-only nodes) |
+| `--join-controller <host:port>` | Controller address to join (required for agent-only nodes, repeatable for fallback order) |
+| `--dc-id DC1` | Datacenter identity to persist in node config (defaults to `DC1`) |
 | `--data-disk /dev/nvme0n1` | Additional data disk(s), can be repeated |
 | `--storage-backend filesystem` | Storage backend: `filesystem`, `lvm`, or `zfs` |
 | `--lvm-vg-name vg0` | LVM volume group name (when using `lvm` backend) |
@@ -64,10 +67,11 @@ kctl --node <NEW_NODE_IP>:9091 node install \
    agent. The request includes:
    - The CA certificate (so the node trusts the controller)
    - The freshly signed node certificate and private key
-   - The controller address (`192.168.40.105:9090`)
+   - Ordered controller endpoints (`192.168.40.105:9090`, `192.168.40.106:9090`, ...)
+   - Datacenter identity (`dcId`, default `DC1`)
 4. The node-agent writes the OS to disk, places the certificates in
    `/etc/kcore/certs/`, and writes `node-agent.yaml` with
-   `controllerAddr` set to the controller.
+   both `controllerAddr` (primary) and `controllers` (fallback list), plus `dcId`.
 5. The node reboots into the installed system.
 
 ## Step 3: Node self-registration (automatic)
@@ -245,7 +249,7 @@ full comparison of kcore's security model with Kubernetes.
 |--------|---------|
 | List disks on new node | `kctl --node <IP>:9091 node disks` |
 | List NICs on new node | `kctl --node <IP>:9091 node nics` |
-| Install to disk (join cluster) | `kctl --node <IP>:9091 node install --os-disk /dev/sda --join-controller <CTRL>:9090` |
+| Install to disk (join cluster, with fallback) | `kctl --node <IP>:9091 node install --os-disk /dev/sda --join-controller <CTRL1>:9090 --join-controller <CTRL2>:9090 --dc-id DC1` |
 | List all nodes | `kctl get nodes` |
 | Get node details | `kctl get node <NODE_ID>` |
 | Approve pending node | `kctl node approve <NODE_ID>` |
