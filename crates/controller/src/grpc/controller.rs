@@ -350,6 +350,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             storage_backend,
             disable_vxlan: req.disable_vxlan,
             approval_status: approval_status.clone(),
+            cert_expiry_days: req.cert_expiry_days,
         };
 
         self.db
@@ -397,7 +398,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         let found = self
             .db
-            .update_heartbeat(&req.node_id, cpu_used, mem_used)
+            .update_heartbeat(&req.node_id, cpu_used, mem_used, req.cert_expiry_days)
             .map_err(|e| Status::internal(e.to_string()))?;
 
         if !found {
@@ -1280,6 +1281,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     storage_backend: storage_backend_to_proto(&n.storage_backend),
                     disable_vxlan: n.disable_vxlan,
                     approval_status: n.approval_status,
+                    cert_expiry_days: n.cert_expiry_days,
                 }
             })
             .collect();
@@ -1327,6 +1329,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 storage_backend: storage_backend_to_proto(&node.storage_backend),
                 disable_vxlan: node.disable_vxlan,
                 approval_status: node.approval_status,
+                cert_expiry_days: node.cert_expiry_days,
             }),
         }))
     }
@@ -1824,6 +1827,7 @@ mod tests {
             storage_backend: "filesystem".to_string(),
             disable_vxlan: false,
             approval_status: "approved".to_string(),
+            cert_expiry_days: -1,
         }
     }
 
@@ -2519,6 +2523,7 @@ mod tests {
                     labels: vec![],
                     storage_backend: 1,
                     disable_vxlan: false,
+                    cert_expiry_days: 365,
                 }),
             )
             .await
@@ -2556,6 +2561,7 @@ mod tests {
                     labels: vec![],
                     storage_backend: 1,
                     disable_vxlan: false,
+                    cert_expiry_days: 300,
                 }),
             )
             .await
@@ -2642,6 +2648,7 @@ mod tests {
             storage_backend: "filesystem".into(),
             disable_vxlan: false,
             approval_status: "pending".into(),
+            cert_expiry_days: -1,
         };
         assert!(
             scheduler::select_node(&[n.clone()]).is_none(),

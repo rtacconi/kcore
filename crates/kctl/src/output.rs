@@ -48,8 +48,8 @@ pub fn print_vm_detail(
 
 pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
     println!(
-        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}",
-        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS", "STORAGE", "APPROVAL"
+        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}",
+        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS", "STORAGE", "APPROVAL", "CERT EXPIRY"
     );
     for n in nodes {
         let (cores, mem) = if let Some(cap) = &n.capacity {
@@ -57,8 +57,9 @@ pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
         } else {
             (0, "n/a".to_string())
         };
+        let cert_expiry = format_cert_expiry(n.cert_expiry_days);
         println!(
-            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}",
+            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}",
             n.node_id,
             n.hostname,
             n.address,
@@ -67,6 +68,7 @@ pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
             n.status,
             storage_backend_str(n.storage_backend),
             n.approval_status,
+            cert_expiry,
         );
     }
 }
@@ -95,6 +97,7 @@ pub fn print_node_detail(n: &controller_proto::NodeInfo) {
         println!("Labels:    {}", n.labels.join(", "));
     }
     println!("Storage:   {}", storage_backend_str(n.storage_backend));
+    println!("Cert:      {}", format_cert_expiry(n.cert_expiry_days));
 }
 
 pub fn print_disk_table(disks: &[node_proto::DiskInfo]) {
@@ -131,6 +134,18 @@ fn vm_state_str(state: i32) -> &'static str {
         3 => "Paused",
         4 => "Error",
         _ => "Unknown",
+    }
+}
+
+fn format_cert_expiry(days: i32) -> String {
+    if days < 0 {
+        "unknown".to_string()
+    } else if days == 0 {
+        "EXPIRED".to_string()
+    } else if days <= 30 {
+        format!("{days}d ⚠")
+    } else {
+        format!("{days}d")
     }
 }
 
