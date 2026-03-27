@@ -272,6 +272,35 @@ impl ControllerService {
             .ok_or_else(|| Status::not_found(format!("node {node_id} not found")))
     }
 
+    fn preflight_vm_create_on_node(
+        &self,
+        node: &NodeRow,
+        spec: &controller_proto::VmSpec,
+    ) -> Result<(), Status> {
+        if node.approval_status != "approved" {
+            return Err(Status::failed_precondition(format!(
+                "node '{}' is not approved",
+                node.id
+            )));
+        }
+        if node.status != "ready" {
+            return Err(Status::unavailable(format!(
+                "node '{}' is not ready",
+                node.id
+            )));
+        }
+
+        let available_cpu = node.cpu_cores - node.cpu_used;
+        let available_memory = node.memory_bytes - node.memory_used;
+        if available_cpu < spec.cpu || available_memory < spec.memory_bytes {
+            return Err(Status::unavailable(format!(
+                "node '{}' lacks capacity for request (need cpu={} mem={}, available cpu={} mem={})",
+                node.id, spec.cpu, spec.memory_bytes, available_cpu, available_memory
+            )));
+        }
+        Ok(())
+    }
+
     async fn set_vm_desired_state_internal(
         &self,
         vm_id: &str,
@@ -574,6 +603,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 requested_storage_backend, node.id, node.storage_backend
             )));
         }
+        self.preflight_vm_create_on_node(&node, &spec)?;
 
         let vm_id = if spec.id.is_empty() {
             let mut selected: Option<String> = None;
@@ -1945,6 +1975,75 @@ impl controller_proto::controller_server::Controller for ControllerService {
         }))
     }
 
+    async fn get_network_overview(
+        &self,
+        request: Request<controller_proto::GetNetworkOverviewRequest>,
+    ) -> Result<Response<controller_proto::GetNetworkOverviewResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+
+        let node_rows = self
+            .db
+            .list_nodes()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let approved: Vec<_> = node_rows
+            .into_iter()
+            .filter(|n| n.approval_status == "approved")
+            .collect();
+
+        let mut nodes = Vec::with_capacity(approved.len());
+        for node in &approved {
+            let interfaces = match self.ensure_admin_client_for_node(node).await {
+                Ok(mut admin) => {
+                    match admin
+                        .list_network_interfaces(node_proto::ListNetworkInterfacesRequest {})
+                        .await
+                    {
+                        Ok(resp) => resp
+                            .into_inner()
+                            .interfaces
+                            .into_iter()
+                            .map(|iface| controller_proto::NetworkInterfaceDetail {
+                                name: iface.name,
+                                mac_address: iface.mac_address,
+                                state: iface.state,
+                                mtu: iface.mtu,
+                                addresses: iface.addresses,
+                            })
+                            .collect(),
+                        Err(e) => {
+                            warn!(node_id = %node.id, error = %e, "ListNetworkInterfaces failed");
+                            vec![]
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!(node_id = %node.id, error = %e, "cannot reach node for network overview");
+                    vec![]
+                }
+            };
+
+            nodes.push(controller_proto::NodeNetworkInfo {
+                node_id: node.id.clone(),
+                hostname: node.hostname.clone(),
+                address: node.address.clone(),
+                gateway_interface: node.gateway_interface.clone(),
+                disable_vxlan: node.disable_vxlan,
+                interfaces,
+            });
+        }
+
+        Ok(Response::new(
+            controller_proto::GetNetworkOverviewResponse {
+                default_gateway_interface: self.default_network.gateway_interface.clone(),
+                default_external_ip: self.default_network.external_ip.clone(),
+                default_gateway_ip: self.default_network.gateway_ip.clone(),
+                default_internal_netmask: self.default_network.internal_netmask.clone(),
+                nodes,
+            },
+        ))
+    }
+
     // TODO(rbac): restrict to admin role when RBAC is implemented
     async fn get_compliance_report(
         &self,
@@ -2518,6 +2617,101 @@ mod tests {
             .expect_err("mismatched storage backend should fail");
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
         assert!(err.message().contains("does not match"));
+    }
+
+    #[tokio::test]
+    async fn create_vm_rejects_target_node_without_capacity_in_preflight() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.cpu_used = 4;
+        node.memory_used = 8 * 1024 * 1024 * 1024;
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db,
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: node.id,
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-no-capacity".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            cloud_init_user_data: String::new(),
+            image_path: "/var/lib/kcore/images/base.raw".to_string(),
+            image_format: "raw".to_string(),
+            ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
+        };
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("preflight capacity check should fail");
+        assert_eq!(err.code(), tonic::Code::Unavailable);
+        assert!(err.message().contains("lacks capacity"));
+    }
+
+    #[tokio::test]
+    async fn create_vm_rejects_target_node_not_ready_in_preflight() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.status = "not-ready".to_string();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db,
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+
+        let req = controller_proto::CreateVmRequest {
+            target_node: node.id,
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-node-not-ready".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+            }),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            cloud_init_user_data: String::new(),
+            image_path: "/var/lib/kcore/images/base.raw".to_string(),
+            image_format: "raw".to_string(),
+            ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
+        };
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("preflight readiness check should fail");
+        assert_eq!(err.code(), tonic::Code::Unavailable);
+        assert!(err.message().contains("not ready"));
     }
 
     #[tokio::test]

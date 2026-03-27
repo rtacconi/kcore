@@ -46,6 +46,9 @@ service Controller {
 
   // Compliance
   rpc GetComplianceReport(GetComplianceReportRequest) returns (GetComplianceReportResponse);
+
+  // Network overview: host interfaces from each node + default network config
+  rpc GetNetworkOverview(GetNetworkOverviewRequest) returns (GetNetworkOverviewResponse);
 }
 
 message RegisterNodeRequest {
@@ -570,4 +573,33 @@ message GetComplianceReportResponse {
   int32 nodes_cert_unknown = 23;
 
   repeated NodeInfo nodes = 24;
+}
+
+// Network overview
+
+message GetNetworkOverviewRequest {}
+
+message NetworkInterfaceDetail {
+  string name = 1;
+  string mac_address = 2;
+  string state = 3;
+  int32 mtu = 4;
+  repeated string addresses = 5;
+}
+
+message NodeNetworkInfo {
+  string node_id = 1;
+  string hostname = 2;
+  string address = 3;
+  string gateway_interface = 4;
+  bool disable_vxlan = 5;
+  repeated NetworkInterfaceDetail interfaces = 6;
+}
+
+message GetNetworkOverviewResponse {
+  string default_gateway_interface = 1;
+  string default_external_ip = 2;
+  string default_gateway_ip = 3;
+  string default_internal_netmask = 4;
+  repeated NodeNetworkInfo nodes = 5;
 }

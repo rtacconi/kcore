@@ -2,7 +2,8 @@
 
 use crate::controller_client::controller_proto;
 use crate::dto::{
-    AccessControlEntryDto, ComplianceDto, NetworkRowDto, NodeSummaryDto, VmRowDto, VmsPageDto,
+    AccessControlEntryDto, ComplianceDto, HostInterfaceDto, NetworkOverviewDto, NetworkRowDto,
+    NodeNetworkDto, NodeSummaryDto, VmRowDto, VmsPageDto,
 };
 use crate::format::{self, paginate_by_name, VM_PAGE_SIZE};
 
@@ -74,6 +75,73 @@ pub fn vms_page_from_proto(vms: Vec<controller_proto::VmInfo>, page: u32) -> Vms
         page_size: pv.page_size,
         total: pv.total,
         vms: pv.items,
+    }
+}
+
+fn classify_interface(name: &str) -> &'static str {
+    if name == "lo" {
+        "loopback"
+    } else if name.starts_with("br-")
+        || name.starts_with("kbr-")
+        || name.starts_with("virbr")
+        || name == "br0"
+    {
+        "bridge"
+    } else if name.starts_with("tap-") || name.starts_with("vnet") {
+        "tap"
+    } else if name.contains('.') || name.starts_with("vlan") {
+        "vlan"
+    } else if name.starts_with("vxlan") || name.starts_with("kvx-") {
+        "vxlan"
+    } else if name.starts_with("eno")
+        || name.starts_with("eth")
+        || name.starts_with("enp")
+        || name.starts_with("ens")
+    {
+        "physical"
+    } else if name.starts_with("bond") {
+        "bond"
+    } else if name.starts_with("docker") || name.starts_with("veth") {
+        "container"
+    } else {
+        "other"
+    }
+}
+
+pub fn network_overview_from_proto(
+    r: controller_proto::GetNetworkOverviewResponse,
+) -> NetworkOverviewDto {
+    NetworkOverviewDto {
+        default_gateway_interface: r.default_gateway_interface,
+        default_external_ip: r.default_external_ip,
+        default_gateway_ip: r.default_gateway_ip,
+        default_internal_netmask: r.default_internal_netmask,
+        nodes: r
+            .nodes
+            .into_iter()
+            .map(|n| NodeNetworkDto {
+                node_id: n.node_id,
+                hostname: n.hostname,
+                address: n.address,
+                gateway_interface: n.gateway_interface,
+                disable_vxlan: n.disable_vxlan,
+                interfaces: n
+                    .interfaces
+                    .into_iter()
+                    .map(|i| {
+                        let kind = classify_interface(&i.name).to_string();
+                        HostInterfaceDto {
+                            name: i.name,
+                            mac_address: i.mac_address,
+                            state: i.state,
+                            mtu: i.mtu,
+                            addresses: i.addresses,
+                            kind,
+                        }
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
@@ -212,5 +280,67 @@ mod tests {
         let rows = networks_from_proto(nets);
         assert_eq!(rows[0].name, "a-net");
         assert_eq!(rows[1].name, "b-net");
+    }
+
+    #[test]
+    fn classify_interface_identifies_types() {
+        assert_eq!(classify_interface("lo"), "loopback");
+        assert_eq!(classify_interface("eno1"), "physical");
+        assert_eq!(classify_interface("eth0"), "physical");
+        assert_eq!(classify_interface("enp3s0"), "physical");
+        assert_eq!(classify_interface("ens5"), "physical");
+        assert_eq!(classify_interface("br-default"), "bridge");
+        assert_eq!(classify_interface("kbr-net1"), "bridge");
+        assert_eq!(classify_interface("virbr0"), "bridge");
+        assert_eq!(classify_interface("br0"), "bridge");
+        assert_eq!(classify_interface("tap-vm1"), "tap");
+        assert_eq!(classify_interface("vnet0"), "tap");
+        assert_eq!(classify_interface("eth0.100"), "vlan");
+        assert_eq!(classify_interface("vlan42"), "vlan");
+        assert_eq!(classify_interface("vxlan100"), "vxlan");
+        assert_eq!(classify_interface("kvx-overlay"), "vxlan");
+        assert_eq!(classify_interface("bond0"), "bond");
+        assert_eq!(classify_interface("docker0"), "container");
+        assert_eq!(classify_interface("veth1234"), "container");
+        assert_eq!(classify_interface("wlan0"), "other");
+    }
+
+    #[test]
+    fn network_overview_maps_and_classifies() {
+        let r = controller_proto::GetNetworkOverviewResponse {
+            default_gateway_interface: "eno1".into(),
+            default_external_ip: "203.0.113.10".into(),
+            default_gateway_ip: "10.0.0.1".into(),
+            default_internal_netmask: "255.255.255.0".into(),
+            nodes: vec![controller_proto::NodeNetworkInfo {
+                node_id: "n1".into(),
+                hostname: "host1".into(),
+                address: "10.0.0.1:9443".into(),
+                gateway_interface: "eno1".into(),
+                disable_vxlan: false,
+                interfaces: vec![
+                    controller_proto::NetworkInterfaceDetail {
+                        name: "eno1".into(),
+                        mac_address: "aa:bb:cc:dd:ee:01".into(),
+                        state: "UP".into(),
+                        mtu: 1500,
+                        addresses: vec!["10.0.0.1/24".into()],
+                    },
+                    controller_proto::NetworkInterfaceDetail {
+                        name: "br-net".into(),
+                        mac_address: "aa:bb:cc:dd:ee:02".into(),
+                        state: "UP".into(),
+                        mtu: 1500,
+                        addresses: vec![],
+                    },
+                ],
+            }],
+        };
+        let dto = network_overview_from_proto(r);
+        assert_eq!(dto.default_external_ip, "203.0.113.10");
+        assert_eq!(dto.nodes.len(), 1);
+        assert_eq!(dto.nodes[0].interfaces.len(), 2);
+        assert_eq!(dto.nodes[0].interfaces[0].kind, "physical");
+        assert_eq!(dto.nodes[0].interfaces[1].kind, "bridge");
     }
 }

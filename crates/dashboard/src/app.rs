@@ -1,5 +1,8 @@
-use crate::api::{get_compliance_dto, list_networks_dto, list_vms_page};
-use crate::dto::{ComplianceDto, NetworkRowDto, NodeSummaryDto, VmRowDto, VmsPageDto};
+use crate::api::{get_compliance_dto, get_network_overview_dto, list_networks_dto, list_vms_page};
+use crate::dto::{
+    ComplianceDto, HostInterfaceDto, NetworkOverviewDto, NetworkRowDto, NodeNetworkDto,
+    NodeSummaryDto, VmRowDto, VmsPageDto,
+};
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::{
@@ -354,16 +357,29 @@ fn vm_row(vm: VmRowDto) -> impl IntoView {
 
 #[component]
 fn NetworksPage() -> impl IntoView {
-    let res = Resource::new(|| (), |_| list_networks_dto());
+    let sdn_res = Resource::new(|| (), |_| list_networks_dto());
+    let overview_res = Resource::new(|| (), |_| get_network_overview_dto());
     view! {
         <section class="hero">
             <h1>"Networks"</h1>
-            <p class="muted">"Networks known to the controller (all nodes)."</p>
+            <p class="muted">"Host networking, VLAN configs, and software-defined networks across all nodes."</p>
         </section>
-        <Suspense fallback=move || view! { <p class="muted">"Loading networks…"</p> }>
+
+        <h2 class="section-title">"Host networking"</h2>
+        <Suspense fallback=move || view! { <p class="muted">"Loading host network data…"</p> }>
             {move || Suspend::new(async move {
-                match res.await {
-                    Ok(rows) => networks_table(rows).into_any(),
+                match overview_res.await {
+                    Ok(data) => host_networking_view(data).into_any(),
+                    Err(e) => view! { <p class="err">{e.to_string()}</p> }.into_any(),
+                }
+            })}
+        </Suspense>
+
+        <h2 class="section-title">"Software-defined networks"</h2>
+        <Suspense fallback=move || view! { <p class="muted">"Loading SDN data…"</p> }>
+            {move || Suspend::new(async move {
+                match sdn_res.await {
+                    Ok(rows) => sdn_table(rows).into_any(),
                     Err(e) => view! { <p class="err">{e.to_string()}</p> }.into_any(),
                 }
             })}
@@ -371,7 +387,99 @@ fn NetworksPage() -> impl IntoView {
     }
 }
 
-fn networks_table(rows: Vec<NetworkRowDto>) -> impl IntoView {
+fn host_networking_view(data: NetworkOverviewDto) -> impl IntoView {
+    let has_nodes = !data.nodes.is_empty();
+    view! {
+        <section class="card" style="margin-bottom: 1rem;">
+            <h2>"Default network config"</h2>
+            <dl class="kv">
+                <dt>"Gateway iface"</dt><dd><code class="inline">{data.default_gateway_interface.clone()}</code></dd>
+                <dt>"External IP"</dt><dd>{data.default_external_ip.clone()}</dd>
+                <dt>"Gateway IP"</dt><dd>{data.default_gateway_ip.clone()}</dd>
+                <dt>"Netmask"</dt><dd>{data.default_internal_netmask.clone()}</dd>
+            </dl>
+        </section>
+        <Show when=move || has_nodes>
+            {data.nodes.clone().into_iter().map(node_network_card).collect_view()}
+        </Show>
+        <Show when=move || !has_nodes>
+            <div class="empty-note">"No approved nodes found."</div>
+        </Show>
+    }
+}
+
+fn node_network_card(node: NodeNetworkDto) -> impl IntoView {
+    let vxlan_label = if node.disable_vxlan {
+        "disabled"
+    } else {
+        "enabled"
+    };
+    let has_ifaces = !node.interfaces.is_empty();
+    let interfaces = node.interfaces.clone();
+    view! {
+        <section class="card node-card">
+            <div class="node-card-header">
+                <span class="node-label">{node.hostname.clone()}</span>
+                <code class="inline">{node.node_id.clone()}</code>
+                <span class="muted">{node.address.clone()}</span>
+            </div>
+            <dl class="kv">
+                <dt>"Gateway iface"</dt><dd><code class="inline">{node.gateway_interface.clone()}</code></dd>
+                <dt>"VXLAN"</dt><dd>{vxlan_label}</dd>
+            </dl>
+            <Show when=move || has_ifaces>
+                <div class="table-wrap" style="margin-top: 0.75rem;">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>"Interface"</th>
+                                <th>"Type"</th>
+                                <th>"State"</th>
+                                <th>"MAC"</th>
+                                <th>"MTU"</th>
+                                <th>"Addresses"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {interfaces.clone().into_iter().map(iface_row).collect_view()}
+                        </tbody>
+                    </table>
+                </div>
+            </Show>
+            <Show when=move || !has_ifaces>
+                <p class="muted" style="margin-top: 0.5rem; font-size: 0.85rem;">"Node unreachable — no interface data."</p>
+            </Show>
+        </section>
+    }
+}
+
+fn iface_row(iface: HostInterfaceDto) -> impl IntoView {
+    let badge_class = format!("badge-iface badge-{}", iface.kind);
+    let state_class = if iface.state == "UP" {
+        "badge badge-up"
+    } else {
+        "badge badge-down"
+    };
+    let addrs = iface.addresses.join(", ");
+    view! {
+        <tr>
+            <td><code class="inline">{iface.name.clone()}</code></td>
+            <td><span class={badge_class}>{iface.kind.clone()}</span></td>
+            <td><span class={state_class}>{iface.state.clone()}</span></td>
+            <td><code class="inline">{iface.mac_address.clone()}</code></td>
+            <td>{iface.mtu}</td>
+            <td>{addrs}</td>
+        </tr>
+    }
+}
+
+fn sdn_table(rows: Vec<NetworkRowDto>) -> impl IntoView {
+    if rows.is_empty() {
+        return view! {
+            <div class="empty-note">"No software-defined networks configured. Use "<code class="inline">"kctl create network"</code>" to add one."</div>
+        }
+        .into_any();
+    }
     view! {
         <div class="table-wrap">
             <table class="data">
@@ -382,6 +490,7 @@ fn networks_table(rows: Vec<NetworkRowDto>) -> impl IntoView {
                         <th>"Node"</th>
                         <th>"External"</th>
                         <th>"Gateway"</th>
+                        <th>"Netmask"</th>
                         <th>"VLAN"</th>
                         <th>"Outbound NAT"</th>
                     </tr>
@@ -394,6 +503,7 @@ fn networks_table(rows: Vec<NetworkRowDto>) -> impl IntoView {
                             <td><code class="inline">{n.node_id.clone()}</code></td>
                             <td>{n.external_ip.clone()}</td>
                             <td>{n.gateway_ip.clone()}</td>
+                            <td>{n.internal_netmask.clone()}</td>
                             <td>{n.vlan_id}</td>
                             <td>{if n.enable_outbound_nat { "yes" } else { "no" }}</td>
                         </tr>
@@ -402,4 +512,5 @@ fn networks_table(rows: Vec<NetworkRowDto>) -> impl IntoView {
             </table>
         </div>
     }
+    .into_any()
 }

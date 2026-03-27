@@ -4,7 +4,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let controller_proto = proto_dir.join("controller.proto");
 
     tonic_build::configure()
-        .build_server(false)
+        .build_server(true)
         .build_client(true)
         .compile_protos(
             std::slice::from_ref(&controller_proto),

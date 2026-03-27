@@ -9,6 +9,9 @@ const ENV_CA: &str = "KCORE_CA_FILE";
 const ENV_CERT: &str = "KCORE_CERT_FILE";
 const ENV_KEY: &str = "KCORE_KEY_FILE";
 const ENV_INSECURE: &str = "KCORE_INSECURE";
+/// When set, used as the TLS certificate verification name (SNI / rustls `domain_name`).
+/// Use when `KCORE_CONTROLLER` is `127.0.0.1` or an IP but the controller cert is issued for a hostname (e.g. `kvm-node`).
+pub const ENV_TLS_DOMAIN: &str = "KCORE_TLS_DOMAIN";
 const DEFAULT_ADDR: &str = "127.0.0.1:9090";
 
 /// Paths and flags used to reach the controller over gRPC (same contract as `kctl`).
@@ -19,6 +22,7 @@ pub struct DashboardConfig {
     pub ca: Option<PathBuf>,
     pub cert: Option<PathBuf>,
     pub key: Option<PathBuf>,
+    pub tls_domain: Option<String>,
 }
 
 impl DashboardConfig {
@@ -34,6 +38,7 @@ impl DashboardConfig {
         let ca = std::env::var(ENV_CA).ok().map(PathBuf::from);
         let cert = std::env::var(ENV_CERT).ok().map(PathBuf::from);
         let key = std::env::var(ENV_KEY).ok().map(PathBuf::from);
+        let tls_domain = std::env::var(ENV_TLS_DOMAIN).ok();
 
         if !insecure && (ca.is_none() || cert.is_none() || key.is_none()) {
             anyhow::bail!(
@@ -51,6 +56,7 @@ impl DashboardConfig {
             ca,
             cert,
             key,
+            tls_domain,
         })
     }
 
@@ -62,6 +68,19 @@ impl DashboardConfig {
             ca: None,
             cert: None,
             key: None,
+            tls_domain: None,
+        }
+    }
+
+    /// Plaintext gRPC to a specific `host:port` (integration tests).
+    pub fn insecure_on(addr: impl Into<String>) -> Self {
+        Self {
+            controller_addr: addr.into(),
+            insecure: true,
+            ca: None,
+            cert: None,
+            key: None,
+            tls_domain: None,
         }
     }
 

@@ -31,18 +31,25 @@ pub async fn connect_channel(cfg: &DashboardConfig) -> Result<Channel> {
         let mut tls = ClientTlsConfig::new();
         tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
         tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
-        if let Some(host) = endpoint_host(&cfg.controller_addr) {
-            tls = tls.domain_name(host.to_string());
+        let verify_name = cfg
+            .tls_domain
+            .clone()
+            .or_else(|| endpoint_host(&cfg.controller_addr).map(str::to_string));
+        if let Some(host) = verify_name {
+            tls = tls.domain_name(host);
         }
         endpoint = endpoint
             .tls_config(tls)
             .context("TLS config for controller endpoint")?;
     }
 
-    endpoint
-        .connect()
-        .await
-        .with_context(|| format!("connecting to {}", cfg.controller_addr))
+    endpoint.connect().await.with_context(|| {
+        format!(
+            "gRPC to {} (mTLS: set {} if the cert is for a hostname, not the connection IP)",
+            cfg.controller_addr,
+            crate::config::ENV_TLS_DOMAIN
+        )
+    })
 }
 
 pub async fn get_compliance(
@@ -79,6 +86,18 @@ pub async fn list_networks(cfg: &DashboardConfig) -> Result<Vec<controller_proto
         .await
         .context("ListNetworks RPC")?;
     Ok(resp.into_inner().networks)
+}
+
+pub async fn get_network_overview(
+    cfg: &DashboardConfig,
+) -> Result<controller_proto::GetNetworkOverviewResponse> {
+    let channel = connect_channel(cfg).await?;
+    let mut client = controller_proto::controller_client::ControllerClient::new(channel);
+    let resp = client
+        .get_network_overview(controller_proto::GetNetworkOverviewRequest {})
+        .await
+        .context("GetNetworkOverview RPC")?;
+    Ok(resp.into_inner())
 }
 
 #[cfg(test)]

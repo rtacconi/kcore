@@ -3,12 +3,14 @@
 use leptos::prelude::*;
 
 use crate::controller_client;
-use crate::dto::{ComplianceDto, NetworkRowDto, VmsPageDto};
-use crate::mappers::{compliance_from_proto, networks_from_proto, vms_page_from_proto};
+use crate::dto::{ComplianceDto, NetworkOverviewDto, NetworkRowDto, VmsPageDto};
+use crate::mappers::{
+    compliance_from_proto, network_overview_from_proto, networks_from_proto, vms_page_from_proto,
+};
 use crate::state::dashboard_config;
 
-fn map_err(e: impl std::fmt::Display) -> ServerFnError {
-    ServerFnError::new(e.to_string())
+fn map_err(e: anyhow::Error) -> ServerFnError {
+    ServerFnError::new(format!("{e:#}"))
 }
 
 #[server(GetComplianceReport, "/api")]
@@ -34,4 +36,13 @@ pub async fn list_networks_dto() -> Result<Vec<NetworkRowDto>, ServerFnError> {
         .await
         .map_err(map_err)?;
     Ok(networks_from_proto(nets))
+}
+
+#[server(GetNetworkOverview, "/api")]
+pub async fn get_network_overview_dto() -> Result<NetworkOverviewDto, ServerFnError> {
+    let cfg = dashboard_config();
+    let overview = controller_client::get_network_overview(cfg)
+        .await
+        .map_err(map_err)?;
+    Ok(network_overview_from_proto(overview))
 }

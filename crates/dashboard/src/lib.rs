@@ -2,6 +2,7 @@
 
 pub mod api;
 pub mod app;
+pub mod app_server;
 pub mod config;
 pub mod controller_client;
 pub mod dto;

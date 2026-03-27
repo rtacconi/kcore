@@ -77,3 +77,32 @@ pub struct NetworkRowDto {
     pub vlan_id: i32,
     pub enable_outbound_nat: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct HostInterfaceDto {
+    pub name: String,
+    pub mac_address: String,
+    pub state: String,
+    pub mtu: i32,
+    pub addresses: Vec<String>,
+    pub kind: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodeNetworkDto {
+    pub node_id: String,
+    pub hostname: String,
+    pub address: String,
+    pub gateway_interface: String,
+    pub disable_vxlan: bool,
+    pub interfaces: Vec<HostInterfaceDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NetworkOverviewDto {
+    pub default_gateway_interface: String,
+    pub default_external_ip: String,
+    pub default_gateway_ip: String,
+    pub default_internal_netmask: String,
+    pub nodes: Vec<NodeNetworkDto>,
+}

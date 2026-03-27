@@ -286,3 +286,61 @@ code.inline {
   font-size: 0.8rem;
   color: var(--muted);
 }
+
+.section-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  margin: 2rem 0 0.75rem;
+  letter-spacing: -0.01em;
+}
+.section-title:first-child {
+  margin-top: 0;
+}
+
+.badge-iface {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 5px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
+.badge-physical { background: rgba(59, 130, 246, 0.18); color: #60a5fa; }
+.badge-bridge { background: rgba(168, 85, 247, 0.18); color: #c084fc; }
+.badge-tap { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+.badge-vlan { background: rgba(236, 72, 153, 0.18); color: #f472b6; }
+.badge-vxlan { background: rgba(94, 234, 212, 0.15); color: var(--accent); }
+.badge-bond { background: rgba(249, 115, 22, 0.18); color: #fb923c; }
+.badge-loopback { background: rgba(139, 147, 167, 0.15); color: var(--muted); }
+.badge-container { background: rgba(34, 211, 238, 0.15); color: #22d3ee; }
+.badge-other { background: rgba(139, 147, 167, 0.12); color: var(--muted); }
+
+.badge-up { background: rgba(94, 234, 212, 0.15); color: var(--accent); }
+.badge-down { background: rgba(248, 113, 113, 0.12); color: var(--err); }
+
+.node-card {
+  margin-bottom: 1rem;
+}
+.node-card-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+  align-items: baseline;
+  margin-bottom: 0.75rem;
+}
+.node-card-header .node-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.empty-note {
+  padding: 2rem 1.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.9rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+}
