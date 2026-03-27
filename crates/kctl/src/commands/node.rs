@@ -166,6 +166,8 @@ pub async fn install(
             controller_key_pem: install_pki.controller_key_pem,
             kctl_cert_pem: String::new(),
             kctl_key_pem: String::new(),
+            sub_ca_cert_pem: install_pki.sub_ca_cert_pem,
+            sub_ca_key_pem: install_pki.sub_ca_key_pem,
             data_disk_mode: data_disk_mode.trim().to_string(),
             storage_backend: typed_storage_backend,
             lvm_vg_name: lvm_vg_name.unwrap_or("").trim().to_string(),

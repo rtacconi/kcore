@@ -7,6 +7,7 @@ use rcgen::{
 use time::{Duration, OffsetDateTime};
 
 const CA_VALIDITY_DAYS: i64 = 3650; // ~10 years
+const SUB_CA_VALIDITY_DAYS: i64 = 1825; // ~5 years
 const CERT_VALIDITY_DAYS: i64 = 365; // 1 year
 
 #[derive(Debug, Clone)]
@@ -14,6 +15,8 @@ pub struct ClusterPkiPaths {
     pub certs_dir: PathBuf,
     pub ca_cert: PathBuf,
     pub ca_key: PathBuf,
+    pub sub_ca_cert: PathBuf,
+    pub sub_ca_key: PathBuf,
     pub controller_cert: PathBuf,
     pub controller_key: PathBuf,
     pub kctl_cert: PathBuf,
@@ -28,6 +31,10 @@ pub struct InstallPkiPayload {
     pub controller_cert_pem: String,
     /// Only populated when the node will also run the controller.
     pub controller_key_pem: String,
+    /// Only populated when the node will also run the controller.
+    pub sub_ca_cert_pem: String,
+    /// Only populated when the node will also run the controller.
+    pub sub_ca_key_pem: String,
 }
 
 pub fn host_from_address(addr: &str) -> Result<String, String> {
@@ -117,6 +124,8 @@ pub fn create_cluster_pki(
         certs_dir: certs_dir.to_path_buf(),
         ca_cert: certs_dir.join("ca.crt"),
         ca_key: certs_dir.join("ca.key"),
+        sub_ca_cert: certs_dir.join("sub-ca.crt"),
+        sub_ca_key: certs_dir.join("sub-ca.key"),
         controller_cert: certs_dir.join("controller.crt"),
         controller_key: certs_dir.join("controller.key"),
         kctl_cert: certs_dir.join("kctl.crt"),
@@ -155,6 +164,9 @@ pub fn create_cluster_pki(
     let ca_cert_pem = ca_cert.pem();
     let ca_key_pem = ca_key.serialize_pem();
 
+    let (sub_ca_cert_pem, sub_ca_key_pem) =
+        generate_sub_ca(&ca_cert_pem, &ca_key_pem)?;
+
     let (controller_cert_pem, controller_key_pem) = sign_cert(
         Some(controller_host),
         "kcore-controller",
@@ -176,12 +188,37 @@ pub fn create_cluster_pki(
 
     write_file(&paths.ca_cert, &ca_cert_pem, 0o644)?;
     write_file(&paths.ca_key, &ca_key_pem, 0o600)?;
+    write_file(&paths.sub_ca_cert, &sub_ca_cert_pem, 0o644)?;
+    write_file(&paths.sub_ca_key, &sub_ca_key_pem, 0o600)?;
     write_file(&paths.controller_cert, &controller_cert_pem, 0o644)?;
     write_file(&paths.controller_key, &controller_key_pem, 0o600)?;
     write_file(&paths.kctl_cert, &kctl_cert_pem, 0o644)?;
     write_file(&paths.kctl_key, &kctl_key_pem, 0o600)?;
 
     Ok(paths)
+}
+
+fn generate_sub_ca(ca_cert_pem: &str, ca_key_pem: &str) -> Result<(String, String), String> {
+    let mut sub_ca_params = CertificateParams::default();
+    sub_ca_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+    sub_ca_params
+        .distinguished_name
+        .push(DnType::CommonName, "kcore-cluster-sub-ca");
+    sub_ca_params.not_before = OffsetDateTime::now_utc();
+    sub_ca_params.not_after = OffsetDateTime::now_utc() + Duration::days(SUB_CA_VALIDITY_DAYS);
+
+    let ca_key =
+        KeyPair::from_pem(ca_key_pem).map_err(|e| format!("loading CA key for sub-CA: {e}"))?;
+    let issuer = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key)
+        .map_err(|e| format!("loading CA cert for sub-CA: {e}"))?;
+
+    let sub_ca_key =
+        KeyPair::generate().map_err(|e| format!("sub-CA key generation: {e}"))?;
+    let sub_ca_cert = sub_ca_params
+        .signed_by(&sub_ca_key, &issuer)
+        .map_err(|e| format!("sub-CA signing: {e}"))?;
+
+    Ok((sub_ca_cert.pem(), sub_ca_key.serialize_pem()))
 }
 
 /// Re-sign the controller certificate with a new host SAN, using the existing CA.
@@ -226,6 +263,55 @@ pub fn rotate_controller_cert(certs_dir: &Path, new_controller_host: &str) -> Re
     Ok(())
 }
 
+/// Generate a new sub-CA signed by the root CA, overwriting the existing
+/// sub-CA cert and key on disk.  Returns the new sub-CA PEM strings.
+pub fn rotate_sub_ca(certs_dir: &Path) -> Result<(String, String), String> {
+    let ca_cert_path = certs_dir.join("ca.crt");
+    let ca_key_path = certs_dir.join("ca.key");
+
+    for path in [&ca_cert_path, &ca_key_path] {
+        if !path.exists() {
+            return Err(format!(
+                "missing {}, cannot rotate sub-CA without the root CA",
+                path.display()
+            ));
+        }
+    }
+
+    let ca_cert_pem = std::fs::read_to_string(&ca_cert_path)
+        .map_err(|e| format!("reading {}: {e}", ca_cert_path.display()))?;
+    let ca_key_pem = std::fs::read_to_string(&ca_key_path)
+        .map_err(|e| format!("reading {}: {e}", ca_key_path.display()))?;
+
+    let (sub_ca_cert_pem, sub_ca_key_pem) = generate_sub_ca(&ca_cert_pem, &ca_key_pem)?;
+
+    write_file(&certs_dir.join("sub-ca.crt"), &sub_ca_cert_pem, 0o644)?;
+    write_file(&certs_dir.join("sub-ca.key"), &sub_ca_key_pem, 0o600)?;
+
+    Ok((sub_ca_cert_pem, sub_ca_key_pem))
+}
+
+/// Sign a leaf certificate using the sub-CA.  Returns (cert_chain_pem, key_pem)
+/// where cert_chain_pem = leaf cert + sub-CA cert concatenated PEM.
+pub fn sign_node_cert_with_sub_ca(
+    sub_ca_cert_pem: &str,
+    sub_ca_key_pem: &str,
+    node_host: &str,
+) -> Result<(String, String), String> {
+    let (leaf_pem, key_pem) = sign_cert(
+        Some(node_host),
+        &format!("kcore-node-{node_host}"),
+        vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ],
+        sub_ca_cert_pem,
+        sub_ca_key_pem,
+    )?;
+    let chain_pem = format!("{leaf_pem}{sub_ca_cert_pem}");
+    Ok((chain_pem, key_pem))
+}
+
 /// Load PKI material for a node install.
 ///
 /// The CA key is read locally to sign the node certificate but is never sent
@@ -244,9 +330,13 @@ pub fn load_install_pki(
 
     let controller_cert_path = certs_dir.join("controller.crt");
     let controller_key_path = certs_dir.join("controller.key");
+    let sub_ca_cert_path = certs_dir.join("sub-ca.crt");
+    let sub_ca_key_path = certs_dir.join("sub-ca.key");
     if include_controller_pki {
         required.push(&controller_cert_path);
         required.push(&controller_key_path);
+        required.push(&sub_ca_cert_path);
+        required.push(&sub_ca_key_path);
     }
 
     let missing: Vec<String> = required
@@ -268,15 +358,20 @@ run `kctl create cluster --context <cluster-name> --controller <host:9090>` and 
     let ca_key_pem = std::fs::read_to_string(&ca_key_path)
         .map_err(|e| format!("reading {}: {e}", ca_key_path.display()))?;
 
-    let (controller_cert_pem, controller_key_pem) = if include_controller_pki {
-        let cert = std::fs::read_to_string(&controller_cert_path)
-            .map_err(|e| format!("reading {}: {e}", controller_cert_path.display()))?;
-        let key = std::fs::read_to_string(&controller_key_path)
-            .map_err(|e| format!("reading {}: {e}", controller_key_path.display()))?;
-        (cert, key)
-    } else {
-        (String::new(), String::new())
-    };
+    let (controller_cert_pem, controller_key_pem, sub_ca_cert_pem, sub_ca_key_pem) =
+        if include_controller_pki {
+            let cert = std::fs::read_to_string(&controller_cert_path)
+                .map_err(|e| format!("reading {}: {e}", controller_cert_path.display()))?;
+            let key = std::fs::read_to_string(&controller_key_path)
+                .map_err(|e| format!("reading {}: {e}", controller_key_path.display()))?;
+            let sub_cert = std::fs::read_to_string(&sub_ca_cert_path)
+                .map_err(|e| format!("reading {}: {e}", sub_ca_cert_path.display()))?;
+            let sub_key = std::fs::read_to_string(&sub_ca_key_path)
+                .map_err(|e| format!("reading {}: {e}", sub_ca_key_path.display()))?;
+            (cert, key, sub_cert, sub_key)
+        } else {
+            (String::new(), String::new(), String::new(), String::new())
+        };
 
     let (node_cert_pem, node_key_pem) = sign_cert(
         Some(node_host),
@@ -295,6 +390,8 @@ run `kctl create cluster --context <cluster-name> --controller <host:9090>` and 
         node_key_pem,
         controller_cert_pem,
         controller_key_pem,
+        sub_ca_cert_pem,
+        sub_ca_key_pem,
     })
 }
 
@@ -317,6 +414,8 @@ mod tests {
 
         assert!(out.ca_cert.exists());
         assert!(out.ca_key.exists());
+        assert!(out.sub_ca_cert.exists());
+        assert!(out.sub_ca_key.exists());
         assert!(out.controller_cert.exists());
         assert!(out.controller_key.exists());
         assert!(out.kctl_cert.exists());
@@ -398,5 +497,75 @@ mod tests {
         let result = rotate_controller_cert(&certs, "10.0.0.1");
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("missing"));
+    }
+
+    #[test]
+    fn sub_ca_generated_during_create_cluster() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let sub_ca_cert = std::fs::read_to_string(certs.join("sub-ca.crt")).expect("sub-ca cert");
+        let sub_ca_key = std::fs::read_to_string(certs.join("sub-ca.key")).expect("sub-ca key");
+        assert!(sub_ca_cert.contains("BEGIN CERTIFICATE"));
+        assert!(sub_ca_key.contains("BEGIN PRIVATE KEY"));
+    }
+
+    #[test]
+    fn rotate_sub_ca_replaces_sub_ca() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let original = std::fs::read_to_string(certs.join("sub-ca.crt")).expect("read");
+        let (new_cert, _new_key) = rotate_sub_ca(&certs).expect("rotate");
+
+        assert_ne!(original, new_cert, "sub-CA cert should change after rotation");
+        let on_disk = std::fs::read_to_string(certs.join("sub-ca.crt")).expect("read");
+        assert_eq!(on_disk, new_cert, "disk should match returned cert");
+    }
+
+    #[test]
+    fn sign_node_cert_with_sub_ca_produces_chain() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let sub_ca_cert = std::fs::read_to_string(certs.join("sub-ca.crt")).expect("read");
+        let sub_ca_key = std::fs::read_to_string(certs.join("sub-ca.key")).expect("read");
+        let (chain_pem, key_pem) =
+            sign_node_cert_with_sub_ca(&sub_ca_cert, &sub_ca_key, "10.0.0.50").expect("sign");
+
+        assert!(key_pem.contains("BEGIN PRIVATE KEY"));
+        let cert_count = chain_pem.matches("BEGIN CERTIFICATE").count();
+        assert_eq!(cert_count, 2, "chain should contain leaf + sub-CA certs");
+    }
+
+    #[test]
+    fn load_install_pki_with_controller_includes_sub_ca() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let payload = load_install_pki(&certs, "127.0.0.1", true).expect("load");
+        assert!(
+            !payload.sub_ca_cert_pem.is_empty(),
+            "sub-CA cert should be included for controller installs"
+        );
+        assert!(
+            !payload.sub_ca_key_pem.is_empty(),
+            "sub-CA key should be included for controller installs"
+        );
+    }
+
+    #[test]
+    fn load_install_pki_without_controller_omits_sub_ca() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "127.0.0.1", false).expect("create pki");
+
+        let payload = load_install_pki(&certs, "10.0.0.21", false).expect("load");
+        assert!(payload.sub_ca_cert_pem.is_empty());
+        assert!(payload.sub_ca_key_pem.is_empty());
     }
 }

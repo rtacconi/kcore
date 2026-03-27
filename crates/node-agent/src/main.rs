@@ -80,6 +80,7 @@ async fn main() -> anyhow::Result<()> {
         tokio::spawn(async move {
             registration::register_with_controller(&reg_cfg).await;
         });
+        registration::start_cert_renewal_loop(cfg.clone());
     }
 
     let mut server = Server::builder();

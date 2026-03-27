@@ -38,6 +38,10 @@ service Controller {
   rpc DrainNode(DrainNodeRequest) returns (DrainNodeResponse);
   rpc ApproveNode(ApproveNodeRequest) returns (ApproveNodeResponse);
   rpc RejectNode(RejectNodeRequest) returns (RejectNodeResponse);
+
+  // Certificate rotation
+  rpc RenewNodeCert(RenewNodeCertRequest) returns (RenewNodeCertResponse);
+  rpc RotateSubCa(RotateSubCaRequest) returns (RotateSubCaResponse);
 }
 
 message RegisterNodeRequest {
@@ -53,6 +57,7 @@ message RegisterNodeRequest {
 message RegisterNodeResponse {
   bool success = 1;
   string message = 2;
+  string approval_status = 3;
 }
 
 message HeartbeatRequest {
@@ -388,6 +393,29 @@ message RejectNodeRequest {
 }
 
 message RejectNodeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// Certificate Rotation
+
+message RenewNodeCertRequest {
+  string node_id = 1;
+}
+
+message RenewNodeCertResponse {
+  bool success = 1;
+  string cert_pem = 2;
+  string key_pem = 3;
+  string message = 4;
+}
+
+message RotateSubCaRequest {
+  string sub_ca_cert_pem = 1;
+  string sub_ca_key_pem = 2;
+}
+
+message RotateSubCaResponse {
   bool success = 1;
   string message = 2;
 }
