@@ -440,6 +440,8 @@ fn write_bootstrap_pki_at(
         ("controller.key", &req.controller_key_pem),
         ("kctl.crt", &req.kctl_cert_pem),
         ("kctl.key", &req.kctl_key_pem),
+        ("sub-ca.crt", &req.sub_ca_cert_pem),
+        ("sub-ca.key", &req.sub_ca_key_pem),
     ];
 
     let has_any = certs.iter().any(|(_, content)| !content.trim().is_empty());
@@ -992,6 +994,8 @@ mod tests {
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
             disable_vxlan: false,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
         };
 
         write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
@@ -1059,6 +1063,8 @@ mod tests {
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
             disable_vxlan: false,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
         };
         write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
         assert!(
@@ -1204,6 +1210,8 @@ mod tests {
                 zfs_pool_name: String::new(),
                 zfs_dataset_prefix: String::new(),
                 disable_vxlan: false,
+                sub_ca_cert_pem: String::new(),
+                sub_ca_key_pem: String::new(),
             }),
         )
         .await
@@ -1238,6 +1246,8 @@ mod tests {
                 zfs_pool_name: String::new(),
                 zfs_dataset_prefix: String::new(),
                 disable_vxlan: false,
+                sub_ca_cert_pem: String::new(),
+                sub_ca_key_pem: String::new(),
             }),
         )
         .await
@@ -1265,6 +1275,8 @@ mod tests {
                 zfs_pool_name: String::new(),
                 zfs_dataset_prefix: String::new(),
                 disable_vxlan: false,
+                sub_ca_cert_pem: String::new(),
+                sub_ca_key_pem: String::new(),
             }),
         )
         .await
@@ -1293,6 +1305,8 @@ mod tests {
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
             disable_vxlan: false,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--controller".to_string()));
@@ -1323,6 +1337,8 @@ mod tests {
             zfs_pool_name: "tank0".to_string(),
             zfs_dataset_prefix: "kcore-".to_string(),
             disable_vxlan: false,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--run-controller".to_string()));
@@ -1357,6 +1373,8 @@ mod tests {
             zfs_pool_name: String::new(),
             zfs_dataset_prefix: String::new(),
             disable_vxlan: true,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--disable-vxlan".to_string()));

@@ -19,6 +19,10 @@ pub struct TlsConfig {
     pub ca_file: String,
     pub cert_file: String,
     pub key_file: String,
+    #[serde(default)]
+    pub sub_ca_cert_file: Option<String>,
+    #[serde(default)]
+    pub sub_ca_key_file: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -2,7 +2,8 @@ use std::path::Path;
 
 use anyhow::Result;
 
-use crate::pki;
+use crate::config::ConnectionInfo;
+use crate::{client, pki};
 
 pub fn rotate(certs_dir: &Path, controller: &str) -> Result<()> {
     let controller_host = pki::host_from_address(controller)
@@ -20,6 +21,32 @@ pub fn rotate(certs_dir: &Path, controller: &str) -> Result<()> {
     println!("Next steps:");
     println!("  1. Copy controller.crt and controller.key to the controller node");
     println!("  2. Restart kcore-controller (systemctl restart kcore-controller)");
+
+    Ok(())
+}
+
+pub async fn rotate_sub_ca(certs_dir: &Path, info: &ConnectionInfo) -> Result<()> {
+    let (sub_ca_cert_pem, sub_ca_key_pem) = pki::rotate_sub_ca(certs_dir)
+        .map_err(|e| anyhow::anyhow!("generating new sub-CA: {e}"))?;
+
+    println!("New sub-CA generated locally:");
+    println!("  cert: {}", certs_dir.join("sub-ca.crt").display());
+    println!("  key:  {}", certs_dir.join("sub-ca.key").display());
+
+    let mut ctrl = client::controller_client(info).await?;
+    let resp = ctrl
+        .rotate_sub_ca(client::controller_proto::RotateSubCaRequest {
+            sub_ca_cert_pem,
+            sub_ca_key_pem,
+        })
+        .await?
+        .into_inner();
+
+    if resp.success {
+        println!("Sub-CA pushed to controller: {}", resp.message);
+    } else {
+        anyhow::bail!("Controller rejected sub-CA rotation: {}", resp.message);
+    }
 
     Ok(())
 }

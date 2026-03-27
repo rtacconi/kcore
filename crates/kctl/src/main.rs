@@ -121,6 +121,13 @@ enum RotateResource {
         #[arg(long)]
         certs_dir: Option<PathBuf>,
     },
+    /// Generate a new sub-CA and push it to the controller
+    #[command(name = "sub-ca")]
+    SubCa {
+        /// Certificate directory (defaults to active context's cert dir)
+        #[arg(long)]
+        certs_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -875,6 +882,22 @@ async fn main() {
                     .unwrap_or_else(|e| fatal(&e))
             };
             commands::certs::rotate(&certs_path, controller)
+        }
+        Command::Rotate {
+            resource: RotateResource::SubCa { certs_dir },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            let certs_path = if let Some(dir) = certs_dir {
+                dir.clone()
+            } else {
+                let config_path = cli
+                    .config
+                    .clone()
+                    .unwrap_or_else(config::default_config_path);
+                config::resolve_install_certs_dir(&config_path)
+                    .unwrap_or_else(|e| fatal(&e))
+            };
+            commands::certs::rotate_sub_ca(&certs_path, &info).await
         }
 
         Command::Apply { file, dry_run } => {

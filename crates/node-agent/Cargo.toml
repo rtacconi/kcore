@@ -20,6 +20,8 @@ tonic = { version = "0.12", features = ["tls"] }
 tonic-health = "0.12"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+pem = "3"
+time = "0.3"
 x509-parser = "0.18"
 anyhow = "1.0.102"
 
@@ -27,4 +29,5 @@ anyhow = "1.0.102"
 tonic-build = "0.12"
 
 [dev-dependencies]
+rcgen = "0.14"
 tempfile = "3"

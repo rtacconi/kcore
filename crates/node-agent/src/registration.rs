@@ -9,6 +9,8 @@ use crate::controller_proto;
 const DISABLE_VXLAN_MARKER: &str = "/etc/kcore/disable-vxlan";
 const REGISTRATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 const MAX_REGISTRATION_RETRIES: u32 = 12;
+const RENEWAL_THRESHOLD_DAYS: i64 = 30;
+const RENEWAL_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(86400);
 
 pub async fn register_with_controller(cfg: &Config) {
     let disable_vxlan = Path::new(DISABLE_VXLAN_MARKER).exists();
@@ -169,6 +171,103 @@ fn get_primary_ip() -> Result<String, std::io::Error> {
         .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no IP found"))
 }
 
+/// Spawn a background task that checks cert expiry daily and renews via
+/// the controller's RenewNodeCert RPC when the cert is within 30 days of expiry.
+pub fn start_cert_renewal_loop(cfg: Config) {
+    tokio::spawn(async move {
+        loop {
+            if let Err(e) = check_and_renew_cert(&cfg).await {
+                warn!(error = %e, "cert renewal check failed");
+            }
+            tokio::time::sleep(RENEWAL_CHECK_INTERVAL).await;
+        }
+    });
+}
+
+async fn check_and_renew_cert(
+    cfg: &Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let tls = match cfg.tls.as_ref() {
+        Some(t) => t,
+        None => return Ok(()),
+    };
+
+    let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
+    let days_remaining = cert_days_remaining(&cert_pem)?;
+
+    if days_remaining > RENEWAL_THRESHOLD_DAYS {
+        info!(
+            days_remaining,
+            "certificate valid, no renewal needed"
+        );
+        return Ok(());
+    }
+
+    info!(
+        days_remaining,
+        "certificate expires soon, requesting renewal"
+    );
+
+    let endpoint = if cfg.controller_addr.contains("://") {
+        cfg.controller_addr.clone()
+    } else {
+        format!("https://{}", cfg.controller_addr)
+    };
+
+    let ca_pem = std::fs::read_to_string(&tls.ca_file)?;
+    let key_pem = std::fs::read_to_string(&tls.key_file)?;
+    let domain = endpoint_host(&endpoint)
+        .unwrap_or("localhost")
+        .to_string();
+    let tls_config = ClientTlsConfig::new()
+        .ca_certificate(Certificate::from_pem(&ca_pem))
+        .identity(Identity::from_pem(&cert_pem, &key_pem))
+        .domain_name(domain);
+    let channel = Channel::from_shared(endpoint)?
+        .tls_config(tls_config)?
+        .connect()
+        .await?;
+
+    let mut client =
+        controller_proto::controller_client::ControllerClient::new(channel);
+    let resp = client
+        .renew_node_cert(controller_proto::RenewNodeCertRequest {
+            node_id: cfg.node_id.clone(),
+        })
+        .await?
+        .into_inner();
+
+    if !resp.success {
+        return Err(format!("controller rejected renewal: {}", resp.message).into());
+    }
+
+    std::fs::write(&tls.cert_file, &resp.cert_pem)?;
+    std::fs::write(&tls.key_file, &resp.key_pem)?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tls.key_file, std::fs::Permissions::from_mode(0o600))?;
+    }
+
+    info!(
+        node_id = %cfg.node_id,
+        "certificate renewed successfully; new cert written to disk"
+    );
+
+    Ok(())
+}
+
+fn cert_days_remaining(cert_pem: &str) -> Result<i64, Box<dyn std::error::Error + Send + Sync>> {
+    let pem = pem::parse(cert_pem)?;
+    use x509_parser::prelude::FromDer;
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(pem.contents())?;
+    let not_after = cert.validity().not_after.to_datetime();
+    let now = time::OffsetDateTime::now_utc();
+    let remaining = not_after - now;
+    Ok(remaining.whole_days())
+}
+
 fn endpoint_host(endpoint: &str) -> Option<&str> {
     let without_scheme = endpoint
         .strip_prefix("https://")
@@ -214,5 +313,45 @@ mod tests {
     fn endpoint_host_plain_hostname() {
         assert_eq!(endpoint_host("controller.local:9090"), Some("controller.local"));
         assert_eq!(endpoint_host("https://myhost"), Some("myhost"));
+    }
+
+    #[test]
+    fn cert_days_remaining_parses_valid_cert() {
+        use rcgen::{CertificateParams, DnType, IsCa, KeyPair};
+        use time::{Duration, OffsetDateTime};
+
+        let mut params = CertificateParams::default();
+        params.is_ca = IsCa::NoCa;
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "test-node");
+        params.not_before = OffsetDateTime::now_utc();
+        params.not_after = OffsetDateTime::now_utc() + Duration::days(100);
+        let key = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        let pem = cert.pem();
+
+        let days = cert_days_remaining(&pem).unwrap();
+        assert!(days >= 99 && days <= 100, "expected ~100 days, got {days}");
+    }
+
+    #[test]
+    fn cert_days_remaining_near_expiry() {
+        use rcgen::{CertificateParams, DnType, IsCa, KeyPair};
+        use time::{Duration, OffsetDateTime};
+
+        let mut params = CertificateParams::default();
+        params.is_ca = IsCa::NoCa;
+        params
+            .distinguished_name
+            .push(DnType::CommonName, "expiring-node");
+        params.not_before = OffsetDateTime::now_utc() - Duration::days(360);
+        params.not_after = OffsetDateTime::now_utc() + Duration::days(5);
+        let key = KeyPair::generate().unwrap();
+        let cert = params.self_signed(&key).unwrap();
+        let pem = cert.pem();
+
+        let days = cert_days_remaining(&pem).unwrap();
+        assert!(days >= 4 && days <= 5, "expected ~5 days, got {days}");
     }
 }

@@ -6,6 +6,8 @@ mod nixgen;
 mod node_client;
 mod scheduler;
 
+use std::sync::{Arc, Mutex};
+
 use clap::Parser;
 use tokio::signal;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
@@ -58,11 +60,15 @@ async fn main() -> anyhow::Result<()> {
             key_file: tls.key_file.clone(),
         }));
 
+    let sub_ca_state = load_sub_ca(&cfg);
+    let sub_ca = Arc::new(Mutex::new(sub_ca_state));
+
     let controller_svc =
         controller_proto::controller_server::ControllerServer::new(grpc::ControllerService::new(
             database.clone(),
             clients.clone(),
             cfg.default_network.clone(),
+            sub_ca,
         ));
 
     let admin_svc = controller_proto::controller_admin_server::ControllerAdminServer::new(
@@ -124,6 +130,55 @@ async fn main() -> anyhow::Result<()> {
         .await?;
 
     Ok(())
+}
+
+fn load_sub_ca(cfg: &config::Config) -> grpc::SubCaState {
+    let tls = match cfg.tls.as_ref() {
+        Some(t) => t,
+        None => return grpc::SubCaState::default(),
+    };
+
+    let cert_file = match &tls.sub_ca_cert_file {
+        Some(f) if !f.is_empty() => f.clone(),
+        _ => return grpc::SubCaState::default(),
+    };
+    let key_file = match &tls.sub_ca_key_file {
+        Some(f) if !f.is_empty() => f.clone(),
+        _ => return grpc::SubCaState::default(),
+    };
+
+    let cert_pem = match std::fs::read_to_string(&cert_file) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(path = %cert_file, error = %e, "sub-CA cert file not found; cert renewal disabled");
+            return grpc::SubCaState {
+                cert_pem: String::new(),
+                key_pem: String::new(),
+                cert_file: Some(cert_file),
+                key_file: Some(key_file),
+            };
+        }
+    };
+    let key_pem = match std::fs::read_to_string(&key_file) {
+        Ok(s) => s,
+        Err(e) => {
+            warn!(path = %key_file, error = %e, "sub-CA key file not found; cert renewal disabled");
+            return grpc::SubCaState {
+                cert_pem: String::new(),
+                key_pem: String::new(),
+                cert_file: Some(cert_file),
+                key_file: Some(key_file),
+            };
+        }
+    };
+
+    info!("sub-CA loaded for automatic certificate renewal");
+    grpc::SubCaState {
+        cert_pem,
+        key_pem,
+        cert_file: Some(cert_file),
+        key_file: Some(key_file),
+    }
 }
 
 async fn shutdown_signal() {

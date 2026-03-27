@@ -438,6 +438,8 @@ tls:
   caFile: /etc/kcore/certs/ca.crt
   certFile: /etc/kcore/certs/controller.crt
   keyFile: /etc/kcore/certs/controller.key
+  subCaCertFile: /etc/kcore/certs/sub-ca.crt
+  subCaKeyFile: /etc/kcore/certs/sub-ca.key
 CTRLEOF
 
                     cat > /mnt/etc/nixos/kcore-vms.nix << 'VMSEOF'

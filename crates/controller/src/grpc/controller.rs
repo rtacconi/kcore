@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
@@ -14,6 +15,7 @@ use super::helpers::{
     short_vm_id_seed, state_fallback_without_runtime,
 };
 use super::helpers::compute_vni;
+use super::signing;
 use super::validation::{
     derive_image_format, derive_image_format_from_path, derive_local_image_path,
     normalize_image_format, normalize_storage_backend, storage_backend_to_proto,
@@ -24,20 +26,41 @@ use super::validation::{
 #[cfg(test)]
 type PushHook = std::sync::Arc<dyn Fn(&NodeRow) -> Result<(), Status> + Send + Sync + 'static>;
 
+#[derive(Clone, Default)]
+pub struct SubCaState {
+    pub cert_pem: String,
+    pub key_pem: String,
+    pub cert_file: Option<String>,
+    pub key_file: Option<String>,
+}
+
+impl SubCaState {
+    pub fn is_available(&self) -> bool {
+        !self.cert_pem.is_empty() && !self.key_pem.is_empty()
+    }
+}
+
 pub struct ControllerService {
     db: Database,
     clients: NodeClients,
     default_network: NetworkConfig,
+    sub_ca: Arc<Mutex<SubCaState>>,
     #[cfg(test)]
     test_push_hook: Option<PushHook>,
 }
 
 impl ControllerService {
-    pub fn new(db: Database, clients: NodeClients, default_network: NetworkConfig) -> Self {
+    pub fn new(
+        db: Database,
+        clients: NodeClients,
+        default_network: NetworkConfig,
+        sub_ca: Arc<Mutex<SubCaState>>,
+    ) -> Self {
         Self {
             db,
             clients,
             default_network,
+            sub_ca,
             #[cfg(test)]
             test_push_hook: None,
         }
@@ -54,6 +77,7 @@ impl ControllerService {
             db,
             clients,
             default_network,
+            sub_ca: Arc::new(Mutex::new(SubCaState::default())),
             test_push_hook: Some(hook),
         }
     }
@@ -342,6 +366,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         Ok(Response::new(controller_proto::RegisterNodeResponse {
             success: true,
             message,
+            approval_status,
         }))
     }
 
@@ -1605,15 +1630,118 @@ impl controller_proto::controller_server::Controller for ControllerService {
             message: format!("node '{}' rejected", req.node_id),
         }))
     }
+
+    async fn renew_node_cert(
+        &self,
+        request: Request<controller_proto::RenewNodeCertRequest>,
+    ) -> Result<Response<controller_proto::RenewNodeCertResponse>, Status> {
+        auth::require_peer(&request, &[CN_NODE_PREFIX])?;
+        let req = request.into_inner();
+
+        let node = self
+            .db
+            .get_node(&req.node_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.node_id)))?;
+
+        if node.approval_status != "approved" {
+            return Err(Status::permission_denied(format!(
+                "node '{}' is not approved (status: {})",
+                req.node_id, node.approval_status
+            )));
+        }
+
+        let sub_ca = self
+            .sub_ca
+            .lock()
+            .map_err(|_| Status::internal("sub-CA lock poisoned"))?
+            .clone();
+
+        if !sub_ca.is_available() {
+            return Err(Status::unavailable(
+                "sub-CA is not configured on this controller; certificate renewal is unavailable",
+            ));
+        }
+
+        let node_host = node
+            .address
+            .split(':')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        if node_host.is_empty() {
+            return Err(Status::internal(format!(
+                "cannot determine host from node address '{}'",
+                node.address
+            )));
+        }
+
+        let (chain_pem, key_pem) =
+            signing::sign_node_cert(&sub_ca.cert_pem, &sub_ca.key_pem, &node_host)
+                .map_err(|e| Status::internal(format!("signing node cert: {e}")))?;
+
+        info!(node_id = %req.node_id, host = %node_host, "renewed node certificate via sub-CA");
+
+        Ok(Response::new(controller_proto::RenewNodeCertResponse {
+            success: true,
+            cert_pem: chain_pem,
+            key_pem,
+            message: format!("certificate renewed for node '{}'", req.node_id),
+        }))
+    }
+
+    async fn rotate_sub_ca(
+        &self,
+        request: Request<controller_proto::RotateSubCaRequest>,
+    ) -> Result<Response<controller_proto::RotateSubCaResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        if req.sub_ca_cert_pem.trim().is_empty() || req.sub_ca_key_pem.trim().is_empty() {
+            return Err(Status::invalid_argument(
+                "sub_ca_cert_pem and sub_ca_key_pem are required",
+            ));
+        }
+
+        signing::validate_sub_ca_cert(&req.sub_ca_cert_pem)
+            .map_err(|e| Status::invalid_argument(format!("invalid sub-CA cert: {e}")))?;
+
+        let mut sub_ca = self
+            .sub_ca
+            .lock()
+            .map_err(|_| Status::internal("sub-CA lock poisoned"))?;
+
+        if let Some(cert_file) = &sub_ca.cert_file {
+            std::fs::write(cert_file, &req.sub_ca_cert_pem)
+                .map_err(|e| Status::internal(format!("writing sub-CA cert: {e}")))?;
+        }
+        if let Some(key_file) = &sub_ca.key_file {
+            std::fs::write(key_file, &req.sub_ca_key_pem)
+                .map_err(|e| Status::internal(format!("writing sub-CA key: {e}")))?;
+        }
+
+        sub_ca.cert_pem = req.sub_ca_cert_pem;
+        sub_ca.key_pem = req.sub_ca_key_pem;
+
+        info!("sub-CA rotated via kctl");
+
+        Ok(Response::new(controller_proto::RotateSubCaResponse {
+            success: true,
+            message: "sub-CA rotated successfully".into(),
+        }))
+    }
 }
 
 #[cfg(test)]
 #[allow(clippy::result_large_err)]
 mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::{Arc, Mutex};
 
     use super::*;
+
+    fn empty_sub_ca() -> Arc<Mutex<SubCaState>> {
+        Arc::new(Mutex::new(SubCaState::default()))
+    }
 
     fn test_network() -> NetworkConfig {
         NetworkConfig {
@@ -2318,7 +2446,7 @@ mod tests {
     #[tokio::test]
     async fn new_node_registers_as_pending() {
         let db = Database::open(":memory:").expect("open db");
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca());
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::register_node(
@@ -2355,7 +2483,7 @@ mod tests {
         node.approval_status = "approved".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca());
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::register_node(
@@ -2393,7 +2521,7 @@ mod tests {
         node.status = "pending".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca());
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::approve_node(
@@ -2421,7 +2549,7 @@ mod tests {
         node.status = "pending".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca());
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::reject_node(
@@ -2468,5 +2596,183 @@ mod tests {
             scheduler::select_node(&[n]).is_some(),
             "approved node should be selected"
         );
+    }
+
+    fn test_sub_ca_state() -> Arc<Mutex<SubCaState>> {
+        use rcgen::{BasicConstraints, CertificateParams, DnType, IsCa, Issuer, KeyPair};
+        use time::{Duration, OffsetDateTime};
+
+        let mut ca_params = CertificateParams::default();
+        ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
+        ca_params
+            .distinguished_name
+            .push(DnType::CommonName, "test-ca");
+        ca_params.not_before = OffsetDateTime::now_utc();
+        ca_params.not_after = OffsetDateTime::now_utc() + Duration::days(3650);
+        let ca_key = KeyPair::generate().unwrap();
+        let ca_cert = ca_params.self_signed(&ca_key).unwrap();
+
+        let mut sub_params = CertificateParams::default();
+        sub_params.is_ca = IsCa::Ca(BasicConstraints::Constrained(0));
+        sub_params
+            .distinguished_name
+            .push(DnType::CommonName, "test-sub-ca");
+        sub_params.not_before = OffsetDateTime::now_utc();
+        sub_params.not_after = OffsetDateTime::now_utc() + Duration::days(1825);
+        let issuer = Issuer::from_ca_cert_pem(&ca_cert.pem(), ca_key).unwrap();
+        let sub_key = KeyPair::generate().unwrap();
+        let sub_cert = sub_params.signed_by(&sub_key, &issuer).unwrap();
+
+        Arc::new(Mutex::new(SubCaState {
+            cert_pem: sub_cert.pem(),
+            key_pem: sub_key.serialize_pem(),
+            cert_file: None,
+            key_file: None,
+        }))
+    }
+
+    #[tokio::test]
+    async fn renew_node_cert_returns_chain() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert");
+
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            test_sub_ca_state(),
+        );
+
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::renew_node_cert(
+                &svc,
+                Request::new(controller_proto::RenewNodeCertRequest {
+                    node_id: "node-1".to_string(),
+                }),
+            )
+            .await
+            .expect("renew should succeed")
+            .into_inner();
+
+        assert!(resp.success);
+        assert!(resp.cert_pem.contains("BEGIN CERTIFICATE"));
+        assert!(resp.key_pem.contains("BEGIN PRIVATE KEY"));
+        let cert_count = resp.cert_pem.matches("BEGIN CERTIFICATE").count();
+        assert_eq!(cert_count, 2, "should contain leaf + sub-CA in chain");
+    }
+
+    #[tokio::test]
+    async fn renew_node_cert_rejects_unapproved_node() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "pending".to_string();
+        db.upsert_node(&node).expect("insert");
+
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            test_sub_ca_state(),
+        );
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::renew_node_cert(
+                &svc,
+                Request::new(controller_proto::RenewNodeCertRequest {
+                    node_id: "node-1".to_string(),
+                }),
+            )
+            .await
+            .expect_err("should reject unapproved node");
+
+        assert_eq!(err.code(), tonic::Code::PermissionDenied);
+    }
+
+    #[tokio::test]
+    async fn renew_node_cert_fails_without_sub_ca() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert");
+
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+        );
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::renew_node_cert(
+                &svc,
+                Request::new(controller_proto::RenewNodeCertRequest {
+                    node_id: "node-1".to_string(),
+                }),
+            )
+            .await
+            .expect_err("should fail without sub-CA");
+
+        assert_eq!(err.code(), tonic::Code::Unavailable);
+    }
+
+    #[tokio::test]
+    async fn rotate_sub_ca_updates_state() {
+        let db = Database::open(":memory:").expect("open db");
+        let sub_ca = test_sub_ca_state();
+
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            sub_ca.clone(),
+        );
+
+        let new_state = test_sub_ca_state();
+        let new_lock = new_state.lock().unwrap();
+        let new_cert = new_lock.cert_pem.clone();
+        let new_key = new_lock.key_pem.clone();
+        drop(new_lock);
+
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::rotate_sub_ca(
+                &svc,
+                Request::new(controller_proto::RotateSubCaRequest {
+                    sub_ca_cert_pem: new_cert.clone(),
+                    sub_ca_key_pem: new_key.clone(),
+                }),
+            )
+            .await
+            .expect("rotate should succeed")
+            .into_inner();
+
+        assert!(resp.success);
+
+        let current = sub_ca.lock().unwrap();
+        assert_eq!(current.cert_pem, new_cert);
+        assert_eq!(current.key_pem, new_key);
+    }
+
+    #[tokio::test]
+    async fn rotate_sub_ca_rejects_empty_cert() {
+        let db = Database::open(":memory:").expect("open db");
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+        );
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::rotate_sub_ca(
+                &svc,
+                Request::new(controller_proto::RotateSubCaRequest {
+                    sub_ca_cert_pem: String::new(),
+                    sub_ca_key_pem: String::new(),
+                }),
+            )
+            .await
+            .expect_err("should reject empty cert");
+
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }
