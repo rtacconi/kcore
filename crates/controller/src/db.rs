@@ -82,6 +82,17 @@ pub struct ReplicationAckRow {
     pub updated_at: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplicationResourceHeadRow {
+    pub resource_key: String,
+    pub last_op_id: String,
+    pub last_logical_ts_unix_ms: i64,
+    pub last_controller_id: String,
+    pub last_event_id: i64,
+    pub last_event_type: String,
+    pub last_body_json: String,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -352,7 +363,22 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 13;
+        if version < 14 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replication_resource_heads (
+                    resource_key TEXT PRIMARY KEY,
+                    last_op_id TEXT NOT NULL,
+                    last_logical_ts_unix_ms INTEGER NOT NULL,
+                    last_controller_id TEXT NOT NULL,
+                    last_event_id INTEGER NOT NULL,
+                    last_event_type TEXT NOT NULL,
+                    last_body_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 14;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -495,6 +521,62 @@ impl Database {
             "INSERT INTO replication_received_ops (op_id, origin_controller_id, event_type, resource_key)
              VALUES (?1, ?2, ?3, ?4)",
             params![op_id, origin_controller_id, event_type, resource_key],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_replication_resource_head(
+        &self,
+        resource_key: &str,
+    ) -> Result<Option<ReplicationResourceHeadRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT resource_key, last_op_id, last_logical_ts_unix_ms, last_controller_id,
+                    last_event_id, last_event_type, last_body_json
+             FROM replication_resource_heads
+             WHERE resource_key = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![resource_key], |row| {
+            Ok(ReplicationResourceHeadRow {
+                resource_key: row.get(0)?,
+                last_op_id: row.get(1)?,
+                last_logical_ts_unix_ms: row.get(2)?,
+                last_controller_id: row.get(3)?,
+                last_event_id: row.get(4)?,
+                last_event_type: row.get(5)?,
+                last_body_json: row.get(6)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn upsert_replication_resource_head(
+        &self,
+        row: &ReplicationResourceHeadRow,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO replication_resource_heads (
+                resource_key, last_op_id, last_logical_ts_unix_ms, last_controller_id,
+                last_event_id, last_event_type, last_body_json, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+             ON CONFLICT(resource_key) DO UPDATE SET
+                last_op_id=excluded.last_op_id,
+                last_logical_ts_unix_ms=excluded.last_logical_ts_unix_ms,
+                last_controller_id=excluded.last_controller_id,
+                last_event_id=excluded.last_event_id,
+                last_event_type=excluded.last_event_type,
+                last_body_json=excluded.last_body_json,
+                updated_at=datetime('now')",
+            params![
+                &row.resource_key,
+                &row.last_op_id,
+                row.last_logical_ts_unix_ms,
+                &row.last_controller_id,
+                row.last_event_id,
+                &row.last_event_type,
+                &row.last_body_json,
+            ],
         )?;
         Ok(())
     }
@@ -1523,5 +1605,27 @@ mod tests {
         assert!(db
             .replication_received_op_exists("op-1")
             .expect("exists after"));
+    }
+
+    #[test]
+    fn replication_resource_head_roundtrip() {
+        let db = Database::open(":memory:").expect("open db");
+        let row = ReplicationResourceHeadRow {
+            resource_key: "vm/v1".into(),
+            last_op_id: "op-1".into(),
+            last_logical_ts_unix_ms: 123,
+            last_controller_id: "ctrl-a".into(),
+            last_event_id: 7,
+            last_event_type: "vm.update".into(),
+            last_body_json: "{\"cpu\":2}".into(),
+        };
+        db.upsert_replication_resource_head(&row).expect("upsert");
+        let got = db
+            .get_replication_resource_head("vm/v1")
+            .expect("get")
+            .expect("exists");
+        assert_eq!(got.last_op_id, "op-1");
+        assert_eq!(got.last_logical_ts_unix_ms, 123);
+        assert_eq!(got.last_event_type, "vm.update");
     }
 }

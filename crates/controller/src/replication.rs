@@ -6,7 +6,7 @@ use tracing::{info, warn};
 
 use crate::config::{ReplicationConfig, TlsConfig};
 use crate::controller_proto;
-use crate::db::Database;
+use crate::db::{Database, ReplicationResourceHeadRow};
 
 const DEFAULT_PAGE_SIZE: i32 = 500;
 const MAX_PAGE_SIZE: i32 = 5_000;
@@ -181,6 +181,11 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
             event.event_id, payload_resource_key, event.resource_key
         ));
     }
+    let logical_ts_unix_ms = payload_obj
+        .get("logicalTsUnixMs")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let body = payload_obj.get("body").cloned().unwrap_or(Value::Null);
 
     if db
         .replication_received_op_exists(op_id)
@@ -195,6 +200,28 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
         payload_resource_key,
     )
     .map_err(|e| format!("insert received op for event {}: {e}", event.event_id))?;
+
+    let existing_head = db
+        .get_replication_resource_head(payload_resource_key)
+        .map_err(|e| format!("get resource head for event {}: {e}", event.event_id))?;
+    if should_replace_head(
+        existing_head.as_ref(),
+        logical_ts_unix_ms,
+        origin_controller_id,
+        op_id,
+    ) {
+        db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
+            resource_key: payload_resource_key.to_string(),
+            last_op_id: op_id.to_string(),
+            last_logical_ts_unix_ms: logical_ts_unix_ms,
+            last_controller_id: origin_controller_id.to_string(),
+            last_event_id: event.event_id,
+            last_event_type: payload_event_type.to_string(),
+            last_body_json: serde_json::to_string(&body)
+                .map_err(|e| format!("serialize head body for event {}: {e}", event.event_id))?,
+        })
+        .map_err(|e| format!("upsert resource head for event {}: {e}", event.event_id))?;
+    }
 
     match event.event_type.as_str() {
         "node.register"
@@ -219,6 +246,24 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
             Ok(())
         }
     }
+}
+
+fn should_replace_head(
+    existing: Option<&ReplicationResourceHeadRow>,
+    logical_ts_unix_ms: i64,
+    controller_id: &str,
+    op_id: &str,
+) -> bool {
+    let Some(existing) = existing else {
+        return true;
+    };
+    if logical_ts_unix_ms != existing.last_logical_ts_unix_ms {
+        return logical_ts_unix_ms > existing.last_logical_ts_unix_ms;
+    }
+    if controller_id != existing.last_controller_id {
+        return controller_id > existing.last_controller_id.as_str();
+    }
+    op_id > existing.last_op_id.as_str()
 }
 
 async fn connect_admin(
@@ -317,5 +362,32 @@ mod tests {
         assert!(db
             .replication_received_op_exists("op-1")
             .expect("received op exists"));
+    }
+
+    #[test]
+    fn apply_replication_event_updates_lww_resource_head() {
+        let db = Database::open(":memory:").expect("open db");
+        let older = controller_proto::ReplicationEvent {
+            event_id: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v1".to_string(),
+            payload: br#"{"opId":"op-1","controllerId":"ctrl-a","logicalTsUnixMs":100,"eventType":"vm.update","resourceKey":"vm/v1","body":{"cpu":1}}"#.to_vec(),
+        };
+        let newer = controller_proto::ReplicationEvent {
+            event_id: 2,
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v1".to_string(),
+            payload: br#"{"opId":"op-2","controllerId":"ctrl-b","logicalTsUnixMs":200,"eventType":"vm.update","resourceKey":"vm/v1","body":{"cpu":2}}"#.to_vec(),
+        };
+        apply_replication_event(&db, &newer).expect("apply newer");
+        apply_replication_event(&db, &older).expect("apply older");
+        let head = db
+            .get_replication_resource_head("vm/v1")
+            .expect("get head")
+            .expect("head exists");
+        assert_eq!(head.last_op_id, "op-2");
+        assert_eq!(head.last_logical_ts_unix_ms, 200);
     }
 }
