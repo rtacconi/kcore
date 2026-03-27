@@ -71,6 +71,10 @@ This is a form of lightweight formal verification. Every `cargo build` is a proo
 - Failure scenarios during `nixos-rebuild switch`
 - Scheduler placement and node lifecycle transitions
 
+For the HA-specific replication and datacenter plan that will be modeled with TLA+, see:
+
+- `docs/ha-crdt-replication.md`
+
 ### Prusti and Creusot (deductive verification)
 
 These tools add pre/post-conditions and loop invariants to Rust code and verify them statically. Prusti translates to Viper, Creusot to Why3.

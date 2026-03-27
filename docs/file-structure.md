@@ -96,6 +96,7 @@ kcore-rust/
 │
 └── docs/
     ├── Architecture.md              high-level flow diagrams (Mermaid) and component responsibilities
+    ├── ha-crdt-replication.md       HA design plan for multi-controller replication, fallback, and DC topology
     ├── networking.md                VM network model, examples, and operational guidance
     ├── migrations.md                DB/API migration notes and rollout guidance
     ├── heartbeat.md                 controller/node heartbeat behavior and liveness semantics
@@ -236,6 +237,7 @@ For each file: purpose + where it is used in runtime/operator flows.
 ### Documentation
 
 - `docs/Architecture.md` — architecture narrative; explains control/data-plane boundaries and component interaction patterns.
+- `docs/ha-crdt-replication.md` — HA architecture plan; defines DC defaults, hybrid CRDT replication, reconciler behavior, failover flows, and TLA+ modeling scope.
 - `docs/networking.md` — operator networking guide; covers network creation, topology examples, and runtime behavior details.
 - `docs/migrations.md` — migration operations guide; tracks schema/API changes and upgrade-safe rollout sequencing.
 - `docs/heartbeat.md` — liveness model documentation; explains heartbeat update rules and stale-node handling semantics.
