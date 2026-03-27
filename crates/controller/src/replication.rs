@@ -15,6 +15,7 @@ const DEFAULT_PAGE_SIZE: i32 = 500;
 const MAX_PAGE_SIZE: i32 = 5_000;
 const ERROR_BACKOFF_SECS: u64 = 5;
 const IDLE_POLL_SECS: u64 = 2;
+const COMPENSATION_IDLE_SECS: u64 = 2;
 
 pub fn spawn_replication_pollers(
     db: Database,
@@ -52,6 +53,21 @@ pub fn spawn_replication_pollers(
             replication_peer_loop(db, &peer, &local_controller_id, tls).await;
         });
     }
+}
+
+pub fn spawn_compensation_executor(db: Database) {
+    tokio::spawn(async move {
+        loop {
+            match process_compensation_once(&db) {
+                Ok(true) => continue,
+                Ok(false) => tokio::time::sleep(Duration::from_secs(COMPENSATION_IDLE_SECS)).await,
+                Err(e) => {
+                    warn!(error = %e, "compensation executor loop failed");
+                    tokio::time::sleep(Duration::from_secs(ERROR_BACKOFF_SECS)).await;
+                }
+            }
+        }
+    });
 }
 
 async fn replication_peer_loop(
@@ -242,15 +258,35 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
                 loser_state, existing.last_op_id, op_id
             )
         };
-        let _ = db.insert_replication_conflict_with_resolved(
+        let loser_state = if replace_head {
+            loser_terminal_state(
+                parse_validity_class(Some(&existing.last_validity)),
+                parse_safety_class(Some(&existing.last_safety_class)),
+            )
+        } else {
+            loser_terminal_state(validity, safety_class)
+        };
+        let challenger_is_loser = !replace_head;
+        let loser_op_id = if challenger_is_loser {
+            op_id
+        } else {
+            existing.last_op_id.as_str()
+        };
+        let conflict_id = db
+            .insert_replication_conflict_with_resolved(
             payload_resource_key,
             &existing.last_op_id,
             op_id,
             &existing.last_controller_id,
             origin_controller_id,
             &reason,
-            true,
-        );
+            loser_state != crate::replication_policy::ReconcileTerminalState::AutoCompensated,
+        )
+        .map_err(|e| format!("insert conflict for event {}: {e}", event.event_id))?;
+        if loser_state == crate::replication_policy::ReconcileTerminalState::AutoCompensated {
+            db.insert_compensation_job(conflict_id, payload_resource_key, loser_op_id)
+                .map_err(|e| format!("insert compensation job for event {}: {e}", event.event_id))?;
+        }
     }
 
     if replace_head {
@@ -302,6 +338,37 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
             Ok(())
         }
     }
+}
+
+fn process_compensation_once(db: &Database) -> Result<bool, String> {
+    let Some(job) = db
+        .claim_next_compensation_job()
+        .map_err(|e| format!("claim compensation job: {e}"))?
+    else {
+        return Ok(false);
+    };
+
+    let result: Result<(), String> = (|| {
+        // Skeleton executor: deterministic no-op compensation hook.
+        // Future steps can map `job.resource_key` and `job.loser_op_id` to concrete rollback actions.
+        db.resolve_replication_conflict(job.conflict_id)
+            .map_err(|e| format!("resolve conflict {}: {e}", job.conflict_id))?;
+        db.complete_compensation_job(job.id)
+            .map_err(|e| format!("complete job {}: {e}", job.id))?;
+        info!(
+            conflict_id = job.conflict_id,
+            resource_key = %job.resource_key,
+            loser_op_id = %job.loser_op_id,
+            "completed compensation job"
+        );
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        let _ = db.fail_compensation_job(job.id, &e);
+        return Err(e);
+    }
+    Ok(true)
 }
 
 fn should_replace_head(
@@ -484,6 +551,39 @@ mod tests {
         };
         apply_replication_event(&db, &first).expect("first");
         apply_replication_event(&db, &second).expect("second");
+        assert_eq!(
+            db.count_unresolved_replication_conflicts()
+                .expect("count conflicts"),
+            0
+        );
+    }
+
+    #[test]
+    fn apply_replication_event_creates_compensation_job_for_unsafe_loser() {
+        let db = Database::open(":memory:").expect("open db");
+        let winner = controller_proto::ReplicationEvent {
+            event_id: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v3".to_string(),
+            payload: br#"{"opId":"op-w","controllerId":"ctrl-a","logicalTsUnixMs":600,"eventType":"vm.update","resourceKey":"vm/v3","safetyClass":"safe","body":{"cpu":1}}"#.to_vec(),
+        };
+        let unsafe_loser = controller_proto::ReplicationEvent {
+            event_id: 2,
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v3".to_string(),
+            payload: br#"{"opId":"op-l","controllerId":"ctrl-b","logicalTsUnixMs":500,"eventType":"vm.update","resourceKey":"vm/v3","safetyClass":"unsafe","body":{"cpu":8}}"#.to_vec(),
+        };
+        apply_replication_event(&db, &winner).expect("winner");
+        apply_replication_event(&db, &unsafe_loser).expect("loser");
+        assert_eq!(
+            db.count_unresolved_replication_conflicts()
+                .expect("count conflicts"),
+            1
+        );
+        assert_eq!(db.count_pending_compensation_jobs().expect("pending jobs"), 1);
+        process_compensation_once(&db).expect("process one");
         assert_eq!(
             db.count_unresolved_replication_conflicts()
                 .expect("count conflicts"),

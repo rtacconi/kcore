@@ -263,6 +263,7 @@ Status (incremental):
 - Apply path now maintains `replication_resource_heads` using deterministic LWW ordering (`logicalTsUnixMs`, then `controllerId`, then `opId`) as a merge foundation before full domain materialization.
 - Equal-timestamp cross-controller contenders are now logged into `replication_conflicts`; `GetReplicationStatus` reports an `unresolved_conflicts` count for operator visibility.
 - Deterministic zero-manual arbitration model is documented in `docs/zero-external-resolution-algorithm.md`.
+- Controller now runs a compensation executor skeleton: `auto_compensated` losers enqueue jobs in `replication_compensation_jobs`, and a background worker closes those conflicts without manual intervention.
 
 ### Phase 4: conflict UX and operator tools
 
