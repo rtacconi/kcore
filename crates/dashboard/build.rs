@@ -6,7 +6,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_server(false)
         .build_client(true)
-        .compile_protos(std::slice::from_ref(&controller_proto), std::slice::from_ref(&proto_dir))?;
+        .compile_protos(
+            std::slice::from_ref(&controller_proto),
+            std::slice::from_ref(&proto_dir),
+        )?;
 
     println!("cargo:rerun-if-changed={}", controller_proto.display());
     Ok(())

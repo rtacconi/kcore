@@ -1,7 +1,5 @@
 use crate::api::{get_compliance_dto, list_networks_dto, list_vms_page};
-use crate::dto::{
-    ComplianceDto, NetworkRowDto, NodeSummaryDto, VmRowDto, VmsPageDto,
-};
+use crate::dto::{ComplianceDto, NetworkRowDto, NodeSummaryDto, VmRowDto, VmsPageDto};
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
 use leptos_router::{
@@ -119,7 +117,11 @@ fn CompliancePage() -> impl IntoView {
 fn compliance_view(data: ComplianceDto) -> impl IntoView {
     let nodes = data.nodes.clone();
     let has_nodes = !nodes.is_empty();
-    let mtls = if data.mtls_enabled { "enabled" } else { "disabled" };
+    let mtls = if data.mtls_enabled {
+        "enabled"
+    } else {
+        "disabled"
+    };
     let subca = if data.sub_ca_enabled {
         "enabled"
     } else {

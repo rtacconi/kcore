@@ -48,7 +48,12 @@ impl<T> PageView<T> {
 }
 
 /// 1-based page, stable ordering by VM name.
-pub fn paginate_by_name<T: Clone>(mut items: Vec<T>, sort_key: impl Fn(&T) -> String, page: u32, page_size: usize) -> PageView<T> {
+pub fn paginate_by_name<T: Clone>(
+    mut items: Vec<T>,
+    sort_key: impl Fn(&T) -> String,
+    page: u32,
+    page_size: usize,
+) -> PageView<T> {
     let total = items.len();
     items.sort_by_key(|a| sort_key(a));
     let page = page.max(1);

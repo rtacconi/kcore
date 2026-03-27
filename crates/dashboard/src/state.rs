@@ -11,6 +11,7 @@ pub fn set_dashboard_config(cfg: DashboardConfig) -> Result<(), DashboardConfig>
 }
 
 pub fn dashboard_config() -> &'static DashboardConfig {
-    CFG.get()
-        .expect("kcore-dashboard: configuration not initialized (call set_dashboard_config from main)")
+    CFG.get().expect(
+        "kcore-dashboard: configuration not initialized (call set_dashboard_config from main)",
+    )
 }

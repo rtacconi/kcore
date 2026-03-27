@@ -28,12 +28,7 @@ impl DashboardConfig {
             .unwrap_or_else(|_| DEFAULT_ADDR.to_string());
 
         let insecure = std::env::var(ENV_INSECURE)
-            .map(|v| {
-                matches!(
-                    v.to_ascii_lowercase().as_str(),
-                    "1" | "true" | "yes"
-                )
-            })
+            .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
             .unwrap_or(false);
 
         let ca = std::env::var(ENV_CA).ok().map(PathBuf::from);
@@ -72,24 +67,15 @@ impl DashboardConfig {
 
     /// Load PEM files for tonic TLS setup.
     pub fn tls_pem_strings(&self) -> Result<(String, String, String)> {
-        let ca = self
-            .ca
-            .as_ref()
-            .context("missing CA path")?;
-        let cert = self
-            .cert
-            .as_ref()
-            .context("missing cert path")?;
-        let key = self
-            .key
-            .as_ref()
-            .context("missing key path")?;
-        let ca_pem = std::fs::read_to_string(ca)
-            .with_context(|| format!("reading {}", ca.display()))?;
-        let cert_pem = std::fs::read_to_string(cert)
-            .with_context(|| format!("reading {}", cert.display()))?;
-        let key_pem = std::fs::read_to_string(key)
-            .with_context(|| format!("reading {}", key.display()))?;
+        let ca = self.ca.as_ref().context("missing CA path")?;
+        let cert = self.cert.as_ref().context("missing cert path")?;
+        let key = self.key.as_ref().context("missing key path")?;
+        let ca_pem =
+            std::fs::read_to_string(ca).with_context(|| format!("reading {}", ca.display()))?;
+        let cert_pem =
+            std::fs::read_to_string(cert).with_context(|| format!("reading {}", cert.display()))?;
+        let key_pem =
+            std::fs::read_to_string(key).with_context(|| format!("reading {}", key.display()))?;
         Ok((ca_pem, cert_pem, key_pem))
     }
 }

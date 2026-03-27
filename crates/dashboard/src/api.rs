@@ -30,6 +30,8 @@ pub async fn list_vms_page(page: u32) -> Result<VmsPageDto, ServerFnError> {
 #[server(ListNetworks, "/api")]
 pub async fn list_networks_dto() -> Result<Vec<NetworkRowDto>, ServerFnError> {
     let cfg = dashboard_config();
-    let nets = controller_client::list_networks(cfg).await.map_err(map_err)?;
+    let nets = controller_client::list_networks(cfg)
+        .await
+        .map_err(map_err)?;
     Ok(networks_from_proto(nets))
 }

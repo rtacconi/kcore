@@ -25,9 +25,11 @@ async fn main() -> anyhow::Result<()> {
         "controller connection: set KCORE_CONTROLLER (or CONTROLLER_ADDR), \
          KCORE_CA_FILE, KCORE_CERT_FILE, KCORE_KEY_FILE, or KCORE_INSECURE=1 for plaintext",
     )?;
-    set_dashboard_config(cfg).map_err(|_| anyhow::anyhow!("dashboard config already initialized"))?;
+    set_dashboard_config(cfg)
+        .map_err(|_| anyhow::anyhow!("dashboard config already initialized"))?;
 
-    let conf = get_configuration(None).context("Leptos configuration (see package.metadata.leptos)")?;
+    let conf =
+        get_configuration(None).context("Leptos configuration (see package.metadata.leptos)")?;
     let leptos_options = conf.leptos_options;
     let addr = leptos_options.site_addr;
     let routes = generate_route_list(App);

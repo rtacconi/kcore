@@ -49,8 +49,7 @@ pub async fn get_compliance(
     cfg: &DashboardConfig,
 ) -> Result<controller_proto::GetComplianceReportResponse> {
     let channel = connect_channel(cfg).await?;
-    let mut client =
-        controller_proto::controller_client::ControllerClient::new(channel);
+    let mut client = controller_proto::controller_client::ControllerClient::new(channel);
     let resp = client
         .get_compliance_report(controller_proto::GetComplianceReportRequest {})
         .await
@@ -60,8 +59,7 @@ pub async fn get_compliance(
 
 pub async fn list_vms(cfg: &DashboardConfig) -> Result<Vec<controller_proto::VmInfo>> {
     let channel = connect_channel(cfg).await?;
-    let mut client =
-        controller_proto::controller_client::ControllerClient::new(channel);
+    let mut client = controller_proto::controller_client::ControllerClient::new(channel);
     let resp = client
         .list_vms(controller_proto::ListVmsRequest {
             target_node: String::new(),
@@ -71,12 +69,9 @@ pub async fn list_vms(cfg: &DashboardConfig) -> Result<Vec<controller_proto::VmI
     Ok(resp.into_inner().vms)
 }
 
-pub async fn list_networks(
-    cfg: &DashboardConfig,
-) -> Result<Vec<controller_proto::NetworkInfo>> {
+pub async fn list_networks(cfg: &DashboardConfig) -> Result<Vec<controller_proto::NetworkInfo>> {
     let channel = connect_channel(cfg).await?;
-    let mut client =
-        controller_proto::controller_client::ControllerClient::new(channel);
+    let mut client = controller_proto::controller_client::ControllerClient::new(channel);
     let resp = client
         .list_networks(controller_proto::ListNetworksRequest {
             target_node: String::new(),

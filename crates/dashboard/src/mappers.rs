@@ -52,10 +52,7 @@ pub fn compliance_from_proto(r: controller_proto::GetComplianceReportResponse) -
     }
 }
 
-pub fn vms_page_from_proto(
-    vms: Vec<controller_proto::VmInfo>,
-    page: u32,
-) -> VmsPageDto {
+pub fn vms_page_from_proto(vms: Vec<controller_proto::VmInfo>, page: u32) -> VmsPageDto {
     let rows: Vec<VmRowDto> = vms
         .into_iter()
         .map(|v| VmRowDto {
