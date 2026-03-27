@@ -657,6 +657,7 @@ fn same_endpoint(a: &str, b: &str) -> bool {
 mod tests {
     use super::*;
     use crate::db::{NodeRow, VmRow};
+    use std::{env, fs};
 
     fn test_node(id: &str) -> NodeRow {
         NodeRow {
@@ -885,5 +886,93 @@ mod tests {
             .expect("reservation read")
             .expect("reservation row");
         assert_eq!(reservation.status, "failed");
+    }
+
+    #[test]
+    fn export_replication_trace_fixture() {
+        let Ok(output_path) = env::var("KCORE_REPLICATION_TRACE_OUT") else {
+            return;
+        };
+
+        let db = Database::open(":memory:").expect("open db");
+        let events = vec![
+            (
+                controller_proto::ReplicationEvent {
+                    event_id: 1,
+                    created_at: "2026-01-01T00:00:00Z".to_string(),
+                    event_type: "vm.update".to_string(),
+                    resource_key: "vm/v-trace".to_string(),
+                    payload: br#"{"opId":"op-trace-a","controllerId":"ctrl-a","logicalTsUnixMs":1000,"eventType":"vm.update","resourceKey":"vm/v-trace","safetyClass":"safe","body":{"cpu":1}}"#.to_vec(),
+                },
+                100,
+            ),
+            (
+                controller_proto::ReplicationEvent {
+                    event_id: 2,
+                    created_at: "2026-01-01T00:00:01Z".to_string(),
+                    event_type: "vm.update".to_string(),
+                    resource_key: "vm/v-trace".to_string(),
+                    payload: br#"{"opId":"op-trace-b","controllerId":"ctrl-b","logicalTsUnixMs":900,"eventType":"vm.update","resourceKey":"vm/v-trace","safetyClass":"unsafe","body":{"cpu":2}}"#.to_vec(),
+                },
+                50,
+            ),
+            (
+                controller_proto::ReplicationEvent {
+                    event_id: 3,
+                    created_at: "2026-01-01T00:00:02Z".to_string(),
+                    event_type: "vm.update".to_string(),
+                    resource_key: "vm/v-trace-2".to_string(),
+                    payload: br#"{"opId":"op-trace-c","controllerId":"ctrl-c","logicalTsUnixMs":2000,"eventType":"vm.update","resourceKey":"vm/v-trace-2","safetyClass":"safe","body":{"cpu":4}}"#.to_vec(),
+                },
+                200,
+            ),
+        ];
+
+        let mut trace_rows = Vec::new();
+        for (event, rank) in events {
+            let payload: Value = serde_json::from_slice(&event.payload).expect("payload json");
+            let op_id = payload
+                .get("opId")
+                .and_then(Value::as_str)
+                .expect("opId")
+                .to_string();
+            let resource_key = payload
+                .get("resourceKey")
+                .and_then(Value::as_str)
+                .expect("resourceKey")
+                .to_string();
+            apply_replication_event(&db, &event).expect("apply event");
+            let winner = db
+                .get_replication_resource_head(&resource_key)
+                .expect("read head")
+                .map(|h| h.last_op_id)
+                .unwrap_or_else(|| op_id.clone());
+            let terminal_state = if winner == op_id {
+                "auto_accepted"
+            } else if payload
+                .get("safetyClass")
+                .and_then(Value::as_str)
+                .unwrap_or("safe")
+                == "unsafe"
+            {
+                "auto_compensated"
+            } else {
+                "auto_rejected"
+            };
+            trace_rows.push(serde_json::json!({
+                "resource_key": resource_key,
+                "op_id": op_id,
+                "rank": rank,
+                "terminal_state": terminal_state,
+                "expected_winner_op_id": winner,
+            }));
+        }
+
+        let as_json = serde_json::to_vec_pretty(&trace_rows).expect("serialize trace");
+        let output = std::path::Path::new(&output_path);
+        if let Some(parent) = output.parent() {
+            fs::create_dir_all(parent).expect("create trace parent");
+        }
+        fs::write(output, as_json).expect("write trace");
     }
 }

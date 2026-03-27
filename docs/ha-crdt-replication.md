@@ -295,3 +295,4 @@ Status (incremental):
 - `CrossDcReplication.tla` now models explicit intra-DC vs cross-DC anti-entropy and checks bounded cross-DC convergence/no-double-apply safety.
 - Trace drift validation now includes both positive and negative fixtures (expected pass and expected fail) via `scripts/test-replication-trace.sh`, reducing silent checker regressions.
 - CI now includes a formal checks workflow (`.github/workflows/formal-checks.yml`) that enforces trace drift checks and runs TLC model checks when available.
+- The trace gate now consumes a generated artifact emitted from a Rust replication test (`replication::tests::export_replication_trace_fixture`) in addition to static fixtures, reducing model-vs-implementation drift risk.

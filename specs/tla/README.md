@@ -51,6 +51,9 @@ the same deterministic winner and auto-terminal assumptions used in the TLA mode
 make test-tla-trace
 ```
 
+The trace harness now also generates a fixture from a Rust replication unit test
+(`replication::tests::export_replication_trace_fixture`) before validating it.
+
 Sample fixture:
 
 - `specs/tla/traces/replication-sample.json`

@@ -17,6 +17,14 @@ jobs:
         with:
           python-version: "3.x"
 
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
       - name: Run replication trace drift checks
         run: make test-tla-trace
 
