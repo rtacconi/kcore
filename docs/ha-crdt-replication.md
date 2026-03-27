@@ -294,3 +294,4 @@ Status (incremental):
 - A trace drift checker now exists (`make test-tla-trace`) to validate sampled replication traces against deterministic winner and auto-terminal assumptions used by the formal model.
 - `CrossDcReplication.tla` now models explicit intra-DC vs cross-DC anti-entropy and checks bounded cross-DC convergence/no-double-apply safety.
 - Trace drift validation now includes both positive and negative fixtures (expected pass and expected fail) via `scripts/test-replication-trace.sh`, reducing silent checker regressions.
+- CI now includes a formal checks workflow (`.github/workflows/formal-checks.yml`) that enforces trace drift checks and runs TLC model checks when available.

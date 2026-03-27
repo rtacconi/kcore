@@ -1,0 +1,47 @@
+name: formal-checks
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  trace-and-tla:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Run replication trace drift checks
+        run: make test-tla-trace
+
+      - name: Install Java (for TLC fallback)
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "21"
+
+      - name: Attempt bounded TLC checks (best effort)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v tlc >/dev/null 2>&1; then
+            make test-tla
+            exit 0
+          fi
+          if [[ ! -f ./tools/tla2tools.jar ]]; then
+            mkdir -p ./tools
+            curl -fsSL \
+              https://github.com/tlaplus/tlaplus/releases/latest/download/tla2tools.jar \
+              -o ./tools/tla2tools.jar || true
+          fi
+          if [[ -f ./tools/tla2tools.jar ]]; then
+            TLA2TOOLS_JAR=./tools/tla2tools.jar make test-tla
+          else
+            echo "TLC unavailable; skipping make test-tla (trace checks already enforced)."
+          fi
