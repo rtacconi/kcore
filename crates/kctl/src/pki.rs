@@ -184,6 +184,48 @@ pub fn create_cluster_pki(
     Ok(paths)
 }
 
+/// Re-sign the controller certificate with a new host SAN, using the existing CA.
+///
+/// This overwrites `controller.crt` and `controller.key` in `certs_dir`.
+/// The CA and kctl certificates are left untouched.
+pub fn rotate_controller_cert(certs_dir: &Path, new_controller_host: &str) -> Result<(), String> {
+    let ca_cert_path = certs_dir.join("ca.crt");
+    let ca_key_path = certs_dir.join("ca.key");
+
+    for path in [&ca_cert_path, &ca_key_path] {
+        if !path.exists() {
+            return Err(format!(
+                "missing {}, cannot rotate controller cert without the CA",
+                path.display()
+            ));
+        }
+    }
+
+    let ca_cert_pem = std::fs::read_to_string(&ca_cert_path)
+        .map_err(|e| format!("reading {}: {e}", ca_cert_path.display()))?;
+    let ca_key_pem = std::fs::read_to_string(&ca_key_path)
+        .map_err(|e| format!("reading {}: {e}", ca_key_path.display()))?;
+
+    let (controller_cert_pem, controller_key_pem) = sign_cert(
+        Some(new_controller_host),
+        "kcore-controller",
+        vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ],
+        &ca_cert_pem,
+        &ca_key_pem,
+    )?;
+
+    let controller_cert_path = certs_dir.join("controller.crt");
+    let controller_key_path = certs_dir.join("controller.key");
+
+    write_file(&controller_cert_path, &controller_cert_pem, 0o644)?;
+    write_file(&controller_key_path, &controller_key_pem, 0o600)?;
+
+    Ok(())
+}
+
 /// Load PKI material for a node install.
 ///
 /// The CA key is read locally to sign the node certificate but is never sent
@@ -321,5 +363,40 @@ mod tests {
             !payload.controller_key_pem.is_empty(),
             "controller key should be sent when node co-locates controller"
         );
+    }
+
+    #[test]
+    fn rotate_controller_cert_replaces_cert_and_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "10.0.0.1", false).expect("create pki");
+
+        let original_cert =
+            std::fs::read_to_string(certs.join("controller.crt")).expect("read cert");
+        let original_ca = std::fs::read_to_string(certs.join("ca.crt")).expect("read ca");
+        let original_kctl = std::fs::read_to_string(certs.join("kctl.crt")).expect("read kctl");
+
+        rotate_controller_cert(&certs, "192.168.1.100").expect("rotate");
+
+        let new_cert =
+            std::fs::read_to_string(certs.join("controller.crt")).expect("read new cert");
+        let new_ca = std::fs::read_to_string(certs.join("ca.crt")).expect("read ca after");
+        let new_kctl =
+            std::fs::read_to_string(certs.join("kctl.crt")).expect("read kctl after");
+
+        assert_ne!(original_cert, new_cert, "controller cert should change");
+        assert_eq!(original_ca, new_ca, "CA cert should be unchanged");
+        assert_eq!(original_kctl, new_kctl, "kctl cert should be unchanged");
+    }
+
+    #[test]
+    fn rotate_controller_cert_fails_without_ca() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("no-ca");
+        std::fs::create_dir_all(&certs).expect("mkdir");
+
+        let result = rotate_controller_cert(&certs, "10.0.0.1");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("missing"));
     }
 }

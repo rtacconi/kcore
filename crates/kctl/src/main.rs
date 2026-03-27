@@ -92,6 +92,11 @@ enum Command {
         #[command(subcommand)]
         resource: DrainResource,
     },
+    /// Rotate certificates
+    Rotate {
+        #[command(subcommand)]
+        resource: RotateResource,
+    },
     /// Apply a NixOS configuration to the controller
     Apply {
         /// Path to the NixOS configuration file
@@ -103,6 +108,19 @@ enum Command {
     },
     /// Show version
     Version,
+}
+
+#[derive(Subcommand)]
+enum RotateResource {
+    /// Rotate controller TLS certificate with a new address SAN
+    Certs {
+        /// New controller address (host:port) for the certificate SAN
+        #[arg(long)]
+        controller: String,
+        /// Certificate directory (defaults to active context's cert dir)
+        #[arg(long)]
+        certs_dir: Option<PathBuf>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -814,6 +832,25 @@ async fn main() {
                 }
                 Err(e) => Err(anyhow::anyhow!("drain failed: {e}")),
             }
+        }
+
+        Command::Rotate {
+            resource: RotateResource::Certs {
+                controller,
+                certs_dir,
+            },
+        } => {
+            let certs_path = if let Some(dir) = certs_dir {
+                dir.clone()
+            } else {
+                let config_path = cli
+                    .config
+                    .clone()
+                    .unwrap_or_else(config::default_config_path);
+                config::resolve_install_certs_dir(&config_path)
+                    .unwrap_or_else(|e| fatal(&e))
+            };
+            commands::certs::rotate(&certs_path, controller)
         }
 
         Command::Apply { file, dry_run } => {
