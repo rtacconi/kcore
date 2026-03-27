@@ -101,11 +101,12 @@ async fn main() -> anyhow::Result<()> {
         .set_serving::<proto::node_compute_server::NodeComputeServer<grpc::ComputeService>>()
         .await;
 
-    if !cfg.controller_addr.is_empty() {
+    if !cfg.controller_endpoints().is_empty() {
         let reg_cfg = cfg.clone();
         tokio::spawn(async move {
             registration::register_with_controller(&reg_cfg).await;
         });
+        registration::start_heartbeat_loop(cfg.clone());
         registration::start_cert_renewal_loop(cfg.clone());
     }
 

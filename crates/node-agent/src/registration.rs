@@ -9,6 +9,7 @@ use crate::controller_proto;
 const DISABLE_VXLAN_MARKER: &str = "/etc/kcore/disable-vxlan";
 const REGISTRATION_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(5);
 const MAX_REGISTRATION_RETRIES: u32 = 12;
+const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 const RENEWAL_THRESHOLD_DAYS: i64 = 30;
 const RENEWAL_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(86400);
 
@@ -53,48 +54,56 @@ pub async fn register_with_controller(cfg: &Config) {
         }
     };
 
-    let endpoint = if cfg.controller_addr.contains("://") {
-        cfg.controller_addr.clone()
-    } else {
-        format!("https://{}", cfg.controller_addr)
-    };
+    let endpoints = controller_endpoints(cfg);
+    if endpoints.is_empty() {
+        return;
+    }
 
     for attempt in 1..=MAX_REGISTRATION_RETRIES {
-        match connect_and_register(
-            cfg,
-            &endpoint,
-            &hostname,
-            cpu_cores,
-            memory_bytes,
-            storage_backend,
-            disable_vxlan,
-        )
-        .await
-        {
-            Ok(()) => {
-                info!(
-                    controller = %cfg.controller_addr,
-                    node_id = %cfg.node_id,
-                    disable_vxlan,
-                    "registered with controller"
-                );
-                return;
-            }
-            Err(e) => {
-                warn!(
-                    attempt,
-                    max = MAX_REGISTRATION_RETRIES,
-                    error = %e,
-                    "registration attempt failed, retrying"
-                );
-                if attempt < MAX_REGISTRATION_RETRIES {
-                    tokio::time::sleep(REGISTRATION_RETRY_DELAY).await;
+        let mut registered = false;
+        for endpoint in &endpoints {
+            match connect_and_register(
+                cfg,
+                endpoint,
+                &hostname,
+                cpu_cores,
+                memory_bytes,
+                storage_backend,
+                disable_vxlan,
+            )
+            .await
+            {
+                Ok(()) => {
+                    info!(
+                        controller = %endpoint,
+                        node_id = %cfg.node_id,
+                        dc_id = %cfg.dc_id,
+                        disable_vxlan,
+                        "registered with controller"
+                    );
+                    registered = true;
+                    break;
+                }
+                Err(e) => {
+                    warn!(
+                        endpoint = %endpoint,
+                        attempt,
+                        max = MAX_REGISTRATION_RETRIES,
+                        error = %e,
+                        "registration attempt failed on controller endpoint"
+                    );
                 }
             }
         }
+        if registered {
+            return;
+        }
+        if attempt < MAX_REGISTRATION_RETRIES {
+            tokio::time::sleep(REGISTRATION_RETRY_DELAY).await;
+        }
     }
     error!(
-        controller = %cfg.controller_addr,
+        endpoints = ?endpoints,
         "failed to register after {} attempts; node may need manual registration",
         MAX_REGISTRATION_RETRIES
     );
@@ -140,6 +149,8 @@ async fn connect_and_register(
 
     let mut client =
         controller_proto::controller_client::ControllerClient::new(channel);
+    let mut labels = Vec::new();
+    labels.push(format!("dc={}", cfg.dc_id.trim()));
     client
         .register_node(controller_proto::RegisterNodeRequest {
             node_id: cfg.node_id.clone(),
@@ -149,7 +160,7 @@ async fn connect_and_register(
                 cpu_cores,
                 memory_bytes,
             }),
-            labels: Vec::new(),
+            labels,
             storage_backend,
             disable_vxlan,
             cert_expiry_days: cert_expiry,
@@ -192,6 +203,60 @@ pub fn start_cert_renewal_loop(cfg: Config) {
     });
 }
 
+pub fn start_heartbeat_loop(cfg: Config) {
+    tokio::spawn(async move {
+        loop {
+            if let Err(e) = send_heartbeat_once(&cfg).await {
+                warn!(error = %e, "heartbeat failed on all controller endpoints");
+            }
+            tokio::time::sleep(HEARTBEAT_INTERVAL).await;
+        }
+    });
+}
+
+async fn send_heartbeat_once(
+    cfg: &Config,
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let cert_expiry_days = cfg
+        .tls
+        .as_ref()
+        .and_then(|tls| std::fs::read_to_string(&tls.cert_file).ok())
+        .and_then(|pem| cert_days_remaining(&pem).ok())
+        .unwrap_or(-1) as i32;
+    let endpoints = controller_endpoints(cfg);
+    if endpoints.is_empty() {
+        return Ok(());
+    }
+    let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
+    for endpoint in &endpoints {
+        let channel = match connect_channel(cfg, endpoint).await {
+            Ok(c) => c,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+        let mut client = controller_proto::controller_client::ControllerClient::new(channel);
+        match client
+            .heartbeat(controller_proto::HeartbeatRequest {
+                node_id: cfg.node_id.clone(),
+                usage: Some(controller_proto::NodeUsage {
+                    cpu_cores_used: 0,
+                    memory_bytes_used: 0,
+                }),
+                cert_expiry_days,
+            })
+            .await
+        {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                last_err = Some(Box::new(e));
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| Box::new(std::io::Error::other("heartbeat failed"))))
+}
+
 async fn check_and_renew_cert(
     cfg: &Config,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -216,34 +281,42 @@ async fn check_and_renew_cert(
         "certificate expires soon, requesting renewal"
     );
 
-    let endpoint = if cfg.controller_addr.contains("://") {
-        cfg.controller_addr.clone()
+    let mut resp_opt = None;
+    let mut last_err: Option<Box<dyn std::error::Error + Send + Sync>> = None;
+    for endpoint in controller_endpoints(cfg) {
+        let channel = match connect_channel(cfg, &endpoint).await {
+            Ok(c) => c,
+            Err(e) => {
+                last_err = Some(e);
+                continue;
+            }
+        };
+
+        let mut client = controller_proto::controller_client::ControllerClient::new(channel);
+        match client
+            .renew_node_cert(controller_proto::RenewNodeCertRequest {
+                node_id: cfg.node_id.clone(),
+            })
+            .await
+        {
+            Ok(resp) => {
+                resp_opt = Some(resp.into_inner());
+                break;
+            }
+            Err(e) => {
+                last_err = Some(Box::new(e));
+            }
+        }
+    }
+    let resp = if let Some(resp) = resp_opt {
+        resp
     } else {
-        format!("https://{}", cfg.controller_addr)
+        return Err(last_err.unwrap_or_else(|| {
+            Box::new(std::io::Error::other(
+                "cert renewal failed on all controller endpoints",
+            ))
+        }));
     };
-
-    let ca_pem = std::fs::read_to_string(&tls.ca_file)?;
-    let key_pem = std::fs::read_to_string(&tls.key_file)?;
-    let domain = endpoint_host(&endpoint)
-        .unwrap_or("localhost")
-        .to_string();
-    let tls_config = ClientTlsConfig::new()
-        .ca_certificate(Certificate::from_pem(&ca_pem))
-        .identity(Identity::from_pem(&cert_pem, &key_pem))
-        .domain_name(domain);
-    let channel = Channel::from_shared(endpoint)?
-        .tls_config(tls_config)?
-        .connect()
-        .await?;
-
-    let mut client =
-        controller_proto::controller_client::ControllerClient::new(channel);
-    let resp = client
-        .renew_node_cert(controller_proto::RenewNodeCertRequest {
-            node_id: cfg.node_id.clone(),
-        })
-        .await?
-        .into_inner();
 
     if !resp.success {
         return Err(format!("controller rejected renewal: {}", resp.message).into());
@@ -300,6 +373,43 @@ fn endpoint_host(endpoint: &str) -> Option<&str> {
         .or(Some(without_scheme))
 }
 
+fn controller_endpoints(cfg: &Config) -> Vec<String> {
+    cfg.controller_endpoints()
+        .into_iter()
+        .map(|addr| {
+            if addr.contains("://") {
+                addr
+            } else {
+                format!("https://{addr}")
+            }
+        })
+        .collect()
+}
+
+async fn connect_channel(
+    cfg: &Config,
+    endpoint: &str,
+) -> Result<Channel, Box<dyn std::error::Error + Send + Sync>> {
+    if let Some(tls) = cfg.tls.as_ref() {
+        let ca_pem = std::fs::read_to_string(&tls.ca_file)?;
+        let cert_pem = std::fs::read_to_string(&tls.cert_file)?;
+        let key_pem = std::fs::read_to_string(&tls.key_file)?;
+        let domain = endpoint_host(endpoint).unwrap_or("localhost").to_string();
+        let tls_config = ClientTlsConfig::new()
+            .ca_certificate(Certificate::from_pem(ca_pem))
+            .identity(Identity::from_pem(cert_pem, key_pem))
+            .domain_name(domain);
+        Ok(Channel::from_shared(endpoint.to_string())?
+            .tls_config(tls_config)?
+            .connect()
+            .await?)
+    } else {
+        Ok(Channel::from_shared(endpoint.to_string())?
+            .connect()
+            .await?)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,6 +439,23 @@ mod tests {
     fn endpoint_host_plain_hostname() {
         assert_eq!(endpoint_host("controller.local:9090"), Some("controller.local"));
         assert_eq!(endpoint_host("https://myhost"), Some("myhost"));
+    }
+
+    #[test]
+    fn controller_endpoints_prefers_list() {
+        let cfg = Config {
+            node_id: "node-1".to_string(),
+            listen_addr: "0.0.0.0:9091".to_string(),
+            controller_addr: "10.0.0.1:9090".to_string(),
+            controllers: vec!["10.0.0.2:9090".to_string(), "10.0.0.3:9090".to_string()],
+            dc_id: "DC1".to_string(),
+            tls: None,
+            vm_socket_dir: "/run/kcore".to_string(),
+            nix_config_path: "/etc/nixos/kcore-vms.nix".to_string(),
+            storage: crate::config::StorageConfig::default(),
+        };
+        let endpoints = super::controller_endpoints(&cfg);
+        assert_eq!(endpoints, vec!["https://10.0.0.2:9090", "https://10.0.0.3:9090"]);
     }
 
     #[test]

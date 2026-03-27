@@ -12,42 +12,66 @@ pub mod node_proto {
 }
 
 pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
-    let scheme = if info.insecure { "http" } else { "https" };
-    let uri = format!("{scheme}://{}", info.address);
+    let addresses = if info.addresses.is_empty() {
+        vec![info.address.clone()]
+    } else {
+        info.addresses.clone()
+    };
+    let mut errors = Vec::new();
+    for address in addresses {
+        let scheme = if info.insecure { "http" } else { "https" };
+        let uri = format!("{scheme}://{}", address);
+        let mut endpoint = Endpoint::from_shared(uri.clone())?;
 
-    let mut endpoint = Endpoint::from_shared(uri)?;
+        if !info.insecure {
+            let ca = info
+                .ca
+                .as_ref()
+                .context("missing CA certificate path for TLS connection")?;
+            let cert = info
+                .cert
+                .as_ref()
+                .context("missing client certificate path for mTLS connection")?;
+            let key = info
+                .key
+                .as_ref()
+                .context("missing client key path for mTLS connection")?;
 
-    if !info.insecure {
-        let ca = info
-            .ca
-            .as_ref()
-            .context("missing CA certificate path for TLS connection")?;
-        let cert = info
-            .cert
-            .as_ref()
-            .context("missing client certificate path for mTLS connection")?;
-        let key = info
-            .key
-            .as_ref()
-            .context("missing client key path for mTLS connection")?;
+            let mut tls = ClientTlsConfig::new();
 
-        let mut tls = ClientTlsConfig::new();
+            let ca_pem =
+                std::fs::read_to_string(ca).with_context(|| format!("reading CA cert {ca}"))?;
+            tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
 
-        let ca_pem =
-            std::fs::read_to_string(ca).with_context(|| format!("reading CA cert {ca}"))?;
-        tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
+            let cert_pem = std::fs::read_to_string(cert)
+                .with_context(|| format!("reading client cert {cert}"))?;
+            let key_pem =
+                std::fs::read_to_string(key).with_context(|| format!("reading client key {key}"))?;
+            tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
+            if let Some(host) = endpoint_host(&address) {
+                tls = tls.domain_name(host.to_string());
+            }
+            endpoint = endpoint.tls_config(tls)?;
+        }
 
-        let cert_pem =
-            std::fs::read_to_string(cert).with_context(|| format!("reading client cert {cert}"))?;
-        let key_pem =
-            std::fs::read_to_string(key).with_context(|| format!("reading client key {key}"))?;
-        tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
-
-        endpoint = endpoint.tls_config(tls)?;
+        match endpoint.connect().await {
+            Ok(channel) => return Ok(channel),
+            Err(e) => errors.push(format!("{address}: {e}")),
+        }
     }
+    anyhow::bail!("failed to connect to any controller endpoint: {}", errors.join(" | "))
+}
 
-    let channel = endpoint.connect().await?;
-    Ok(channel)
+fn endpoint_host(address: &str) -> Option<&str> {
+    if let Some(rest) = address.strip_prefix('[') {
+        if let Some(end_idx) = rest.find(']') {
+            return Some(&rest[..end_idx]);
+        }
+    }
+    address
+        .rsplit_once(':')
+        .map(|(host, _)| host)
+        .or(Some(address))
 }
 
 pub async fn controller_client(
@@ -182,6 +206,7 @@ mod tests {
 
         let info = ConnectionInfo {
             address: addr,
+            addresses: vec![],
             insecure: false,
             cert: Some(certs_dir.join("kctl.crt").display().to_string()),
             key: Some(certs_dir.join("kctl.key").display().to_string()),
@@ -213,6 +238,7 @@ mod tests {
 
         let info = ConnectionInfo {
             address: addr,
+            addresses: vec![],
             insecure: false,
             cert: Some(bad_dir.join("kctl.crt").display().to_string()),
             key: Some(bad_dir.join("kctl.key").display().to_string()),

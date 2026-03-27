@@ -257,14 +257,17 @@ Customers need to demonstrate that data at rest is encrypted.
 
 **Reference NixOS LUKS configuration:**
 
+**Option A — TPM 2.0 sealed key (recommended for servers):**
+
+The LUKS key is sealed to the TPM's Platform Configuration Registers (PCRs). The disk auto-unlocks only on the same machine with the same boot chain. If the disk is removed, the key cannot be recovered.
+
 ```nix
 {
   boot.initrd.luks.devices."cryptroot" = {
     device = "/dev/disk/by-uuid/<PARTITION-UUID>";
     preLVM = true;
-    allowDiscards = true;                    # for SSD TRIM
-    # Optional: FIDO2 hardware token unlock
-    # fido2.credential = "<credential-id>";
+    allowDiscards = true;
+    crypttabExtraOpts = [ "tpm2-device=auto" ];
   };
 
   fileSystems."/" = {
@@ -272,10 +275,67 @@ Customers need to demonstrate that data at rest is encrypted.
     fsType = "ext4";
   };
 
+  boot.initrd.systemd.enable = true;        # required for systemd-cryptenroll TPM2 support
+
   # For FIPS-mode kernel crypto (optional):
   # boot.kernelParams = [ "fips=1" ];
 }
 ```
+
+After the first boot with a passphrase-encrypted disk, enroll the TPM:
+
+```bash
+sudo systemd-cryptenroll /dev/<PARTITION> --tpm2-device=auto --tpm2-pcrs=0+7
+```
+
+PCR 0 (firmware) and PCR 7 (Secure Boot policy) are the recommended bindings. This ensures the disk will not unlock if the firmware or boot chain is tampered with.
+
+**Option B — Passphrase only (development / no TPM):**
+
+```nix
+{
+  boot.initrd.luks.devices."cryptroot" = {
+    device = "/dev/disk/by-uuid/<PARTITION-UUID>";
+    preLVM = true;
+    allowDiscards = true;
+  };
+
+  fileSystems."/" = {
+    device = "/dev/mapper/cryptroot";
+    fsType = "ext4";
+  };
+}
+```
+
+**Option C — FIDO2 hardware token (YubiKey):**
+
+```nix
+{
+  boot.initrd.luks.devices."cryptroot" = {
+    device = "/dev/disk/by-uuid/<PARTITION-UUID>";
+    preLVM = true;
+    allowDiscards = true;
+    fido2.credential = "<credential-id>";
+  };
+
+  fileSystems."/" = {
+    device = "/dev/mapper/cryptroot";
+    fsType = "ext4";
+  };
+}
+```
+
+**LUKS unlock method comparison:**
+
+| Method | Unattended boot | Disk removal protection | Hardware required |
+|--------|----------------|------------------------|-------------------|
+| TPM 2.0 (PCR-sealed) | Yes | Yes — key bound to machine | TPM 2.0 chip |
+| TPM 2.0 + PIN | No (requires PIN) | Yes | TPM 2.0 chip |
+| FIDO2 (YubiKey) | Semi (token must be present) | Yes — key on token | USB security key |
+| Passphrase | No (requires password) | Yes — key in operator's head | None |
+| Tang/Clevis (network-bound) | Yes | Yes — key released only on trusted LAN | Tang server |
+
+For production KCore deployments, **TPM 2.0 with PCR binding (Option A)** is recommended. It provides unattended boot with strong disk-removal protection and requires no operator intervention after initial enrollment.
 
 Customers should apply this to all KCore nodes. The `kctl node install` workflow does not currently automate LUKS setup — the operator must partition and encrypt the disk before running the installer, or use a pre-encrypted NixOS image.
 

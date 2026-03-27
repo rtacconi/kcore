@@ -10,6 +10,10 @@ pub struct Config {
     pub listen_addr: String,
     #[serde(default)]
     pub controller_addr: String,
+    #[serde(default)]
+    pub controllers: Vec<String>,
+    #[serde(default = "default_dc_id")]
+    pub dc_id: String,
     pub tls: Option<TlsConfig>,
     #[serde(default = "default_vm_socket_dir")]
     pub vm_socket_dir: String,
@@ -77,6 +81,10 @@ fn default_vm_socket_dir() -> String {
 
 fn default_nix_config_path() -> String {
     "/etc/nixos/kcore-vms.nix".to_string()
+}
+
+fn default_dc_id() -> String {
+    "DC1".to_string()
 }
 
 fn default_image_cache_dir() -> String {
@@ -152,6 +160,23 @@ impl Config {
         }
         Ok(())
     }
+
+    pub fn controller_endpoints(&self) -> Vec<String> {
+        if !self.controllers.is_empty() {
+            return self
+                .controllers
+                .iter()
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+                .collect();
+        }
+        let single = self.controller_addr.trim();
+        if single.is_empty() {
+            Vec::new()
+        } else {
+            vec![single.to_string()]
+        }
+    }
 }
 
 #[cfg(test)]
@@ -209,5 +234,16 @@ storage:
             .validate()
             .expect_err("should reject missing lvm config");
         assert!(err.to_string().contains("lvm"));
+    }
+
+    #[test]
+    fn defaults_dc_id_to_dc1() {
+        let parsed: Config = serde_yaml::from_str(
+            r#"
+nodeId: node-1
+"#,
+        )
+        .expect("parse");
+        assert_eq!(parsed.dc_id, "DC1");
     }
 }

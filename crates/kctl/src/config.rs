@@ -19,6 +19,8 @@ pub struct Config {
 pub struct Context {
     #[serde(default)]
     pub controller: String,
+    #[serde(default)]
+    pub controllers: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub insecure: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,6 +33,7 @@ pub struct Context {
 
 pub struct ConnectionInfo {
     pub address: String,
+    pub addresses: Vec<String>,
     pub insecure: bool,
     pub cert: Option<String>,
     pub key: Option<String>,
@@ -148,6 +151,13 @@ fn normalize_address(addr: &str, default_port: u16) -> String {
     }
 }
 
+fn normalize_addresses(addrs: &[String], default_port: u16) -> Vec<String> {
+    addrs.iter()
+        .map(|s| normalize_address(s.trim(), default_port))
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 /// Resolve a controller address from CLI flags and config file.
 /// Priority: flag > config > error.
 pub fn resolve_controller(
@@ -168,6 +178,7 @@ pub fn resolve_controller(
         };
         return Ok(ConnectionInfo {
             address: normalize_address(addr, 9090),
+            addresses: vec![normalize_address(addr, 9090)],
             insecure: insecure_flag,
             cert,
             key,
@@ -183,8 +194,23 @@ pub fn resolve_controller(
         )
     })?;
 
+    let addresses = if !ctx.controllers.is_empty() {
+        normalize_addresses(&ctx.controllers, 9090)
+    } else {
+        let normalized = normalize_address(&ctx.controller, 9090);
+        if normalized.is_empty() {
+            Vec::new()
+        } else {
+            vec![normalized]
+        }
+    };
+    if addresses.is_empty() {
+        return Err("no controller endpoints configured in current context".to_string());
+    }
+
     Ok(ConnectionInfo {
-        address: normalize_address(&ctx.controller, 9090),
+        address: addresses[0].clone(),
+        addresses,
         insecure: ctx.insecure || insecure_flag,
         cert: if ctx.insecure || insecure_flag {
             None
@@ -239,6 +265,7 @@ pub fn resolve_node(
 
     Ok(ConnectionInfo {
         address: normalize_address(addr, 9091),
+        addresses: vec![normalize_address(addr, 9091)],
         insecure: insecure_flag,
         cert,
         key,
@@ -255,6 +282,7 @@ mod tests {
         let info = resolve_controller(Path::new("/nonexistent"), &Some("10.0.0.10".into()), true)
             .expect("resolve controller");
         assert_eq!(info.address, "10.0.0.10:9090");
+        assert_eq!(info.addresses, vec!["10.0.0.10:9090"]);
         assert!(info.insecure);
         assert!(info.cert.is_none());
         assert!(info.key.is_none());
@@ -275,6 +303,7 @@ mod tests {
         let info = resolve_node(Path::new("/nonexistent"), &Some("10.0.0.21".into()), true)
             .expect("resolve node");
         assert_eq!(info.address, "10.0.0.21:9091");
+        assert_eq!(info.addresses, vec!["10.0.0.21:9091"]);
         assert!(info.insecure);
         assert!(info.cert.is_none());
         assert!(info.key.is_none());

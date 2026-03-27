@@ -21,6 +21,7 @@ pub fn create(
         context_name.to_string(),
         Context {
             controller: controller.to_string(),
+            controllers: vec![controller.to_string()],
             insecure: false,
             cert: Some(pki_paths.kctl_cert.display().to_string()),
             key: Some(pki_paths.kctl_key.display().to_string()),
