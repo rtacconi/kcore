@@ -3,16 +3,22 @@ use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
 use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
+use crate::config::ReplicationConfig;
 use crate::controller_proto;
 use crate::db::Database;
 
 pub struct ControllerAdminService {
     db: Database,
+    replication_peers: Vec<String>,
 }
 
 impl ControllerAdminService {
-    pub fn new(db: Database) -> Self {
-        Self { db }
+    pub fn new(db: Database, replication: Option<ReplicationConfig>) -> Self {
+        let replication_peers = replication.map(|r| r.peers).unwrap_or_default();
+        Self {
+            db,
+            replication_peers,
+        }
     }
 }
 
@@ -116,6 +122,63 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             controller_proto::AckReplicationEventsResponse { success: true },
         ))
     }
+
+    async fn get_replication_status(
+        &self,
+        request: Request<controller_proto::GetReplicationStatusRequest>,
+    ) -> Result<Response<controller_proto::GetReplicationStatusResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let outbox_head_event_id = self
+            .db
+            .replication_outbox_head_id()
+            .map_err(|e| Status::internal(format!("reading outbox head: {e}")))?;
+        let outbox_size = self
+            .db
+            .replication_outbox_len()
+            .map_err(|e| Status::internal(format!("reading outbox size: {e}")))?;
+        let ack_rows = self
+            .db
+            .list_replication_acks()
+            .map_err(|e| Status::internal(format!("listing replication acks: {e}")))?;
+
+        let outgoing = ack_rows
+            .iter()
+            .filter(|row| !row.peer_id.starts_with("pull/") && !row.peer_id.starts_with("apply/"))
+            .map(|row| controller_proto::ReplicationOutgoingStatus {
+                peer_id: row.peer_id.clone(),
+                last_acked_event_id: row.last_event_id,
+                lag_events: (outbox_head_event_id - row.last_event_id).max(0),
+            })
+            .collect();
+
+        let mut incoming = Vec::new();
+        for endpoint in &self.replication_peers {
+            let pull_key = format!("pull/{endpoint}");
+            let apply_key = format!("apply/{endpoint}");
+            let last_pulled_event_id = ack_rows
+                .iter()
+                .find(|row| row.peer_id == pull_key)
+                .map(|row| row.last_event_id)
+                .unwrap_or(0);
+            let last_applied_event_id = ack_rows
+                .iter()
+                .find(|row| row.peer_id == apply_key)
+                .map(|row| row.last_event_id)
+                .unwrap_or(0);
+            incoming.push(controller_proto::ReplicationIncomingStatus {
+                peer_endpoint: endpoint.clone(),
+                last_pulled_event_id,
+                last_applied_event_id,
+            });
+        }
+
+        Ok(Response::new(controller_proto::GetReplicationStatusResponse {
+            outbox_head_event_id,
+            outbox_size,
+            outgoing,
+            incoming,
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -127,7 +190,7 @@ mod tests {
         let db = Database::open(":memory:").expect("open db");
         db.append_replication_outbox("node.register", "node/n1", br#"{"a":1}"#)
             .expect("append row");
-        let svc = ControllerAdminService::new(db);
+        let svc = ControllerAdminService::new(db, None);
         let resp = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::get_replication_events(
             &svc,
             Request::new(controller_proto::GetReplicationEventsRequest {
@@ -146,7 +209,7 @@ mod tests {
     #[tokio::test]
     async fn ack_replication_events_validates_peer_id() {
         let db = Database::open(":memory:").expect("open db");
-        let svc = ControllerAdminService::new(db);
+        let svc = ControllerAdminService::new(db, None);
         let err = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::ack_replication_events(
             &svc,
             Request::new(controller_proto::AckReplicationEventsRequest {
@@ -162,7 +225,7 @@ mod tests {
     #[tokio::test]
     async fn ack_replication_events_persists_frontier() {
         let db = Database::open(":memory:").expect("open db");
-        let svc = ControllerAdminService::new(db.clone());
+        let svc = ControllerAdminService::new(db.clone(), None);
         <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::ack_replication_events(
             &svc,
             Request::new(controller_proto::AckReplicationEventsRequest {
@@ -176,5 +239,46 @@ mod tests {
             db.get_replication_ack("peer-a").expect("get ack"),
             Some(9)
         );
+    }
+
+    #[tokio::test]
+    async fn get_replication_status_reports_outgoing_and_incoming() {
+        let db = Database::open(":memory:").expect("open db");
+        db.append_replication_outbox("vm.create", "vm/v1", br#"{}"#)
+            .expect("append");
+        db.append_replication_outbox("vm.update", "vm/v1", br#"{}"#)
+            .expect("append");
+        db.upsert_replication_ack("peer-ctrl-b", 1).expect("ack outgoing");
+        db.upsert_replication_ack("pull/10.0.0.11:9090", 5)
+            .expect("ack pull");
+        db.upsert_replication_ack("apply/10.0.0.11:9090", 4)
+            .expect("ack apply");
+
+        let svc = ControllerAdminService::new(
+            db,
+            Some(ReplicationConfig {
+                controller_id: "ctrl-a".into(),
+                dc_id: "DC1".into(),
+                peers: vec!["10.0.0.11:9090".into()],
+            }),
+        );
+
+        let resp = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::get_replication_status(
+            &svc,
+            Request::new(controller_proto::GetReplicationStatusRequest {}),
+        )
+        .await
+        .expect("status")
+        .into_inner();
+
+        assert_eq!(resp.outbox_head_event_id, 2);
+        assert_eq!(resp.outbox_size, 2);
+        assert_eq!(resp.outgoing.len(), 1);
+        assert_eq!(resp.outgoing[0].peer_id, "peer-ctrl-b");
+        assert_eq!(resp.outgoing[0].lag_events, 1);
+        assert_eq!(resp.incoming.len(), 1);
+        assert_eq!(resp.incoming[0].peer_endpoint, "10.0.0.11:9090");
+        assert_eq!(resp.incoming[0].last_pulled_event_id, 5);
+        assert_eq!(resp.incoming[0].last_applied_event_id, 4);
     }
 }

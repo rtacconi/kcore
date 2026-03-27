@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use serde_json::Value;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tracing::{info, warn};
 
@@ -111,14 +112,20 @@ async fn poll_once(
         return Ok(false);
     }
 
-    let last_event_id = events.last().map(|e| e.event_id).unwrap_or(after_event_id);
-    db.upsert_replication_ack(local_frontier_key, last_event_id)
+    let mut last_applied_event_id = after_event_id;
+    for event in &events {
+        apply_replication_event(event)?;
+        last_applied_event_id = event.event_id;
+    }
+    db.upsert_replication_ack(&format!("apply/{peer}"), last_applied_event_id)
+        .map_err(|e| format!("store local apply frontier: {e}"))?;
+    db.upsert_replication_ack(local_frontier_key, last_applied_event_id)
         .map_err(|e| format!("store local frontier: {e}"))?;
 
     client
         .ack_replication_events(controller_proto::AckReplicationEventsRequest {
             peer_id: local_controller_id.to_string(),
-            last_event_id,
+            last_event_id: last_applied_event_id,
         })
         .await
         .map_err(|e| format!("ack_replication_events: {e}"))?;
@@ -127,10 +134,45 @@ async fn poll_once(
         peer = %peer,
         events = events.len(),
         from_event = after_event_id,
-        to_event = last_event_id,
+        to_event = last_applied_event_id,
         "replication poll advanced frontier"
     );
     Ok(true)
+}
+
+fn apply_replication_event(event: &controller_proto::ReplicationEvent) -> Result<(), String> {
+    let payload: Value = serde_json::from_slice(&event.payload)
+        .map_err(|e| format!("invalid replication payload for event {}: {e}", event.event_id))?;
+    if !payload.is_object() {
+        return Err(format!(
+            "invalid replication payload type for event {}: expected object",
+            event.event_id
+        ));
+    }
+
+    match event.event_type.as_str() {
+        "node.register"
+        | "node.approve"
+        | "node.reject"
+        | "node.drain"
+        | "vm.create"
+        | "vm.update"
+        | "vm.delete"
+        | "vm.desired_state.set"
+        | "network.create"
+        | "network.delete" => {
+            // Phase-2 skeleton: payload validation + typed dispatch point.
+            Ok(())
+        }
+        _ => {
+            warn!(
+                event_type = %event.event_type,
+                resource_key = %event.resource_key,
+                "unknown replication event type; skipping in skeleton apply path"
+            );
+            Ok(())
+        }
+    }
 }
 
 async fn connect_admin(
@@ -197,5 +239,18 @@ mod tests {
         assert!(same_endpoint("10.0.0.10:9090", "https://10.0.0.10:9090"));
         assert!(same_endpoint("HTTP://10.0.0.10:9090", "10.0.0.10:9090"));
         assert!(!same_endpoint("10.0.0.10:9090", "10.0.0.11:9090"));
+    }
+
+    #[test]
+    fn apply_replication_event_rejects_non_object_payload() {
+        let event = controller_proto::ReplicationEvent {
+            event_id: 7,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.create".to_string(),
+            resource_key: "vm/v1".to_string(),
+            payload: br#"[1,2,3]"#.to_vec(),
+        };
+        let err = apply_replication_event(&event).expect_err("must fail");
+        assert!(err.contains("expected object"));
     }
 }

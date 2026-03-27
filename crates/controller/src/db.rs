@@ -75,6 +75,13 @@ pub struct ReplicationOutboxRow {
     pub payload: Vec<u8>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplicationAckRow {
+    pub peer_id: String,
+    pub last_event_id: i64,
+    pub updated_at: String,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -373,6 +380,15 @@ impl Database {
         )
     }
 
+    pub fn replication_outbox_head_id(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COALESCE(MAX(id), 0) FROM replication_outbox",
+            [],
+            |row| row.get(0),
+        )
+    }
+
     pub fn list_replication_outbox_since(
         &self,
         min_id_exclusive: i64,
@@ -426,6 +442,23 @@ impl Database {
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e),
         }
+    }
+
+    pub fn list_replication_acks(&self) -> Result<Vec<ReplicationAckRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT peer_id, last_event_id, updated_at
+             FROM replication_ack
+             ORDER BY peer_id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ReplicationAckRow {
+                peer_id: row.get(0)?,
+                last_event_id: row.get(1)?,
+                updated_at: row.get(2)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
@@ -1416,5 +1449,28 @@ mod tests {
 
         db.upsert_replication_ack("peer-a", 105).expect("upsert second");
         assert_eq!(db.get_replication_ack("peer-a").expect("get"), Some(105));
+    }
+
+    #[test]
+    fn replication_outbox_head_id_empty_and_populated() {
+        let db = Database::open(":memory:").expect("open db");
+        assert_eq!(db.replication_outbox_head_id().expect("head"), 0);
+        let id = db
+            .append_replication_outbox("node.register", "node/n1", br#"{"x":1}"#)
+            .expect("append");
+        assert_eq!(db.replication_outbox_head_id().expect("head"), id);
+    }
+
+    #[test]
+    fn replication_ack_list_returns_rows() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_replication_ack("peer-a", 7).expect("upsert a");
+        db.upsert_replication_ack("pull/10.0.0.11:9090", 3)
+            .expect("upsert pull");
+        let rows = db.list_replication_acks().expect("list");
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].peer_id, "peer-a");
+        assert_eq!(rows[0].last_event_id, 7);
+        assert!(!rows[0].updated_at.is_empty());
     }
 }

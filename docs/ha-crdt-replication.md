@@ -257,6 +257,8 @@ Status (incremental):
 Status (incremental):
 
 - Controller now starts per-peer background pollers when `replication.peers` is configured. Pollers use `GetReplicationEvents` and `AckReplicationEvents`, maintain a local pull frontier, and skip self-referential peer endpoints.
+- Pollers now include an event-apply skeleton path that validates JSON payload shape and tracks an `apply/<peer>` frontier separate from pull progress.
+- `ControllerAdmin.GetReplicationStatus` exposes replication health counters (`outbox_head_event_id`, `outbox_size`, outgoing ack lag, and incoming pull/apply frontiers).
 
 ### Phase 4: conflict UX and operator tools
 

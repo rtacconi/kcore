@@ -333,6 +333,8 @@ service ControllerAdmin {
   rpc GetReplicationEvents(GetReplicationEventsRequest) returns (GetReplicationEventsResponse);
   // Stores peer replication acknowledgement frontier.
   rpc AckReplicationEvents(AckReplicationEventsRequest) returns (AckReplicationEventsResponse);
+  // Reports replication lag and frontier health.
+  rpc GetReplicationStatus(GetReplicationStatusRequest) returns (GetReplicationStatusResponse);
 }
 
 message GetReplicationEventsRequest {
@@ -359,6 +361,27 @@ message AckReplicationEventsRequest {
 
 message AckReplicationEventsResponse {
   bool success = 1;
+}
+
+message GetReplicationStatusRequest {}
+
+message ReplicationOutgoingStatus {
+  string peer_id = 1;
+  int64 last_acked_event_id = 2;
+  int64 lag_events = 3;
+}
+
+message ReplicationIncomingStatus {
+  string peer_endpoint = 1;
+  int64 last_pulled_event_id = 2;
+  int64 last_applied_event_id = 3;
+}
+
+message GetReplicationStatusResponse {
+  int64 outbox_head_event_id = 1;
+  int64 outbox_size = 2;
+  repeated ReplicationOutgoingStatus outgoing = 3;
+  repeated ReplicationIncomingStatus incoming = 4;
 }
 
 // SSH Key Management
