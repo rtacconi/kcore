@@ -871,17 +871,17 @@ async fn main() {
                 certs_dir,
             },
         } => {
-            let info = resolve_controller(&cli).ok();
+            let config_path = cli
+                .config
+                .clone()
+                .unwrap_or_else(config::default_config_path);
             let certs_path = if let Some(dir) = certs_dir {
                 dir.clone()
             } else {
-                let config_path = cli
-                    .config
-                    .clone()
-                    .unwrap_or_else(config::default_config_path);
                 config::resolve_install_certs_dir(&config_path)
                     .unwrap_or_else(|e| fatal(&e))
             };
+            let info = config::resolve_controller(&config_path, &None, cli.insecure).ok();
             commands::certs::rotate(&certs_path, controller, info.as_ref()).await
         }
         Command::Rotate {
