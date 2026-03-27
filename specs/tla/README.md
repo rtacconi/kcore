@@ -57,6 +57,13 @@ Sample fixture:
 - `specs/tla/traces/replication-sample-2.json`
 - `specs/tla/traces/replication-invalid-terminal.json` (negative-case fixture)
 
+## CI integration
+
+GitHub Actions workflow `formal-checks.yml` runs:
+
+- `make test-tla-trace` (required)
+- `make test-tla` when TLC is available (or when `tla2tools.jar` can be fetched)
+
 Notes:
 
 - These specs are intentionally bounded; they are guardrails, not full proofs.
