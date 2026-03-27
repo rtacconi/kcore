@@ -16,6 +16,8 @@ const MAX_PAGE_SIZE: i32 = 5_000;
 const ERROR_BACKOFF_SECS: u64 = 5;
 const IDLE_POLL_SECS: u64 = 2;
 const COMPENSATION_IDLE_SECS: u64 = 2;
+const MATERIALIZER_IDLE_SECS: u64 = 2;
+const MATERIALIZER_BATCH_SIZE: i64 = 256;
 
 pub fn spawn_replication_pollers(
     db: Database,
@@ -63,6 +65,21 @@ pub fn spawn_compensation_executor(db: Database) {
                 Ok(false) => tokio::time::sleep(Duration::from_secs(COMPENSATION_IDLE_SECS)).await,
                 Err(e) => {
                     warn!(error = %e, "compensation executor loop failed");
+                    tokio::time::sleep(Duration::from_secs(ERROR_BACKOFF_SECS)).await;
+                }
+            }
+        }
+    });
+}
+
+pub fn spawn_head_materializer(db: Database) {
+    tokio::spawn(async move {
+        loop {
+            match process_materialization_once(&db) {
+                Ok(true) => continue,
+                Ok(false) => tokio::time::sleep(Duration::from_secs(MATERIALIZER_IDLE_SECS)).await,
+                Err(e) => {
+                    warn!(error = %e, "replication head materializer loop failed");
                     tokio::time::sleep(Duration::from_secs(ERROR_BACKOFF_SECS)).await;
                 }
             }
@@ -371,6 +388,116 @@ fn process_compensation_once(db: &Database) -> Result<bool, String> {
     Ok(true)
 }
 
+fn process_materialization_once(db: &Database) -> Result<bool, String> {
+    let heads = db
+        .list_replication_resource_heads(MATERIALIZER_BATCH_SIZE)
+        .map_err(|e| format!("list replication heads: {e}"))?;
+    for head in &heads {
+        let already = db
+            .get_materialized_replication_head(&head.resource_key)
+            .map_err(|e| format!("get materialized head {}: {e}", head.resource_key))?;
+        if already
+            .as_ref()
+            .map(|row| row.last_op_id == head.last_op_id)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        apply_head_to_domain(db, head)?;
+        db.upsert_materialized_replication_head(
+            &head.resource_key,
+            &head.last_op_id,
+            &head.last_event_type,
+        )
+        .map_err(|e| format!("upsert materialized head {}: {e}", head.resource_key))?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Result<(), String> {
+    let body: Value = serde_json::from_str(&head.last_body_json)
+        .map_err(|e| format!("parse head body for {}: {e}", head.resource_key))?;
+    match head.last_event_type.as_str() {
+        "vm.desired_state.set" => {
+            let vm_id = body
+                .get("vmId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("missing vmId for {}", head.resource_key))?;
+            let auto_start = body
+                .get("autoStart")
+                .and_then(Value::as_bool)
+                .ok_or_else(|| format!("missing autoStart for {}", head.resource_key))?;
+            let _ = db
+                .set_vm_auto_start(vm_id, auto_start)
+                .map_err(|e| format!("set vm auto_start {vm_id}: {e}"))?;
+            Ok(())
+        }
+        "vm.update" => {
+            let vm_id = body
+                .get("vmId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("missing vmId for {}", head.resource_key))?;
+            let cpu = body
+                .get("cpu")
+                .and_then(Value::as_i64)
+                .and_then(|v| i32::try_from(v).ok());
+            let memory_bytes = body.get("memoryBytes").and_then(Value::as_i64);
+            let _ = db
+                .update_vm_spec(vm_id, cpu, memory_bytes)
+                .map_err(|e| format!("update vm spec {vm_id}: {e}"))?;
+            Ok(())
+        }
+        "vm.delete" => {
+            let vm_id = body
+                .get("vmId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("missing vmId for {}", head.resource_key))?;
+            let _ = db
+                .delete_vm_by_id_or_name(vm_id)
+                .map_err(|e| format!("delete vm {vm_id}: {e}"))?;
+            Ok(())
+        }
+        "node.approve" => {
+            let node_id = body
+                .get("nodeId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("missing nodeId for {}", head.resource_key))?;
+            let _ = db
+                .set_node_approval(node_id, "approved")
+                .map_err(|e| format!("set node approval approved {node_id}: {e}"))?;
+            let _ = db
+                .update_node_status(node_id, "ready")
+                .map_err(|e| format!("set node status ready {node_id}: {e}"))?;
+            Ok(())
+        }
+        "node.reject" => {
+            let node_id = body
+                .get("nodeId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("missing nodeId for {}", head.resource_key))?;
+            let _ = db
+                .set_node_approval(node_id, "rejected")
+                .map_err(|e| format!("set node approval rejected {node_id}: {e}"))?;
+            let _ = db
+                .update_node_status(node_id, "rejected")
+                .map_err(|e| format!("set node status rejected {node_id}: {e}"))?;
+            Ok(())
+        }
+        "node.drain" => {
+            let node_id = body
+                .get("nodeId")
+                .and_then(Value::as_str)
+                .ok_or_else(|| format!("missing nodeId for {}", head.resource_key))?;
+            let _ = db
+                .update_node_status(node_id, "drained")
+                .map_err(|e| format!("set node status drained {node_id}: {e}"))?;
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
 fn should_replace_head(
     existing: Option<&ReplicationResourceHeadRow>,
     policy_priority: i32,
@@ -455,6 +582,49 @@ fn same_endpoint(a: &str, b: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::{NodeRow, VmRow};
+
+    fn test_node(id: &str) -> NodeRow {
+        NodeRow {
+            id: id.to_string(),
+            hostname: "n1".to_string(),
+            address: "10.0.0.10:9443".to_string(),
+            cpu_cores: 4,
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+            status: "ready".to_string(),
+            last_heartbeat: String::new(),
+            gateway_interface: "eth0".to_string(),
+            cpu_used: 0,
+            memory_used: 0,
+            storage_backend: "fs".to_string(),
+            disable_vxlan: false,
+            approval_status: "approved".to_string(),
+            cert_expiry_days: -1,
+        }
+    }
+
+    fn test_vm(id: &str, node_id: &str) -> VmRow {
+        VmRow {
+            id: id.to_string(),
+            name: "vm-name".to_string(),
+            cpu: 1,
+            memory_bytes: 512 * 1024 * 1024,
+            image_path: "/var/lib/libvirt/images/vm-name.qcow2".to_string(),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            image_format: "qcow2".to_string(),
+            image_size: 0,
+            network: "default".to_string(),
+            auto_start: false,
+            node_id: node_id.to_string(),
+            created_at: String::new(),
+            runtime_state: "stopped".to_string(),
+            cloud_init_user_data: String::new(),
+            storage_backend: "fs".to_string(),
+            storage_size_bytes: 0,
+            vm_ip: String::new(),
+        }
+    }
 
     #[test]
     fn normalize_endpoint_adds_scheme() {
@@ -589,5 +759,34 @@ mod tests {
                 .expect("count conflicts"),
             0
         );
+    }
+
+    #[test]
+    fn materializer_applies_vm_desired_state_and_tracks_frontier() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node("node-1");
+        db.upsert_node(&node).expect("insert node");
+        db.insert_vm(&test_vm("vm-1", &node.id)).expect("insert vm");
+        db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
+            resource_key: "vm/vm-1".to_string(),
+            last_op_id: "op-1".to_string(),
+            last_logical_ts_unix_ms: 100,
+            last_policy_priority: 0,
+            last_intent_epoch: 0,
+            last_validity: "valid".to_string(),
+            last_safety_class: "safe".to_string(),
+            last_controller_id: "ctrl-a".to_string(),
+            last_event_id: 1,
+            last_event_type: "vm.desired_state.set".to_string(),
+            last_body_json: r#"{"vmId":"vm-1","autoStart":true}"#.to_string(),
+        })
+        .expect("upsert head");
+
+        assert!(process_materialization_once(&db).expect("materialize"));
+        let vm = db.get_vm("vm-1").expect("get vm").expect("vm exists");
+        assert!(vm.auto_start);
+
+        // Replay-safe: same winner op should not produce further work.
+        assert!(!process_materialization_once(&db).expect("materialize no-op"));
     }
 }

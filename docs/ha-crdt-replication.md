@@ -264,6 +264,7 @@ Status (incremental):
 - Equal-timestamp cross-controller contenders are now logged into `replication_conflicts`; `GetReplicationStatus` reports an `unresolved_conflicts` count for operator visibility.
 - Deterministic zero-manual arbitration model is documented in `docs/zero-external-resolution-algorithm.md`.
 - Controller now runs a compensation executor skeleton: `auto_compensated` losers enqueue jobs in `replication_compensation_jobs`, and a background worker closes those conflicts without manual intervention.
+- Controller now runs a head materializer skeleton: winning `replication_resource_heads` are replay-safely projected into selected domain intents (`vm.update`, `vm.desired_state.set`, `vm.delete`, `node.approve/reject/drain`) using `replication_materialized_heads`.
 
 ### Phase 4: conflict UX and operator tools
 

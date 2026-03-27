@@ -98,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
         &cfg.listen_addr,
     );
     replication::spawn_compensation_executor(database.clone());
+    replication::spawn_head_materializer(database.clone());
 
     let staleness_db = database.clone();
     tokio::spawn(async move {

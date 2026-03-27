@@ -119,6 +119,13 @@ pub struct ReplicationCompensationJobRow {
     pub attempts: i32,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplicationMaterializedHeadRow {
+    pub resource_key: String,
+    pub last_op_id: String,
+    pub last_event_type: String,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -455,7 +462,18 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 17;
+        if version < 18 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replication_materialized_heads (
+                    resource_key TEXT PRIMARY KEY,
+                    last_op_id TEXT NOT NULL,
+                    last_event_type TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 18;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -850,6 +868,76 @@ impl Database {
              SET status = 'failed', last_error = ?2, updated_at = datetime('now')
              WHERE id = ?1",
             params![id, error],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_replication_resource_heads(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<ReplicationResourceHeadRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT resource_key, last_op_id, last_logical_ts_unix_ms,
+                    last_policy_priority, last_intent_epoch, last_validity, last_safety_class,
+                    last_controller_id, last_event_id, last_event_type, last_body_json
+             FROM replication_resource_heads
+             ORDER BY last_event_id ASC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(ReplicationResourceHeadRow {
+                resource_key: row.get(0)?,
+                last_op_id: row.get(1)?,
+                last_logical_ts_unix_ms: row.get(2)?,
+                last_policy_priority: row.get(3)?,
+                last_intent_epoch: row.get(4)?,
+                last_validity: row.get(5)?,
+                last_safety_class: row.get(6)?,
+                last_controller_id: row.get(7)?,
+                last_event_id: row.get(8)?,
+                last_event_type: row.get(9)?,
+                last_body_json: row.get(10)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn get_materialized_replication_head(
+        &self,
+        resource_key: &str,
+    ) -> Result<Option<ReplicationMaterializedHeadRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT resource_key, last_op_id, last_event_type
+             FROM replication_materialized_heads
+             WHERE resource_key = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![resource_key], |row| {
+            Ok(ReplicationMaterializedHeadRow {
+                resource_key: row.get(0)?,
+                last_op_id: row.get(1)?,
+                last_event_type: row.get(2)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn upsert_materialized_replication_head(
+        &self,
+        resource_key: &str,
+        last_op_id: &str,
+        last_event_type: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO replication_materialized_heads (resource_key, last_op_id, last_event_type, updated_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(resource_key) DO UPDATE SET
+                last_op_id=excluded.last_op_id,
+                last_event_type=excluded.last_event_type,
+                updated_at=datetime('now')",
+            params![resource_key, last_op_id, last_event_type],
         )?;
         Ok(())
     }
@@ -1970,5 +2058,24 @@ mod tests {
         assert_eq!(job.conflict_id, conflict_id);
         db.complete_compensation_job(job.id).expect("complete");
         assert_eq!(db.count_pending_compensation_jobs().expect("count"), 0);
+    }
+
+    #[test]
+    fn materialized_head_roundtrip() {
+        let db = Database::open(":memory:").expect("open db");
+        assert!(
+            db.get_materialized_replication_head("vm/v1")
+                .expect("get")
+                .is_none()
+        );
+        db.upsert_materialized_replication_head("vm/v1", "op-1", "vm.update")
+            .expect("upsert");
+        let row = db
+            .get_materialized_replication_head("vm/v1")
+            .expect("get")
+            .expect("present");
+        assert_eq!(row.resource_key, "vm/v1");
+        assert_eq!(row.last_op_id, "op-1");
+        assert_eq!(row.last_event_type, "vm.update");
     }
 }

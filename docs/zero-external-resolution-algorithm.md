@@ -62,6 +62,7 @@ Current tables used by this algorithm:
 - `replication_ack`: per-peer frontiers (`pull/*`, `apply/*`, peer ack)
 - `replication_received_ops`: dedupe by `opId`
 - `replication_resource_heads`: deterministic winner head per resource
+- `replication_materialized_heads`: replay-safe frontier of head-to-domain projection
 - `replication_conflicts`: audit rows for contenders (stored auto-resolved by policy)
 - `replication_compensation_jobs`: queued retries for `auto_compensated` loser handling
 
@@ -110,5 +111,6 @@ Liveness:
 ## Current Limitations
 
 - Compensation executor is currently a deterministic skeleton (no domain-specific rollback yet).
+- Head materialization currently covers a subset of event types; full desired-state projection is still in progress.
 - Resource reservations/escrow for scarce resources are not modeled yet.
-- Domain materialization from heads to desired-state tables is incremental.
+- Domain materialization from heads to desired-state tables remains incremental.
