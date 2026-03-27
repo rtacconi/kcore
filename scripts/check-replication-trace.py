@@ -4,6 +4,8 @@ import sys
 from pathlib import Path
 
 AUTO_TERMINALS = {"auto_accepted", "auto_rejected", "auto_compensated", "none"}
+RESERVATION_STATES = {"not_applicable", "reserved", "failed"}
+COMPENSATION_STATES = {"not_applicable", "queued", "completed"}
 
 
 def winner(current, challenger):
@@ -42,23 +44,46 @@ def main() -> int:
             "op_id": str(raw["op_id"]),
             "rank": int(raw["rank"]),
             "terminal_state": str(raw["terminal_state"]),
+            "reservation_status": str(raw.get("reservation_status", "not_applicable")),
+            "compensation_status": str(raw.get("compensation_status", "not_applicable")),
         }
 
         if event["terminal_state"] not in AUTO_TERMINALS:
             errors.append(
                 f"event[{idx}] has non-auto terminal_state={event['terminal_state']}"
             )
+        if event["reservation_status"] not in RESERVATION_STATES:
+            errors.append(
+                f"event[{idx}] has invalid reservation_status={event['reservation_status']}"
+            )
+        if event["compensation_status"] not in COMPENSATION_STATES:
+            errors.append(
+                f"event[{idx}] has invalid compensation_status={event['compensation_status']}"
+            )
+        if event["reservation_status"] == "failed" and event["terminal_state"] != "auto_rejected":
+            errors.append(
+                f"event[{idx}] reservation failed must imply auto_rejected terminal"
+            )
+        if event["terminal_state"] == "auto_compensated" and event[
+            "compensation_status"
+        ] not in {"queued", "completed"}:
+            errors.append(
+                f"event[{idx}] auto_compensated requires queued/completed compensation"
+            )
 
         key = event["resource_key"]
         prior = heads.get(key)
-        new_head = winner(prior, event)
-        heads[key] = new_head
+        if event["reservation_status"] == "failed":
+            new_head = prior
+        else:
+            new_head = winner(prior, event)
+            heads[key] = new_head
 
         expected = raw.get("expected_winner_op_id")
-        if expected is not None and str(expected) != new_head["op_id"]:
-            errors.append(
-                f"event[{idx}] expected winner {expected}, got {new_head['op_id']}"
-            )
+        if expected is not None:
+            actual = "none" if new_head is None else new_head["op_id"]
+            if str(expected) != actual:
+                errors.append(f"event[{idx}] expected winner {expected}, got {actual}")
 
     if errors:
         print("trace check failed:")

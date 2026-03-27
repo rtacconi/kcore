@@ -112,6 +112,7 @@ Current bounded TLC model coverage:
 - Invariants checked include `TypeOK`, `NoDoubleApply`, `DeterministicWinner`, and `NoManualRequired`.
 - `CrossDcReplication.tla` encodes DC-aware delivery/anti-entropy and checks bounded cross-DC convergence with no-double-apply semantics.
 - Drift checks now include a trace fixture generated from controller replication Rust tests, in addition to static fixtures.
+- Drift checker rows now carry reservation/compensation branch signals so `auto_rejected` (reservation failure) and `auto_compensated` paths are validated directly.
 
 Liveness:
 

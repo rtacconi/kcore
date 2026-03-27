@@ -905,6 +905,22 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_compensation_job_status_for_loser_op(
+        &self,
+        loser_op_id: &str,
+    ) -> Result<Option<String>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT status
+             FROM replication_compensation_jobs
+             WHERE loser_op_id = ?1
+             ORDER BY id DESC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map(params![loser_op_id], |row| row.get::<_, String>(0))?;
+        rows.next().transpose()
+    }
+
     pub fn list_replication_resource_heads(
         &self,
         limit: i64,
@@ -2168,8 +2184,18 @@ mod tests {
             .expect("job exists");
         assert_eq!(job.status, "running");
         assert_eq!(job.conflict_id, conflict_id);
+        assert_eq!(
+            db.get_compensation_job_status_for_loser_op("op-loser")
+                .expect("status lookup"),
+            Some("running".to_string())
+        );
         db.complete_compensation_job(job.id).expect("complete");
         assert_eq!(db.count_pending_compensation_jobs().expect("count"), 0);
+        assert_eq!(
+            db.get_compensation_job_status_for_loser_op("op-loser")
+                .expect("status lookup"),
+            Some("completed".to_string())
+        );
     }
 
     #[test]

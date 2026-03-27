@@ -4,6 +4,8 @@
     "op_id": "op-a",
     "rank": 10,
     "terminal_state": "auto_accepted",
+    "reservation_status": "not_applicable",
+    "compensation_status": "not_applicable",
     "expected_winner_op_id": "op-a"
   },
   {
@@ -11,6 +13,8 @@
     "op_id": "op-b",
     "rank": 8,
     "terminal_state": "auto_rejected",
+    "reservation_status": "not_applicable",
+    "compensation_status": "not_applicable",
     "expected_winner_op_id": "op-a"
   },
   {
@@ -18,6 +22,8 @@
     "op_id": "op-z",
     "rank": 1,
     "terminal_state": "auto_accepted",
+    "reservation_status": "not_applicable",
+    "compensation_status": "not_applicable",
     "expected_winner_op_id": "op-z"
   },
   {
@@ -25,6 +31,8 @@
     "op_id": "op-y",
     "rank": 1,
     "terminal_state": "auto_compensated",
+    "reservation_status": "not_applicable",
+    "compensation_status": "queued",
     "expected_winner_op_id": "op-z"
   }
 ]

@@ -296,3 +296,4 @@ Status (incremental):
 - Trace drift validation now includes both positive and negative fixtures (expected pass and expected fail) via `scripts/test-replication-trace.sh`, reducing silent checker regressions.
 - CI now includes a formal checks workflow (`.github/workflows/formal-checks.yml`) that enforces trace drift checks and runs TLC model checks when available.
 - The trace gate now consumes a generated artifact emitted from a Rust replication test (`replication::tests::export_replication_trace_fixture`) in addition to static fixtures, reducing model-vs-implementation drift risk.
+- Generated trace rows now include reservation and compensation branch signals (`reservation_status`, `compensation_status`) so drift checks cover zero-manual rejection/compensation paths explicitly.

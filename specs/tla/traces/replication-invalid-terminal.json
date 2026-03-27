@@ -4,6 +4,8 @@
     "op_id": "op-bad",
     "rank": 42,
     "terminal_state": "manual",
+    "reservation_status": "not_applicable",
+    "compensation_status": "not_applicable",
     "expected_winner_op_id": "op-bad"
   }
 ]

@@ -919,6 +919,16 @@ mod tests {
             (
                 controller_proto::ReplicationEvent {
                     event_id: 3,
+                    created_at: "2026-01-01T00:00:01.500Z".to_string(),
+                    event_type: "vm.create".to_string(),
+                    resource_key: "vm/v-trace-reservation".to_string(),
+                    payload: br#"{"opId":"op-trace-r","controllerId":"ctrl-r","logicalTsUnixMs":1500,"eventType":"vm.create","resourceKey":"vm/v-trace-reservation","body":{"vmId":"v-trace-reservation","nodeId":"missing-node","name":"vtrace"}}"#.to_vec(),
+                },
+                80,
+            ),
+            (
+                controller_proto::ReplicationEvent {
+                    event_id: 4,
                     created_at: "2026-01-01T00:00:02Z".to_string(),
                     event_type: "vm.update".to_string(),
                     resource_key: "vm/v-trace-2".to_string(),
@@ -942,13 +952,35 @@ mod tests {
                 .expect("resourceKey")
                 .to_string();
             apply_replication_event(&db, &event).expect("apply event");
-            let winner = db
+            let head_op = db
                 .get_replication_resource_head(&resource_key)
                 .expect("read head")
-                .map(|h| h.last_op_id)
-                .unwrap_or_else(|| op_id.clone());
-            let terminal_state = if winner == op_id {
+                .map(|h| h.last_op_id);
+            let reservation_status = payload
+                .get("body")
+                .and_then(Value::as_object)
+                .and_then(|b| b.get("nodeId"))
+                .and_then(Value::as_str)
+                .and_then(|node_id| {
+                    db.get_replication_reservation(
+                        &format!("node-capacity/{node_id}"),
+                        &resource_key,
+                    )
+                    .ok()
+                    .flatten()
+                })
+                .map(|r| r.status)
+                .unwrap_or_else(|| "not_applicable".to_string());
+            let compensation_status = db
+                .get_compensation_job_status_for_loser_op(&op_id)
+                .ok()
+                .flatten()
+                .map(|s| if s == "completed" { "completed" } else { "queued" }.to_string())
+                .unwrap_or_else(|| "not_applicable".to_string());
+            let terminal_state = if head_op.as_deref() == Some(op_id.as_str()) {
                 "auto_accepted"
+            } else if reservation_status == "failed" {
+                "auto_rejected"
             } else if payload
                 .get("safetyClass")
                 .and_then(Value::as_str)
@@ -959,12 +991,21 @@ mod tests {
             } else {
                 "auto_rejected"
             };
+            let expected_winner = if let Some(w) = head_op {
+                w
+            } else if reservation_status == "failed" {
+                "none".to_string()
+            } else {
+                op_id.clone()
+            };
             trace_rows.push(serde_json::json!({
                 "resource_key": resource_key,
                 "op_id": op_id,
                 "rank": rank,
                 "terminal_state": terminal_state,
-                "expected_winner_op_id": winner,
+                "reservation_status": reservation_status,
+                "compensation_status": compensation_status,
+                "expected_winner_op_id": expected_winner,
             }));
         }
 
