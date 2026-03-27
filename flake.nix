@@ -387,15 +387,6 @@
                       SSH_KEYS=$(cat /root/.ssh/authorized_keys | sed 's/^/      "/' | sed 's/$/"/' | paste -sd '\n')
                     fi
 
-                    # Controller is opt-in only. By default, install as node-agent that joins an existing controller.
-                    CONTROLLER_ADDR="$CONTROLLER_ENDPOINT"
-                    if [ "$RUN_CONTROLLER" = "true" ]; then
-                      CONTROLLER_ADDR="127.0.0.1:9090"
-                    elif [ -z "$CONTROLLER_ENDPOINT" ]; then
-                      echo "Error: provide --controller <host:9090> or pass --run-controller"
-                      exit 1
-                    fi
-
                     GATEWAY_INTERFACE=$(ip -4 route show default 2>/dev/null | awk 'NR==1 {print $5}')
                     INTERNAL_GATEWAY_IP="10.240.0.1"
                     EXTERNAL_IP=""
@@ -413,6 +404,15 @@
                     fi
                     if [ -z "$EXTERNAL_IP" ]; then
                       EXTERNAL_IP="127.0.0.1"
+                    fi
+
+                    # Controller is opt-in only. By default, install as node-agent that joins an existing controller.
+                    CONTROLLER_ADDR="$CONTROLLER_ENDPOINT"
+                    if [ "$RUN_CONTROLLER" = "true" ]; then
+                      CONTROLLER_ADDR="$EXTERNAL_IP:9090"
+                    elif [ -z "$CONTROLLER_ENDPOINT" ]; then
+                      echo "Error: provide --controller <host:9090> or pass --run-controller"
+                      exit 1
                     fi
 
                     cat > /mnt/etc/kcore/node-agent.yaml << AGENTEOF
