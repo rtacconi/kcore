@@ -247,6 +247,7 @@ Status (incremental):
 - Controller config accepts optional `replication` (`controllerId`, `dcId`, `peers`). When present, mutating RPCs append JSON envelopes to SQLite table `replication_outbox` (migration v11).
 - Emitters wired for `node.register` and `vm.create` (after successful node push). Peer fan-out, merge engine, and `replication_log` / ack frontiers are not implemented yet.
 - ControllerAdmin includes early replication transport RPCs: `GetReplicationEvents(after_event_id, limit)` and `AckReplicationEvents(peer_id, last_event_id)`. These currently page from `replication_outbox` and store per-peer frontier in `replication_ack`.
+- Replication envelopes now carry causal/event identity fields (`schemaVersion`, `opId`, `logicalTsUnixMs`, `controllerId`, `dcId`) and receivers dedupe incoming events by `opId` using `replication_received_ops`.
 
 ### Phase 3: in-process reconciler
 

@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tonic::{Request, Response, Status};
 use tracing::{error, info, warn};
+use uuid::Uuid;
 
 use crate::auth::{self, CN_KCTL, CN_NODE_PREFIX};
 use crate::config::{NetworkConfig, ReplicationConfig};
@@ -330,7 +331,14 @@ impl ControllerService {
         let Some(rep) = &self.replication else {
             return;
         };
+        let logical_ts_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         let envelope = serde_json::json!({
+            "schemaVersion": 1,
+            "opId": Uuid::new_v4().to_string(),
+            "logicalTsUnixMs": logical_ts_unix_ms,
             "controllerId": rep.controller_id,
             "dcId": rep.dc_id,
             "eventType": event_type,

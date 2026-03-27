@@ -114,7 +114,7 @@ async fn poll_once(
 
     let mut last_applied_event_id = after_event_id;
     for event in &events {
-        apply_replication_event(event)?;
+        apply_replication_event(db, event)?;
         last_applied_event_id = event.event_id;
     }
     db.upsert_replication_ack(&format!("apply/{peer}"), last_applied_event_id)
@@ -140,15 +140,61 @@ async fn poll_once(
     Ok(true)
 }
 
-fn apply_replication_event(event: &controller_proto::ReplicationEvent) -> Result<(), String> {
+fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationEvent) -> Result<(), String> {
     let payload: Value = serde_json::from_slice(&event.payload)
         .map_err(|e| format!("invalid replication payload for event {}: {e}", event.event_id))?;
-    if !payload.is_object() {
+    let payload_obj = payload
+        .as_object()
+        .ok_or_else(|| {
+            format!(
+                "invalid replication payload type for event {}: expected object",
+                event.event_id
+            )
+        })?;
+
+    let origin_controller_id = payload_obj
+        .get("controllerId")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| format!("event {} missing controllerId", event.event_id))?;
+    let fallback_op_id = format!("legacy:{}:{}", origin_controller_id, event.event_id);
+    let op_id = payload_obj
+        .get("opId")
+        .and_then(|v| v.as_str())
+        .unwrap_or(fallback_op_id.as_str());
+    let payload_event_type = payload_obj
+        .get("eventType")
+        .and_then(|v| v.as_str())
+        .unwrap_or(event.event_type.as_str());
+    let payload_resource_key = payload_obj
+        .get("resourceKey")
+        .and_then(|v| v.as_str())
+        .unwrap_or(event.resource_key.as_str());
+    if payload_event_type != event.event_type {
         return Err(format!(
-            "invalid replication payload type for event {}: expected object",
-            event.event_id
+            "event {} eventType mismatch: payload={}, row={}",
+            event.event_id, payload_event_type, event.event_type
         ));
     }
+    if payload_resource_key != event.resource_key {
+        return Err(format!(
+            "event {} resourceKey mismatch: payload={}, row={}",
+            event.event_id, payload_resource_key, event.resource_key
+        ));
+    }
+
+    if db
+        .replication_received_op_exists(op_id)
+        .map_err(|e| format!("check received op for event {}: {e}", event.event_id))?
+    {
+        return Ok(());
+    }
+    db.insert_replication_received_op(
+        op_id,
+        origin_controller_id,
+        payload_event_type,
+        payload_resource_key,
+    )
+    .map_err(|e| format!("insert received op for event {}: {e}", event.event_id))?;
 
     match event.event_type.as_str() {
         "node.register"
@@ -250,7 +296,26 @@ mod tests {
             resource_key: "vm/v1".to_string(),
             payload: br#"[1,2,3]"#.to_vec(),
         };
-        let err = apply_replication_event(&event).expect_err("must fail");
-        assert!(err.contains("expected object"));
+        let db = Database::open(":memory:").expect("open db");
+        let err = apply_replication_event(&db, &event).expect_err("must fail");
+        assert!(err.contains("expected object") || err.contains("missing opId"));
+    }
+
+    #[test]
+    fn apply_replication_event_dedupes_by_op_id() {
+        let db = Database::open(":memory:").expect("open db");
+        let payload = br#"{"opId":"op-1","controllerId":"ctrl-a","eventType":"vm.create","resourceKey":"vm/v1","body":{}}"#.to_vec();
+        let event = controller_proto::ReplicationEvent {
+            event_id: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.create".to_string(),
+            resource_key: "vm/v1".to_string(),
+            payload: payload.clone(),
+        };
+        apply_replication_event(&db, &event).expect("first apply");
+        apply_replication_event(&db, &event).expect("duplicate apply should be noop");
+        assert!(db
+            .replication_received_op_exists("op-1")
+            .expect("received op exists"));
     }
 }

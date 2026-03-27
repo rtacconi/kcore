@@ -340,7 +340,19 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 12;
+        if version < 13 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replication_received_ops (
+                    op_id TEXT PRIMARY KEY,
+                    origin_controller_id TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    resource_key TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 13;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -459,6 +471,32 @@ impl Database {
             })
         })?;
         rows.collect()
+    }
+
+    pub fn replication_received_op_exists(&self, op_id: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM replication_received_ops WHERE op_id = ?1",
+            params![op_id],
+            |row| row.get(0),
+        )?;
+        Ok(count > 0)
+    }
+
+    pub fn insert_replication_received_op(
+        &self,
+        op_id: &str,
+        origin_controller_id: &str,
+        event_type: &str,
+        resource_key: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO replication_received_ops (op_id, origin_controller_id, event_type, resource_key)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![op_id, origin_controller_id, event_type, resource_key],
+        )?;
+        Ok(())
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
@@ -1472,5 +1510,18 @@ mod tests {
         assert_eq!(rows[0].peer_id, "peer-a");
         assert_eq!(rows[0].last_event_id, 7);
         assert!(!rows[0].updated_at.is_empty());
+    }
+
+    #[test]
+    fn replication_received_op_insert_and_exists() {
+        let db = Database::open(":memory:").expect("open db");
+        assert!(!db
+            .replication_received_op_exists("op-1")
+            .expect("exists before"));
+        db.insert_replication_received_op("op-1", "ctrl-a", "vm.create", "vm/v1")
+            .expect("insert");
+        assert!(db
+            .replication_received_op_exists("op-1")
+            .expect("exists after"));
     }
 }
