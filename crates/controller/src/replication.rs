@@ -920,11 +920,11 @@ mod tests {
                 controller_proto::ReplicationEvent {
                     event_id: 3,
                     created_at: "2026-01-01T00:00:01.500Z".to_string(),
-                    event_type: "vm.create".to_string(),
-                    resource_key: "vm/v-trace-reservation".to_string(),
-                    payload: br#"{"opId":"op-trace-r","controllerId":"ctrl-r","logicalTsUnixMs":1500,"eventType":"vm.create","resourceKey":"vm/v-trace-reservation","body":{"vmId":"v-trace-reservation","nodeId":"missing-node","name":"vtrace"}}"#.to_vec(),
+                    event_type: "vm.update".to_string(),
+                    resource_key: "vm/v-trace-2".to_string(),
+                    payload: br#"{"opId":"op-trace-c","controllerId":"ctrl-c","logicalTsUnixMs":2000,"eventType":"vm.update","resourceKey":"vm/v-trace-2","safetyClass":"safe","body":{"cpu":4}}"#.to_vec(),
                 },
-                80,
+                200,
             ),
             (
                 controller_proto::ReplicationEvent {
@@ -932,9 +932,19 @@ mod tests {
                     created_at: "2026-01-01T00:00:02Z".to_string(),
                     event_type: "vm.update".to_string(),
                     resource_key: "vm/v-trace-2".to_string(),
-                    payload: br#"{"opId":"op-trace-c","controllerId":"ctrl-c","logicalTsUnixMs":2000,"eventType":"vm.update","resourceKey":"vm/v-trace-2","safetyClass":"safe","body":{"cpu":4}}"#.to_vec(),
+                    payload: br#"{"opId":"op-trace-d","controllerId":"ctrl-d","logicalTsUnixMs":1900,"eventType":"vm.update","resourceKey":"vm/v-trace-2","safetyClass":"unsafe","body":{"cpu":2}}"#.to_vec(),
                 },
-                200,
+                150,
+            ),
+            (
+                controller_proto::ReplicationEvent {
+                    event_id: 5,
+                    created_at: "2026-01-01T00:00:02.500Z".to_string(),
+                    event_type: "vm.create".to_string(),
+                    resource_key: "vm/v-trace-reservation".to_string(),
+                    payload: br#"{"opId":"op-trace-r","controllerId":"ctrl-r","logicalTsUnixMs":1500,"eventType":"vm.create","resourceKey":"vm/v-trace-reservation","body":{"vmId":"v-trace-reservation","nodeId":"missing-node","name":"vtrace"}}"#.to_vec(),
+                },
+                80,
             ),
         ];
 
@@ -952,6 +962,12 @@ mod tests {
                 .expect("resourceKey")
                 .to_string();
             apply_replication_event(&db, &event).expect("apply event");
+            if event.event_id == 2 {
+                assert!(
+                    process_compensation_once(&db).expect("process compensation"),
+                    "expected one compensation job to process"
+                );
+            }
             let head_op = db
                 .get_replication_resource_head(&resource_key)
                 .expect("read head")
