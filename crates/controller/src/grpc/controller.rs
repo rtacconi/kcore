@@ -1790,6 +1790,122 @@ impl controller_proto::controller_server::Controller for ControllerService {
             message: "TLS certificate updated; server reloading".into(),
         }))
     }
+
+    // TODO(rbac): restrict to admin role when RBAC is implemented
+    async fn get_compliance_report(
+        &self,
+        request: Request<controller_proto::GetComplianceReportRequest>,
+    ) -> Result<Response<controller_proto::GetComplianceReportResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+
+        let (approved, pending, rejected) = self
+            .db
+            .count_nodes_by_approval()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let total_nodes = approved + pending + rejected;
+
+        let (total_vms, running_vms) = self
+            .db
+            .count_vms_by_auto_start()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let stopped_vms = total_vms - running_vms;
+
+        let (nat, bridge, vxlan) = self
+            .db
+            .count_networks_by_type()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let total_networks = nat + bridge + vxlan;
+
+        let (expiring_30d, cert_unknown) = self
+            .db
+            .count_nodes_cert_expiry()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let sub_ca_enabled = self.sub_ca.lock().unwrap().is_available();
+
+        let access_control = vec![
+            acl("RegisterNode", CN_NODE_PREFIX),
+            acl("Heartbeat", CN_NODE_PREFIX),
+            acl("SyncVmState", CN_NODE_PREFIX),
+            acl("CreateVm", CN_KCTL),
+            acl("UpdateVm", CN_KCTL),
+            acl("DeleteVm", CN_KCTL),
+            acl("SetVmDesiredState", CN_KCTL),
+            acl("GetVm", CN_KCTL),
+            acl("ListVms", CN_KCTL),
+            acl("CreateNetwork", CN_KCTL),
+            acl("DeleteNetwork", CN_KCTL),
+            acl("ListNetworks", CN_KCTL),
+            acl("ListNodes", CN_KCTL),
+            acl("GetNode", CN_KCTL),
+            acl("CreateSshKey", CN_KCTL),
+            acl("DeleteSshKey", CN_KCTL),
+            acl("ListSshKeys", CN_KCTL),
+            acl("GetSshKey", CN_KCTL),
+            acl("DrainNode", CN_KCTL),
+            acl("ApproveNode", CN_KCTL),
+            acl("RejectNode", CN_KCTL),
+            acl("RenewNodeCert", CN_NODE_PREFIX),
+            acl("RotateSubCa", CN_KCTL),
+            acl("ReloadTls", CN_KCTL),
+            acl("GetComplianceReport", CN_KCTL),
+            acl("ApplyNixConfig", CN_KCTL),
+        ];
+
+        Ok(Response::new(
+            controller_proto::GetComplianceReportResponse {
+                controller_version: env!("CARGO_PKG_VERSION").to_string(),
+                crypto_library: "aws-lc-rs (AWS-LC, FIPS 140-3 #4816)".into(),
+                tls13_cipher_suites: vec![
+                    "TLS_AES_256_GCM_SHA384".into(),
+                    "TLS_AES_128_GCM_SHA256".into(),
+                ],
+                tls12_cipher_suites: vec![
+                    "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384".into(),
+                    "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256".into(),
+                    "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384".into(),
+                    "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256".into(),
+                ],
+                kx_groups: vec![
+                    "secp384r1 (P-384)".into(),
+                    "secp256r1 (P-256)".into(),
+                ],
+                excluded_algorithms: vec![
+                    "ChaCha20-Poly1305".into(),
+                    "X25519".into(),
+                    "RSA key exchange".into(),
+                ],
+                mtls_enabled: self.tls_paths.is_some(),
+                access_control,
+                total_nodes,
+                approved_nodes: approved,
+                pending_nodes: pending,
+                rejected_nodes: rejected,
+                total_vms,
+                running_vms,
+                stopped_vms,
+                total_networks,
+                nat_networks: nat,
+                bridge_networks: bridge,
+                vxlan_networks: vxlan,
+                sub_ca_enabled,
+                cert_auto_renewal_days: 30,
+                nodes_expiring_30d: expiring_30d,
+                nodes_cert_unknown: cert_unknown,
+            },
+        ))
+    }
+}
+
+fn acl(method: &str, identity: &str) -> controller_proto::AccessControlEntry {
+    controller_proto::AccessControlEntry {
+        rpc_method: method.to_string(),
+        allowed_identities: if identity.ends_with('-') {
+            format!("{identity}*")
+        } else {
+            identity.to_string()
+        },
+    }
 }
 
 #[cfg(test)]

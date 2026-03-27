@@ -370,6 +370,9 @@ enum GetResource {
         #[arg(long = "target-node")]
         target_node: Option<String>,
     },
+    /// Show compliance report
+    #[command(alias = "compliance")]
+    ComplianceReport,
 }
 
 #[derive(Subcommand)]
@@ -727,6 +730,12 @@ async fn main() {
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::network::list(&info, target_node.clone()).await
+        }
+        Command::Get {
+            resource: GetResource::ComplianceReport,
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::compliance::report(&info).await
         }
 
         Command::Node {

@@ -43,6 +43,9 @@ service Controller {
   rpc RenewNodeCert(RenewNodeCertRequest) returns (RenewNodeCertResponse);
   rpc RotateSubCa(RotateSubCaRequest) returns (RotateSubCaResponse);
   rpc ReloadTls(ReloadTlsRequest) returns (ReloadTlsResponse);
+
+  // Compliance
+  rpc GetComplianceReport(GetComplianceReportRequest) returns (GetComplianceReportResponse);
 }
 
 message RegisterNodeRequest {
@@ -432,4 +435,46 @@ message ReloadTlsRequest {
 message ReloadTlsResponse {
   bool success = 1;
   string message = 2;
+}
+
+// Compliance Report
+
+message GetComplianceReportRequest {}
+
+message AccessControlEntry {
+  string rpc_method = 1;
+  string allowed_identities = 2;
+}
+
+message GetComplianceReportResponse {
+  string controller_version = 1;
+
+  string crypto_library = 2;
+  repeated string tls13_cipher_suites = 3;
+  repeated string tls12_cipher_suites = 4;
+  repeated string kx_groups = 5;
+  repeated string excluded_algorithms = 6;
+
+  bool mtls_enabled = 7;
+
+  repeated AccessControlEntry access_control = 8;
+
+  int32 total_nodes = 9;
+  int32 approved_nodes = 10;
+  int32 pending_nodes = 11;
+  int32 rejected_nodes = 12;
+
+  int32 total_vms = 13;
+  int32 running_vms = 14;
+  int32 stopped_vms = 15;
+
+  int32 total_networks = 16;
+  int32 nat_networks = 17;
+  int32 bridge_networks = 18;
+  int32 vxlan_networks = 19;
+
+  bool sub_ca_enabled = 20;
+  int32 cert_auto_renewal_days = 21;
+  int32 nodes_expiring_30d = 22;
+  int32 nodes_cert_unknown = 23;
 }

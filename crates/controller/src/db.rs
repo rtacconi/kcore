@@ -769,6 +769,76 @@ impl Database {
         let rows = stmt.query_map(params![timeout_seconds], row_to_node)?;
         rows.collect()
     }
+
+    pub fn count_nodes_by_approval(&self) -> Result<(i32, i32, i32), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt =
+            conn.prepare("SELECT approval_status, COUNT(*) FROM nodes GROUP BY approval_status")?;
+        let rows = stmt.query_map([], |row| {
+            let status: String = row.get(0)?;
+            let count: i32 = row.get(1)?;
+            Ok((status, count))
+        })?;
+        let (mut approved, mut pending, mut rejected) = (0, 0, 0);
+        for row in rows {
+            let (status, count) = row?;
+            match status.as_str() {
+                "approved" => approved = count,
+                "pending" => pending = count,
+                "rejected" => rejected = count,
+                _ => {}
+            }
+        }
+        Ok((approved, pending, rejected))
+    }
+
+    pub fn count_vms_by_auto_start(&self) -> Result<(i32, i32), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let total: i32 = conn.query_row("SELECT COUNT(*) FROM vms", [], |row| row.get(0))?;
+        let running: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM vms WHERE auto_start = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok((total, running))
+    }
+
+    pub fn count_networks_by_type(&self) -> Result<(i32, i32, i32), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt =
+            conn.prepare("SELECT network_type, COUNT(*) FROM networks GROUP BY network_type")?;
+        let rows = stmt.query_map([], |row| {
+            let ntype: String = row.get(0)?;
+            let count: i32 = row.get(1)?;
+            Ok((ntype, count))
+        })?;
+        let (mut nat, mut bridge, mut vxlan) = (0, 0, 0);
+        for row in rows {
+            let (ntype, count) = row?;
+            match ntype.as_str() {
+                "nat" => nat = count,
+                "bridge" => bridge = count,
+                "vxlan" => vxlan = count,
+                _ => {}
+            }
+        }
+        Ok((nat, bridge, vxlan))
+    }
+
+    pub fn count_nodes_cert_expiry(&self) -> Result<(i32, i32), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let expiring: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE cert_expiry_days > 0 AND cert_expiry_days <= 30",
+            [],
+            |row| row.get(0),
+        )?;
+        let unknown: i32 = conn.query_row(
+            "SELECT COUNT(*) FROM nodes WHERE cert_expiry_days < 0",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok((expiring, unknown))
+    }
 }
 
 fn row_to_node(row: &rusqlite::Row) -> Result<NodeRow, rusqlite::Error> {
