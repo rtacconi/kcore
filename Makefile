@@ -40,7 +40,7 @@ test-tla:
 	bash ./scripts/check-tla.sh
 
 test-tla-trace:
-	python3 ./scripts/check-replication-trace.py ./specs/tla/traces/replication-sample.json
+	bash ./scripts/test-replication-trace.sh
 
 coverage:
 	nix develop -c nix shell nixpkgs#cargo-llvm-cov nixpkgs#cargo nixpkgs#rustc nixpkgs#llvmPackages_21.llvm -c sh -lc 'LLVM_COV="$$(which llvm-cov)" LLVM_PROFDATA="$$(which llvm-profdata)" cargo llvm-cov --workspace --summary-only'

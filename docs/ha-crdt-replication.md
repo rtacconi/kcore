@@ -293,3 +293,4 @@ Status (incremental):
 - `ControllerNodeReconcile.tla` now models deterministic priority-based failover and heartbeat progress with fairness constraints, improving failover-liveness guardrails.
 - A trace drift checker now exists (`make test-tla-trace`) to validate sampled replication traces against deterministic winner and auto-terminal assumptions used by the formal model.
 - `CrossDcReplication.tla` now models explicit intra-DC vs cross-DC anti-entropy and checks bounded cross-DC convergence/no-double-apply safety.
+- Trace drift validation now includes both positive and negative fixtures (expected pass and expected fail) via `scripts/test-replication-trace.sh`, reducing silent checker regressions.

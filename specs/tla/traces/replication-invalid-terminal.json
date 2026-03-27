@@ -1,0 +1,9 @@
+[
+  {
+    "resource_key": "vm/v-bad",
+    "op_id": "op-bad",
+    "rank": 42,
+    "terminal_state": "manual",
+    "expected_winner_op_id": "op-bad"
+  }
+]

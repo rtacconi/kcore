@@ -54,6 +54,8 @@ make test-tla-trace
 Sample fixture:
 
 - `specs/tla/traces/replication-sample.json`
+- `specs/tla/traces/replication-sample-2.json`
+- `specs/tla/traces/replication-invalid-terminal.json` (negative-case fixture)
 
 Notes:
 

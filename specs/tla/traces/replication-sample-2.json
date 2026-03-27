@@ -1,0 +1,23 @@
+[
+  {
+    "resource_key": "network/n1",
+    "op_id": "op-10",
+    "rank": 5,
+    "terminal_state": "auto_accepted",
+    "expected_winner_op_id": "op-10"
+  },
+  {
+    "resource_key": "network/n1",
+    "op_id": "op-11",
+    "rank": 7,
+    "terminal_state": "auto_accepted",
+    "expected_winner_op_id": "op-11"
+  },
+  {
+    "resource_key": "node/node-1",
+    "op_id": "op-20",
+    "rank": 1,
+    "terminal_state": "none",
+    "expected_winner_op_id": "op-20"
+  }
+]
