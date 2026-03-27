@@ -109,6 +109,16 @@ pub struct ReplicationConflictRow {
     pub reason: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct ReplicationCompensationJobRow {
+    pub id: i64,
+    pub conflict_id: i64,
+    pub resource_key: String,
+    pub loser_op_id: String,
+    pub status: String,
+    pub attempts: i32,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -429,7 +439,23 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 16;
+        if version < 17 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replication_compensation_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conflict_id INTEGER NOT NULL REFERENCES replication_conflicts(id) ON DELETE CASCADE,
+                    resource_key TEXT NOT NULL,
+                    loser_op_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'pending',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 17;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -741,6 +767,91 @@ impl Database {
             params![id],
         )?;
         Ok(rows > 0)
+    }
+
+    pub fn insert_compensation_job(
+        &self,
+        conflict_id: i64,
+        resource_key: &str,
+        loser_op_id: &str,
+    ) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO replication_compensation_jobs (conflict_id, resource_key, loser_op_id)
+             VALUES (?1, ?2, ?3)",
+            params![conflict_id, resource_key, loser_op_id],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn count_pending_compensation_jobs(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM replication_compensation_jobs WHERE status = 'pending'",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn claim_next_compensation_job(
+        &self,
+    ) -> Result<Option<ReplicationCompensationJobRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, conflict_id, resource_key, loser_op_id, status, attempts
+             FROM replication_compensation_jobs
+             WHERE status IN ('pending', 'failed')
+             ORDER BY id ASC
+             LIMIT 1",
+        )?;
+        let mut rows = stmt.query_map([], |row| {
+            Ok(ReplicationCompensationJobRow {
+                id: row.get(0)?,
+                conflict_id: row.get(1)?,
+                resource_key: row.get(2)?,
+                loser_op_id: row.get(3)?,
+                status: row.get(4)?,
+                attempts: row.get(5)?,
+            })
+        })?;
+        let Some(job) = rows.next().transpose()? else {
+            return Ok(None);
+        };
+        let updated = conn.execute(
+            "UPDATE replication_compensation_jobs
+             SET status = 'running', attempts = attempts + 1, updated_at = datetime('now')
+             WHERE id = ?1 AND status IN ('pending', 'failed')",
+            params![job.id],
+        )?;
+        if updated == 0 {
+            return Ok(None);
+        }
+        let mut claimed = job;
+        claimed.status = "running".to_string();
+        claimed.attempts += 1;
+        Ok(Some(claimed))
+    }
+
+    pub fn complete_compensation_job(&self, id: i64) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "UPDATE replication_compensation_jobs
+             SET status = 'completed', updated_at = datetime('now')
+             WHERE id = ?1",
+            params![id],
+        )?;
+        Ok(())
+    }
+
+    pub fn fail_compensation_job(&self, id: i64, error: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "UPDATE replication_compensation_jobs
+             SET status = 'failed', last_error = ?2, updated_at = datetime('now')
+             WHERE id = ?1",
+            params![id, error],
+        )?;
+        Ok(())
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
@@ -1830,5 +1941,34 @@ mod tests {
                 .expect("count after resolve"),
             0
         );
+    }
+
+    #[test]
+    fn compensation_job_roundtrip() {
+        let db = Database::open(":memory:").expect("open db");
+        let conflict_id = db
+            .insert_replication_conflict(
+                "vm/v1",
+                "op-inc",
+                "op-loser",
+                "ctrl-a",
+                "ctrl-b",
+                "needs compensation",
+            )
+            .expect("insert conflict");
+        assert_eq!(db.count_pending_compensation_jobs().expect("count"), 0);
+        let job_id = db
+            .insert_compensation_job(conflict_id, "vm/v1", "op-loser")
+            .expect("insert job");
+        assert!(job_id >= 1);
+        assert_eq!(db.count_pending_compensation_jobs().expect("count"), 1);
+        let job = db
+            .claim_next_compensation_job()
+            .expect("claim")
+            .expect("job exists");
+        assert_eq!(job.status, "running");
+        assert_eq!(job.conflict_id, conflict_id);
+        db.complete_compensation_job(job.id).expect("complete");
+        assert_eq!(db.count_pending_compensation_jobs().expect("count"), 0);
     }
 }

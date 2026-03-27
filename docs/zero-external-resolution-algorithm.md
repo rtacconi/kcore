@@ -63,6 +63,7 @@ Current tables used by this algorithm:
 - `replication_received_ops`: dedupe by `opId`
 - `replication_resource_heads`: deterministic winner head per resource
 - `replication_conflicts`: audit rows for contenders (stored auto-resolved by policy)
+- `replication_compensation_jobs`: queued retries for `auto_compensated` loser handling
 
 ## Apply Pipeline
 
@@ -74,7 +75,8 @@ For each incoming event:
 4. Compute deterministic rank winner.
 5. Upsert `replication_resource_heads` if contender wins.
 6. Record audit conflict row with automatic resolution reason.
-7. Advance `apply/<peer>` frontier.
+7. If loser terminal is `auto_compensated`, enqueue compensation job and complete it via background executor.
+8. Advance `apply/<peer>` frontier.
 
 No unresolved conflict is required for normal convergence.
 
@@ -107,6 +109,6 @@ Liveness:
 
 ## Current Limitations
 
-- `auto_compensated` terminal semantics are defined but compensation execution is not yet implemented.
+- Compensation executor is currently a deterministic skeleton (no domain-specific rollback yet).
 - Resource reservations/escrow for scarce resources are not modeled yet.
 - Domain materialization from heads to desired-state tables is incremental.
