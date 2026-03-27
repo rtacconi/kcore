@@ -42,9 +42,9 @@ struct Cli {
     #[arg(short = 'c', long, global = true)]
     config: Option<PathBuf>,
 
-    /// Controller address (host:port)
+    /// Controller address (host:port), repeatable for fallback order
     #[arg(short = 's', long, global = true)]
-    controller: Option<String>,
+    controller: Vec<String>,
 
     /// Skip TLS (connect over plain HTTP)
     #[arg(short = 'k', long, global = true)]
@@ -920,7 +920,7 @@ async fn main() {
                 config::resolve_install_certs_dir(&config_path)
                     .unwrap_or_else(|e| fatal(&e))
             };
-            let info = config::resolve_controller(&config_path, &None, cli.insecure).ok();
+            let info = config::resolve_controller(&config_path, &[], cli.insecure).ok();
             commands::certs::rotate(&certs_path, controller, info.as_ref()).await
         }
         Command::Rotate {

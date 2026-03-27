@@ -192,6 +192,23 @@ mod tests {
         (addr.to_string(), tx)
     }
 
+    async fn start_insecure_server() -> (String, oneshot::Sender<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+        let (_reporter, service) = tonic_health::server::health_reporter();
+        let (tx, rx) = oneshot::channel::<()>();
+        tokio::spawn(async move {
+            Server::builder()
+                .add_service(service)
+                .serve_with_incoming_shutdown(TcpListenerStream::new(listener), async move {
+                    let _ = rx.await;
+                })
+                .await
+                .expect("serve");
+        });
+        (addr.to_string(), tx)
+    }
+
     fn ensure_crypto_provider() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
     }
@@ -254,5 +271,27 @@ mod tests {
             .await;
         let _ = shutdown.send(());
         assert!(resp.is_err());
+    }
+
+    #[tokio::test]
+    async fn connect_falls_back_to_second_controller_endpoint() {
+        let (addr, shutdown) = start_insecure_server().await;
+        let info = ConnectionInfo {
+            address: "127.0.0.1:1".to_string(),
+            addresses: vec!["127.0.0.1:1".to_string(), addr],
+            insecure: true,
+            cert: None,
+            key: None,
+            ca: None,
+        };
+        let channel = super::connect(&info).await.expect("fallback connect");
+        let mut health = tonic_health::pb::health_client::HealthClient::new(channel);
+        let resp = health
+            .check(tonic_health::pb::HealthCheckRequest {
+                service: String::new(),
+            })
+            .await;
+        let _ = shutdown.send(());
+        assert!(resp.is_ok());
     }
 }

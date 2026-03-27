@@ -162,11 +162,15 @@ fn normalize_addresses(addrs: &[String], default_port: u16) -> Vec<String> {
 /// Priority: flag > config > error.
 pub fn resolve_controller(
     config_path: &Path,
-    controller_flag: &Option<String>,
+    controller_flags: &[String],
     insecure_flag: bool,
 ) -> Result<ConnectionInfo, String> {
     let default_certs = default_certs_dir();
-    if let Some(addr) = controller_flag {
+    if !controller_flags.is_empty() {
+        let addresses = normalize_addresses(controller_flags, 9090);
+        if addresses.is_empty() {
+            return Err("no valid --controller endpoints provided".to_string());
+        }
         let (cert, key, ca) = if insecure_flag {
             (None, None, None)
         } else {
@@ -177,8 +181,8 @@ pub fn resolve_controller(
             )
         };
         return Ok(ConnectionInfo {
-            address: normalize_address(addr, 9090),
-            addresses: vec![normalize_address(addr, 9090)],
+            address: addresses[0].clone(),
+            addresses,
             insecure: insecure_flag,
             cert,
             key,
@@ -279,7 +283,11 @@ mod tests {
 
     #[test]
     fn resolve_controller_uses_flag_and_defaults_port() {
-        let info = resolve_controller(Path::new("/nonexistent"), &Some("10.0.0.10".into()), true)
+        let info = resolve_controller(
+            Path::new("/nonexistent"),
+            &["10.0.0.10".into()],
+            true,
+        )
             .expect("resolve controller");
         assert_eq!(info.address, "10.0.0.10:9090");
         assert_eq!(info.addresses, vec!["10.0.0.10:9090"]);
@@ -308,5 +316,17 @@ mod tests {
         assert!(info.cert.is_none());
         assert!(info.key.is_none());
         assert!(info.ca.is_none());
+    }
+
+    #[test]
+    fn resolve_controller_accepts_multiple_flag_endpoints() {
+        let info = resolve_controller(
+            Path::new("/nonexistent"),
+            &["10.0.0.10".into(), "10.0.0.11:9090".into()],
+            true,
+        )
+        .expect("resolve controller");
+        assert_eq!(info.address, "10.0.0.10:9090");
+        assert_eq!(info.addresses, vec!["10.0.0.10:9090", "10.0.0.11:9090"]);
     }
 }

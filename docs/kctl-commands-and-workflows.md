@@ -7,7 +7,7 @@ This guide walks through `kctl` from first-time setup to day-to-day operations, 
 These flags are available for most commands:
 
 - `-c, --config <path>`: path to kctl config (default `~/.kcore/config`)
-- `-s, --controller <host:port>`: override controller endpoint
+- `-s, --controller <host:port>`: override controller endpoint (repeat to provide ordered fallback endpoints)
 - `-k, --insecure`: use plain HTTP and skip TLS client auth
 - `--node <host:port>`: target node-agent endpoint for direct node commands
 
