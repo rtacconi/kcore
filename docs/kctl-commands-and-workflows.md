@@ -328,6 +328,10 @@ Top-level commands:
 - `kctl node install --os-disk ... --join-controller ... [--data-disk ...] [--storage-backend filesystem|lvm|zfs] [--disable-vxlan]`
 - `kctl node apply-nix -f ... [--no-rebuild]`
 - `kctl pull image <uri>` (legacy/manual path)
+- `kctl node approve <NODE_ID>`
+- `kctl node reject <NODE_ID>`
+- `kctl rotate certs --controller <host:port>` (rotate controller cert and push to controller)
+- `kctl rotate sub-ca` (generate and push new sub-CA to controller)
 - `kctl apply -f ... [--dry-run]`
 - `kctl version`
 
@@ -342,9 +346,11 @@ New environment:
 
 Day-2 operations:
 
-1. inspect with `kctl get ...`
+1. inspect with `kctl get ...` (the nodes table includes a `CERT EXPIRY` column)
 2. adjust desired VM running state with `kctl set vm ... --state ...` (or `kctl start/stop vm ...`)
 3. update configs with `kctl node apply-nix ...` or `kctl apply ...`
+4. rotate controller cert with `kctl rotate certs --controller <host:port>`
+5. rotate sub-CA with `kctl rotate sub-ca`
 
 ## 11) Storage backend examples
 

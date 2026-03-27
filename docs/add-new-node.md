@@ -210,6 +210,23 @@ This generates a new sub-CA from the root CA and pushes it to the
 controller. Existing node certs remain valid (the root CA is the trust
 anchor); future renewals use the new sub-CA.
 
+### Monitoring certificate expiry
+
+`kctl get nodes` includes a `CERT EXPIRY` column showing days until each
+node's certificate expires:
+
+```
+ID                    HOSTNAME     ADDRESS             CORES    MEMORY  STATUS   STORAGE     APPROVAL    CERT EXPIRY
+kvm-node-01           kvm-node     192.168.40.105:9091      6   15.5 GB  ready    filesystem  approved           363d
+kvm-node-02           kvm-node-02  192.168.40.110:9091      4   16.0 GB  ready    filesystem  approved            25d ⚠
+```
+
+- Certificates expiring within 30 days are flagged with `⚠`.
+- `EXPIRED` is shown if the certificate has already expired.
+- `unknown` appears if the node has not yet reported its certificate status.
+
+The detailed view (`kctl get node <NODE_ID>`) also includes a `Cert:` line.
+
 ## Security model
 
 The approval queue adds a human gate on top of the mTLS trust model. Even

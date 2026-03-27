@@ -99,15 +99,15 @@ threat model and practical priorities are different.
 - **Certificate rotation commands**: `kctl rotate certs` re-signs the
   controller certificate; `kctl rotate sub-ca` generates a new sub-CA
   and pushes it to the controller.
+- **Certificate expiry visibility**: `kctl get nodes` displays days until
+  each node's certificate expires with a `⚠` warning when within 30 days.
 
 ### Planned improvements
 
 1. **Audit log** -- structured log of all mutating API calls recording
    actor identity, action, resource, and timestamp. Essential for
    debugging and compliance.
-2. **Cert expiry warning** -- `kctl get nodes` displays days until each
-   node's certificate expires to prevent silent expiry.
-3. **RBAC** -- multiple operator roles such as read-only, vm-admin, and
+2. **RBAC** -- multiple operator roles such as read-only, vm-admin, and
    cluster-admin with fine-grained permission control.
 
 ### Not planned (Kubernetes-specific complexity)

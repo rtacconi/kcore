@@ -120,6 +120,7 @@ Additional security measures:
 
 - **Node approval queue**: new nodes register as `pending` and must be approved before participating in the cluster.
 - **Sub-CA auto-rotation**: node certs are renewed automatically; the sub-CA is revocable by the operator without affecting the root CA.
+- **Certificate expiry visibility**: each node reports its certificate expiry at registration. `kctl get nodes` shows a `CERT EXPIRY` column with days remaining and a `⚠` warning when within 30 days of expiry.
 
 Remaining gaps to track:
 
