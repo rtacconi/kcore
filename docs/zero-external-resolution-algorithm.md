@@ -106,6 +106,11 @@ Key invariants:
 - **HeadMonotonicity**: head only changes to a greater rank.
 - **NoManualRequired**: conflicts are immediately terminal (`auto_*`) in normal flow.
 
+Current bounded TLC model coverage:
+
+- `ControllerReplication.tla` encodes `Outbox`, `Delivered`, `Applied`, `Head`, `ReceivedOps`, `Frontier`, and `Conflicts`.
+- Invariants checked include `TypeOK`, `NoDoubleApply`, `DeterministicWinner`, and `NoManualRequired`.
+
 Liveness:
 
 - Under fair delivery, every delivered event is eventually applied and frontiers converge.
