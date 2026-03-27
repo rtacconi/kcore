@@ -126,6 +126,16 @@ pub struct ReplicationMaterializedHeadRow {
     pub last_event_type: String,
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ReplicationReservationRow {
+    pub reservation_key: String,
+    pub resource_key: String,
+    pub op_id: String,
+    pub status: String,
+    pub error: String,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -473,7 +483,21 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 18;
+        if version < 19 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replication_reservations (
+                    reservation_key TEXT NOT NULL,
+                    resource_key TEXT NOT NULL,
+                    op_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    error TEXT NOT NULL DEFAULT '',
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    PRIMARY KEY (reservation_key, resource_key)
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 19;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -940,6 +964,52 @@ impl Database {
             params![resource_key, last_op_id, last_event_type],
         )?;
         Ok(())
+    }
+
+    pub fn upsert_replication_reservation(
+        &self,
+        reservation_key: &str,
+        resource_key: &str,
+        op_id: &str,
+        status: &str,
+        error: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO replication_reservations (
+                reservation_key, resource_key, op_id, status, error, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+             ON CONFLICT(reservation_key, resource_key) DO UPDATE SET
+                op_id=excluded.op_id,
+                status=excluded.status,
+                error=excluded.error,
+                updated_at=datetime('now')",
+            params![reservation_key, resource_key, op_id, status, error],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_replication_reservation(
+        &self,
+        reservation_key: &str,
+        resource_key: &str,
+    ) -> Result<Option<ReplicationReservationRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT reservation_key, resource_key, op_id, status, error
+             FROM replication_reservations
+             WHERE reservation_key = ?1 AND resource_key = ?2",
+        )?;
+        let mut rows = stmt.query_map(params![reservation_key, resource_key], |row| {
+            Ok(ReplicationReservationRow {
+                reservation_key: row.get(0)?,
+                resource_key: row.get(1)?,
+                op_id: row.get(2)?,
+                status: row.get(3)?,
+                error: row.get(4)?,
+            })
+        })?;
+        rows.next().transpose()
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
@@ -2077,5 +2147,25 @@ mod tests {
         assert_eq!(row.resource_key, "vm/v1");
         assert_eq!(row.last_op_id, "op-1");
         assert_eq!(row.last_event_type, "vm.update");
+    }
+
+    #[test]
+    fn replication_reservation_roundtrip() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_replication_reservation(
+            "node-capacity/node-1",
+            "vm/v1",
+            "op-1",
+            "reserved",
+            "",
+        )
+        .expect("upsert reservation");
+        let row = db
+            .get_replication_reservation("node-capacity/node-1", "vm/v1")
+            .expect("get reservation")
+            .expect("reservation present");
+        assert_eq!(row.op_id, "op-1");
+        assert_eq!(row.status, "reserved");
+        assert!(row.error.is_empty());
     }
 }

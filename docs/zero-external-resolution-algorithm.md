@@ -65,6 +65,7 @@ Current tables used by this algorithm:
 - `replication_materialized_heads`: replay-safe frontier of head-to-domain projection
 - `replication_conflicts`: audit rows for contenders (stored auto-resolved by policy)
 - `replication_compensation_jobs`: queued retries for `auto_compensated` loser handling
+- `replication_reservations`: reservation ledger for scarce-resource preconditions
 
 ## Apply Pipeline
 
@@ -112,5 +113,5 @@ Liveness:
 
 - Compensation executor is currently a deterministic skeleton (no domain-specific rollback yet).
 - Head materialization currently covers a subset of event types; full desired-state projection is still in progress.
-- Resource reservations/escrow for scarce resources are not modeled yet.
+- Reservation model currently gates `vm.create` with a node-capacity token; full IP/storage escrow remains in progress.
 - Domain materialization from heads to desired-state tables remains incremental.

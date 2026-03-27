@@ -251,7 +251,7 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
     let existing_head = db
         .get_replication_resource_head(payload_resource_key)
         .map_err(|e| format!("get resource head for event {}: {e}", event.event_id))?;
-    let replace_head = should_replace_head(
+    let mut replace_head = should_replace_head(
         existing_head.as_ref(),
         policy_priority,
         intent_epoch,
@@ -261,8 +261,34 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
         origin_controller_id,
         op_id,
     );
+    let mut reservation_rejected = false;
+    if replace_head {
+        let reservation =
+            evaluate_reservation(db, &event.event_type, payload_resource_key, op_id, &body)?;
+        if !reservation.accepted {
+            replace_head = false;
+            reservation_rejected = true;
+            let (incumbent_op_id, incumbent_controller_id) = existing_head
+                .as_ref()
+                .map(|h| (h.last_op_id.as_str(), h.last_controller_id.as_str()))
+                .unwrap_or((op_id, origin_controller_id));
+            let reason = format!("auto-rejected: reservation failed ({})", reservation.reason);
+            let _ = db.insert_replication_conflict_with_resolved(
+                payload_resource_key,
+                incumbent_op_id,
+                op_id,
+                incumbent_controller_id,
+                origin_controller_id,
+                &reason,
+                true,
+            );
+        }
+    }
 
     if let Some(existing) = existing_head.as_ref() {
+        if reservation_rejected {
+            return Ok(());
+        }
         let reason = if replace_head {
             format!(
                 "auto-resolved: challenger wins by deterministic rank (incumbent_op={}, challenger_op={})",
@@ -354,6 +380,54 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
             );
             Ok(())
         }
+    }
+}
+
+struct ReservationOutcome {
+    accepted: bool,
+    reason: String,
+}
+
+fn evaluate_reservation(
+    db: &Database,
+    event_type: &str,
+    resource_key: &str,
+    op_id: &str,
+    body: &Value,
+) -> Result<ReservationOutcome, String> {
+    if event_type != "vm.create" {
+        return Ok(ReservationOutcome {
+            accepted: true,
+            reason: "not-required".to_string(),
+        });
+    }
+    let Some(node_id) = body.get("nodeId").and_then(Value::as_str) else {
+        return Ok(ReservationOutcome {
+            accepted: false,
+            reason: "missing nodeId".to_string(),
+        });
+    };
+    let reservation_key = format!("node-capacity/{node_id}");
+    let can_reserve = db
+        .get_node(node_id)
+        .map_err(|e| format!("load node for reservation {node_id}: {e}"))?
+        .map(|n| n.approval_status == "approved")
+        .unwrap_or(false);
+    if can_reserve {
+        db.upsert_replication_reservation(&reservation_key, resource_key, op_id, "reserved", "")
+            .map_err(|e| format!("reserve token {reservation_key}: {e}"))?;
+        Ok(ReservationOutcome {
+            accepted: true,
+            reason: reservation_key,
+        })
+    } else {
+        let error = "node missing or not approved";
+        db.upsert_replication_reservation(&reservation_key, resource_key, op_id, "failed", error)
+            .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
+        Ok(ReservationOutcome {
+            accepted: false,
+            reason: format!("{reservation_key}: {error}"),
+        })
     }
 }
 
@@ -788,5 +862,28 @@ mod tests {
 
         // Replay-safe: same winner op should not produce further work.
         assert!(!process_materialization_once(&db).expect("materialize no-op"));
+    }
+
+    #[test]
+    fn vm_create_reservation_failure_rejects_head() {
+        let db = Database::open(":memory:").expect("open db");
+        let ev = controller_proto::ReplicationEvent {
+            event_id: 10,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.create".to_string(),
+            resource_key: "vm/v9".to_string(),
+            payload: br#"{"opId":"op-9","controllerId":"ctrl-a","logicalTsUnixMs":1000,"eventType":"vm.create","resourceKey":"vm/v9","body":{"vmId":"v9","nodeId":"missing-node","name":"v9"}}"#.to_vec(),
+        };
+        apply_replication_event(&db, &ev).expect("apply");
+        assert!(
+            db.get_replication_resource_head("vm/v9")
+                .expect("get head")
+                .is_none()
+        );
+        let reservation = db
+            .get_replication_reservation("node-capacity/missing-node", "vm/v9")
+            .expect("reservation read")
+            .expect("reservation row");
+        assert_eq!(reservation.status, "failed");
     }
 }
