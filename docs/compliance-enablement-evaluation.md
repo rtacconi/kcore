@@ -233,27 +233,50 @@ KCore now uses FIPS-validated cryptography by default, without requiring a runti
 - KCore does not need its own FIPS 140-3 certificate. It uses a pre-validated library and documents that fact.
 - Customer evidence: "All management plane TLS uses aws-lc-rs (AWS-LC FIPS 140-3 #4816) with AES-GCM cipher suites and NIST P-256/P-384 key exchange. No non-FIPS algorithms are negotiable."
 
-### 2.5 Encryption at rest (GDPR, SOC 2, PCI)
+### 2.5 Encryption at rest (NCSC, SOC 2, defense in depth)
 
-Customers need to demonstrate that data at rest is encrypted.
+#### What each standard actually requires
 
-**Data classification:** KCore's controller SQLite database stores only operational metadata — node IPs, hostnames, VM definitions, network configurations, and certificate Common Names. It does **not** store personal data (GDPR), cardholder data (PCI DSS), or customer secrets. Therefore application-level database encryption (e.g. SQLCipher) is unnecessary and would add build complexity and key management burden for zero compliance value.
+No standard requires encrypting "everything on every disk." Each scopes encryption at rest to specific data types:
 
-**Why full-disk encryption (LUKS) is sufficient:**
+| Standard | What must be encrypted at rest | OS partition? | KCore metadata? |
+|----------|-------------------------------|--------------|----------------|
+| **PCI DSS 4.0** (Req 3.5) | **PANs and SAD only.** PCI SSC: "Requirements 3.5–3.7 would not be applicable to systems that do not store or manage the storage of cardholder data." Disk-level encryption alone is insufficient for PANs anyway — file/column/app-level encryption is required on top. | No | No (KCore stores no cardholder data) |
+| **SOC 2** (CC6.1, C1.1) | **Customer/confidential data** per risk classification. Principle-based — auditors evaluate appropriateness, not specific mechanisms. | Not required | Only if classified as confidential |
+| **GDPR** (Art. 32) | **Personal data** only. "Encryption of personal data where appropriate." Technology-neutral, risk-proportional. | No | No (KCore stores no personal data) |
+| **FIPS 140-3** | **Nothing** — FIPS validates cryptographic modules, not what you encrypt. Scope is set by organizational policy (typically via NIST 800-53). | N/A | N/A |
+| **NIST 800-53** (SC-28) | **Organization-defined information at rest.** Includes both user data and system data (configs, credentials, auth info). You choose full-disk or per-file. | Your choice | Yes — configs and credentials are in scope |
+| **NCSC Principle 2** | **Your data and assets storing/processing it**, including "credentials, configuration data, derived metadata and logs." Broadest scope. | Implicitly yes | Yes — credentials and configs are in scope |
 
-- **PCI DSS 4.0 Requirement 3.5.1.2** restricts disk-level-only encryption to removable media, but this applies specifically to stored PANs. The PCI SSC states: "Requirements 3.5–3.7 would not be applicable to systems that do not store or manage the storage of cardholder data." KCore never stores PANs.
-- **SOC 2** is principle-based and does not prescribe specific encryption methods. Auditors evaluate whether the approach is appropriate for the data classification. LUKS on the host disk, combined with file permissions (0600) on certificate files and mTLS on the network, is a defensible position for infrastructure metadata.
-- **GDPR Art. 32** requires "appropriate technical measures" proportional to risk. KCore stores no personal data. LUKS on the host disk protects operational metadata. Guest-level encryption for VMs containing personal data is the customer's responsibility.
-- **FIPS 140-3** has no opinion on encryption at rest beyond requiring a validated module if encryption is used. LUKS uses the kernel's `dm-crypt` which operates in FIPS mode when the `fips=1` kernel parameter is set.
+#### Data classification for KCore nodes
 
-**What to provide:**
+KCore's controller SQLite database stores only operational metadata — node IPs, hostnames, VM definitions, network configurations, and certificate Common Names. It does **not** store personal data (GDPR), cardholder data (PCI DSS), or customer secrets.
 
-| Layer | Protection | Responsibility | Engineering effort |
-|-------|-----------|---------------|-------------------|
-| Host disk (LUKS) | Full-disk encryption via dm-crypt/LUKS on NixOS nodes | Customer deploys using KCore's reference NixOS configuration | Documentation only |
-| Certificate files | File permissions (0600) + LUKS | Already implemented | Already done |
-| Controller SQLite DB | Protected by LUKS — no application-level encryption needed | N/A (operational metadata only) | None |
-| VM guest disks | Guest-level LUKS for workloads with sensitive/personal/cardholder data | Customer's responsibility | Documentation only |
+However, KCore nodes **do** store on disk:
+- TLS private keys and sub-CA private keys (`/etc/kcore/certs/`) — **credentials**
+- Controller configuration (`controller.yaml`) — **configuration data**
+- NixOS system configuration — **system data**
+
+Under NCSC Principle 2 and NIST 800-53 SC-28, these are in scope for encryption at rest.
+
+#### Why KCore enforces full-disk encryption
+
+Although most standards do not require encrypting the OS partition or operational metadata, KCore encrypts the entire disk for four reasons:
+
+1. **NCSC and NIST compliance** — the broadest standards include credentials and configuration data in scope. KCore stores TLS private keys and sub-CA keys on disk.
+2. **Defense in depth** — if an attacker gains physical access to a node, full-disk encryption prevents reading any data, including binaries, configs, and the Nix store.
+3. **Operational simplicity** — one LUKS partition for everything is simpler than selectively encrypting individual paths. No risk of accidentally storing sensitive data on an unencrypted volume.
+4. **VM guest disks reside on the same node** — customer VMs that process personal or cardholder data have their disk images stored on the host. Full-disk LUKS provides a baseline layer of protection for those images at rest, even though customers with PCI requirements still need application-level encryption inside the VM.
+
+#### What KCore provides vs. customer responsibility
+
+| Layer | Protection | Responsibility | Notes |
+|-------|-----------|---------------|-------|
+| Host disk (LUKS) | Full-disk encryption via dm-crypt/LUKS, mandatory on all nodes | KCore enforces at install time (TPM auto-detect, key-file fallback) | Automated by `kctl node install` |
+| Certificate files | File permissions (0600) + LUKS | Already implemented | Defense in depth |
+| Controller SQLite DB | Protected by LUKS — no application-level encryption needed | N/A (operational metadata only, no PII/PAN) | SQLCipher unnecessary |
+| VM guest disks (host-level) | LUKS on host protects qcow2/ZFS volumes at rest | Automatic — images reside on encrypted host disk | Baseline protection |
+| VM guest disks (app-level) | Guest-level LUKS or app-level encryption inside the VM | **Customer's responsibility** | Required for PCI DSS Req 3.5 if VMs process cardholder data |
 
 **Reference NixOS LUKS configuration:**
 
@@ -340,11 +363,13 @@ For production KCore deployments, **TPM 2.0 with PCR binding (Option A)** is rec
 Customers should apply this to all KCore nodes. The `kctl node install` workflow does not currently automate LUKS setup — the operator must partition and encrypt the disk before running the installer, or use a pre-encrypted NixOS image.
 
 **Why this matters for customers:**
-- GDPR Art. 32: "encryption of personal data" — customer VMs with personal data use guest-level LUKS
-- SOC 2 C1.1: "confidential information is protected" — LUKS on host disk protects all KCore state
-- PCI DSS 2.2: "system hardening" — LUKS is a general hardening control; PCI 3.5 does not apply because KCore does not store cardholder data
+- **NCSC Principle 2**: "credentials, configuration data, derived metadata and logs" must be protected — LUKS on the host disk covers TLS keys, sub-CA keys, and controller configuration
+- **NIST 800-53 SC-28**: system data (configs, credentials) is in scope for encryption at rest — full-disk LUKS satisfies this
+- **SOC 2 C1.1**: "confidential information is protected" — LUKS on host disk protects all KCore state; auditors evaluate risk-appropriateness, and full-disk encryption is a strong position
+- **PCI DSS 2.2**: "system hardening" — LUKS is a general hardening control; Req 3.5 does not apply because KCore does not store cardholder data. Customers whose VMs process cardholder data must additionally implement application-level encryption inside the VM (Req 3.5.1.2)
+- **GDPR Art. 32**: "encryption of personal data where appropriate" — KCore stores no personal data, but customer VMs may; host-level LUKS provides a baseline, guest-level encryption is the customer's responsibility
 
-**Effort estimate:** Documentation only. No engineering required.
+**Effort estimate:** Engineering required for automated LUKS in `kctl node install` (TPM auto-detect + key-file fallback). Reference NixOS configurations provided below for manual deployments.
 
 ### 2.6 Certificate lifecycle management (SOC 2, PCI, NCSC)
 
