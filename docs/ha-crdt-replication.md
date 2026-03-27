@@ -262,6 +262,7 @@ Status (incremental):
 - `ControllerAdmin.GetReplicationStatus` exposes replication health counters (`outbox_head_event_id`, `outbox_size`, outgoing ack lag, and incoming pull/apply frontiers).
 - Apply path now maintains `replication_resource_heads` using deterministic LWW ordering (`logicalTsUnixMs`, then `controllerId`, then `opId`) as a merge foundation before full domain materialization.
 - Equal-timestamp cross-controller contenders are now logged into `replication_conflicts`; `GetReplicationStatus` reports an `unresolved_conflicts` count for operator visibility.
+- Deterministic zero-manual arbitration model is documented in `docs/zero-external-resolution-algorithm.md`.
 
 ### Phase 4: conflict UX and operator tools
 

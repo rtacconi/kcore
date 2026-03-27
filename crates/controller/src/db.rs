@@ -87,6 +87,10 @@ pub struct ReplicationResourceHeadRow {
     pub resource_key: String,
     pub last_op_id: String,
     pub last_logical_ts_unix_ms: i64,
+    pub last_policy_priority: i32,
+    pub last_intent_epoch: i64,
+    pub last_validity: String,
+    pub last_safety_class: String,
     pub last_controller_id: String,
     pub last_event_id: i64,
     pub last_event_type: String,
@@ -406,7 +410,26 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 15;
+        if version < 16 {
+            let _ = conn.execute(
+                "ALTER TABLE replication_resource_heads ADD COLUMN last_policy_priority INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE replication_resource_heads ADD COLUMN last_intent_epoch INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE replication_resource_heads ADD COLUMN last_validity TEXT NOT NULL DEFAULT 'valid'",
+                [],
+            );
+            let _ = conn.execute(
+                "ALTER TABLE replication_resource_heads ADD COLUMN last_safety_class TEXT NOT NULL DEFAULT 'safe'",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 16;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -559,8 +582,9 @@ impl Database {
     ) -> Result<Option<ReplicationResourceHeadRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT resource_key, last_op_id, last_logical_ts_unix_ms, last_controller_id,
-                    last_event_id, last_event_type, last_body_json
+            "SELECT resource_key, last_op_id, last_logical_ts_unix_ms,
+                    last_policy_priority, last_intent_epoch, last_validity, last_safety_class,
+                    last_controller_id, last_event_id, last_event_type, last_body_json
              FROM replication_resource_heads
              WHERE resource_key = ?1",
         )?;
@@ -569,10 +593,14 @@ impl Database {
                 resource_key: row.get(0)?,
                 last_op_id: row.get(1)?,
                 last_logical_ts_unix_ms: row.get(2)?,
-                last_controller_id: row.get(3)?,
-                last_event_id: row.get(4)?,
-                last_event_type: row.get(5)?,
-                last_body_json: row.get(6)?,
+                last_policy_priority: row.get(3)?,
+                last_intent_epoch: row.get(4)?,
+                last_validity: row.get(5)?,
+                last_safety_class: row.get(6)?,
+                last_controller_id: row.get(7)?,
+                last_event_id: row.get(8)?,
+                last_event_type: row.get(9)?,
+                last_body_json: row.get(10)?,
             })
         })?;
         rows.next().transpose()
@@ -585,12 +613,18 @@ impl Database {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO replication_resource_heads (
-                resource_key, last_op_id, last_logical_ts_unix_ms, last_controller_id,
+                resource_key, last_op_id, last_logical_ts_unix_ms,
+                last_policy_priority, last_intent_epoch, last_validity, last_safety_class,
+                last_controller_id,
                 last_event_id, last_event_type, last_body_json, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, datetime('now'))
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, datetime('now'))
              ON CONFLICT(resource_key) DO UPDATE SET
                 last_op_id=excluded.last_op_id,
                 last_logical_ts_unix_ms=excluded.last_logical_ts_unix_ms,
+                last_policy_priority=excluded.last_policy_priority,
+                last_intent_epoch=excluded.last_intent_epoch,
+                last_validity=excluded.last_validity,
+                last_safety_class=excluded.last_safety_class,
                 last_controller_id=excluded.last_controller_id,
                 last_event_id=excluded.last_event_id,
                 last_event_type=excluded.last_event_type,
@@ -600,6 +634,10 @@ impl Database {
                 &row.resource_key,
                 &row.last_op_id,
                 row.last_logical_ts_unix_ms,
+                row.last_policy_priority,
+                row.last_intent_epoch,
+                &row.last_validity,
+                &row.last_safety_class,
                 &row.last_controller_id,
                 row.last_event_id,
                 &row.last_event_type,
@@ -618,19 +656,41 @@ impl Database {
         challenger_controller_id: &str,
         reason: &str,
     ) -> Result<i64, rusqlite::Error> {
+        self.insert_replication_conflict_with_resolved(
+            resource_key,
+            incumbent_op_id,
+            challenger_op_id,
+            incumbent_controller_id,
+            challenger_controller_id,
+            reason,
+            false,
+        )
+    }
+
+    pub fn insert_replication_conflict_with_resolved(
+        &self,
+        resource_key: &str,
+        incumbent_op_id: &str,
+        challenger_op_id: &str,
+        incumbent_controller_id: &str,
+        challenger_controller_id: &str,
+        reason: &str,
+        resolved: bool,
+    ) -> Result<i64, rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO replication_conflicts (
                 resource_key, incumbent_op_id, challenger_op_id,
-                incumbent_controller_id, challenger_controller_id, reason
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                incumbent_controller_id, challenger_controller_id, reason, resolved
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             params![
                 resource_key,
                 incumbent_op_id,
                 challenger_op_id,
                 incumbent_controller_id,
                 challenger_controller_id,
-                reason
+                reason,
+                if resolved { 1 } else { 0 }
             ],
         )?;
         Ok(conn.last_insert_rowid())
@@ -1716,6 +1776,10 @@ mod tests {
             resource_key: "vm/v1".into(),
             last_op_id: "op-1".into(),
             last_logical_ts_unix_ms: 123,
+            last_policy_priority: 10,
+            last_intent_epoch: 3,
+            last_validity: "valid".into(),
+            last_safety_class: "safe".into(),
             last_controller_id: "ctrl-a".into(),
             last_event_id: 7,
             last_event_type: "vm.update".into(),
@@ -1728,6 +1792,8 @@ mod tests {
             .expect("exists");
         assert_eq!(got.last_op_id, "op-1");
         assert_eq!(got.last_logical_ts_unix_ms, 123);
+        assert_eq!(got.last_policy_priority, 10);
+        assert_eq!(got.last_intent_epoch, 3);
         assert_eq!(got.last_event_type, "vm.update");
     }
 

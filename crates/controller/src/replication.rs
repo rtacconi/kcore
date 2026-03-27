@@ -7,6 +7,9 @@ use tracing::{info, warn};
 use crate::config::{ReplicationConfig, TlsConfig};
 use crate::controller_proto;
 use crate::db::{Database, ReplicationResourceHeadRow};
+use crate::replication_policy::{
+    compare_rank, loser_terminal_state, parse_safety_class, parse_validity_class, ArbitrationRank,
+};
 
 const DEFAULT_PAGE_SIZE: i32 = 500;
 const MAX_PAGE_SIZE: i32 = 5_000;
@@ -185,6 +188,17 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
         .get("logicalTsUnixMs")
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
+    let policy_priority = payload_obj
+        .get("policyPriority")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0) as i32;
+    let intent_epoch = payload_obj
+        .get("intentEpoch")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0);
+    let validity = parse_validity_class(payload_obj.get("validity").and_then(|v| v.as_str()));
+    let safety_class =
+        parse_safety_class(payload_obj.get("safetyClass").and_then(|v| v.as_str()));
     let body = payload_obj.get("body").cloned().unwrap_or(Value::Null);
 
     if db
@@ -204,31 +218,58 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
     let existing_head = db
         .get_replication_resource_head(payload_resource_key)
         .map_err(|e| format!("get resource head for event {}: {e}", event.event_id))?;
-    if let Some(existing) = existing_head.as_ref() {
-        if existing.last_logical_ts_unix_ms == logical_ts_unix_ms
-            && existing.last_controller_id != origin_controller_id
-            && existing.last_op_id != op_id
-        {
-            let _ = db.insert_replication_conflict(
-                payload_resource_key,
-                &existing.last_op_id,
-                op_id,
-                &existing.last_controller_id,
-                origin_controller_id,
-                "same logicalTsUnixMs with competing controllers; tie-breaker applied",
-            );
-        }
-    }
-    if should_replace_head(
+    let replace_head = should_replace_head(
         existing_head.as_ref(),
+        policy_priority,
+        intent_epoch,
+        validity,
+        safety_class,
         logical_ts_unix_ms,
         origin_controller_id,
         op_id,
-    ) {
+    );
+
+    if let Some(existing) = existing_head.as_ref() {
+        let reason = if replace_head {
+            format!(
+                "auto-resolved: challenger wins by deterministic rank (incumbent_op={}, challenger_op={})",
+                existing.last_op_id, op_id
+            )
+        } else {
+            let loser_state = loser_terminal_state(validity, safety_class);
+            format!(
+                "auto-resolved: incumbent remains winner; challenger terminal={:?} (incumbent_op={}, challenger_op={})",
+                loser_state, existing.last_op_id, op_id
+            )
+        };
+        let _ = db.insert_replication_conflict_with_resolved(
+            payload_resource_key,
+            &existing.last_op_id,
+            op_id,
+            &existing.last_controller_id,
+            origin_controller_id,
+            &reason,
+            true,
+        );
+    }
+
+    if replace_head {
         db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
             resource_key: payload_resource_key.to_string(),
             last_op_id: op_id.to_string(),
             last_logical_ts_unix_ms: logical_ts_unix_ms,
+            last_policy_priority: policy_priority,
+            last_intent_epoch: intent_epoch,
+            last_validity: payload_obj
+                .get("validity")
+                .and_then(|v| v.as_str())
+                .unwrap_or("valid")
+                .to_string(),
+            last_safety_class: payload_obj
+                .get("safetyClass")
+                .and_then(|v| v.as_str())
+                .unwrap_or("safe")
+                .to_string(),
             last_controller_id: origin_controller_id.to_string(),
             last_event_id: event.event_id,
             last_event_type: payload_event_type.to_string(),
@@ -265,6 +306,10 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
 
 fn should_replace_head(
     existing: Option<&ReplicationResourceHeadRow>,
+    policy_priority: i32,
+    intent_epoch: i64,
+    validity: crate::replication_policy::ValidityClass,
+    safety_class: crate::replication_policy::SafetyClass,
     logical_ts_unix_ms: i64,
     controller_id: &str,
     op_id: &str,
@@ -272,13 +317,27 @@ fn should_replace_head(
     let Some(existing) = existing else {
         return true;
     };
-    if logical_ts_unix_ms != existing.last_logical_ts_unix_ms {
-        return logical_ts_unix_ms > existing.last_logical_ts_unix_ms;
-    }
-    if controller_id != existing.last_controller_id {
-        return controller_id > existing.last_controller_id.as_str();
-    }
-    op_id > existing.last_op_id.as_str()
+    compare_rank(
+        ArbitrationRank {
+            validity,
+            safety: safety_class,
+            policy_priority,
+            intent_epoch,
+            logical_ts_unix_ms,
+            controller_id,
+            op_id,
+        },
+        ArbitrationRank {
+            validity: parse_validity_class(Some(&existing.last_validity)),
+            safety: parse_safety_class(Some(&existing.last_safety_class)),
+            policy_priority: existing.last_policy_priority,
+            intent_epoch: existing.last_intent_epoch,
+            logical_ts_unix_ms: existing.last_logical_ts_unix_ms,
+            controller_id: &existing.last_controller_id,
+            op_id: &existing.last_op_id,
+        },
+    )
+    .is_gt()
 }
 
 async fn connect_admin(
@@ -428,7 +487,7 @@ mod tests {
         assert_eq!(
             db.count_unresolved_replication_conflicts()
                 .expect("count conflicts"),
-            1
+            0
         );
     }
 }

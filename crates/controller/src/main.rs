@@ -5,6 +5,7 @@ mod grpc;
 mod nixgen;
 mod node_client;
 mod replication;
+mod replication_policy;
 mod scheduler;
 
 use std::sync::{Arc, Mutex};
