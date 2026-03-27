@@ -93,6 +93,18 @@ pub struct ReplicationResourceHeadRow {
     pub last_body_json: String,
 }
 
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct ReplicationConflictRow {
+    pub id: i64,
+    pub resource_key: String,
+    pub incumbent_op_id: String,
+    pub challenger_op_id: String,
+    pub incumbent_controller_id: String,
+    pub challenger_controller_id: String,
+    pub reason: String,
+}
+
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
         if let Some(parent) = std::path::Path::new(path).parent() {
@@ -378,7 +390,23 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 14;
+        if version < 15 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS replication_conflicts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    resource_key TEXT NOT NULL,
+                    incumbent_op_id TEXT NOT NULL,
+                    challenger_op_id TEXT NOT NULL,
+                    incumbent_controller_id TEXT NOT NULL,
+                    challenger_controller_id TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    resolved INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 15;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -579,6 +607,69 @@ impl Database {
             ],
         )?;
         Ok(())
+    }
+
+    pub fn insert_replication_conflict(
+        &self,
+        resource_key: &str,
+        incumbent_op_id: &str,
+        challenger_op_id: &str,
+        incumbent_controller_id: &str,
+        challenger_controller_id: &str,
+        reason: &str,
+    ) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO replication_conflicts (
+                resource_key, incumbent_op_id, challenger_op_id,
+                incumbent_controller_id, challenger_controller_id, reason
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                resource_key,
+                incumbent_op_id,
+                challenger_op_id,
+                incumbent_controller_id,
+                challenger_controller_id,
+                reason
+            ],
+        )?;
+        Ok(conn.last_insert_rowid())
+    }
+
+    pub fn count_unresolved_replication_conflicts(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM replication_conflicts WHERE resolved = 0",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn list_unresolved_replication_conflicts(
+        &self,
+        limit: i64,
+    ) -> Result<Vec<ReplicationConflictRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, resource_key, incumbent_op_id, challenger_op_id,
+                    incumbent_controller_id, challenger_controller_id, reason
+             FROM replication_conflicts
+             WHERE resolved = 0
+             ORDER BY id DESC
+             LIMIT ?1",
+        )?;
+        let rows = stmt.query_map(params![limit], |row| {
+            Ok(ReplicationConflictRow {
+                id: row.get(0)?,
+                resource_key: row.get(1)?,
+                incumbent_op_id: row.get(2)?,
+                challenger_op_id: row.get(3)?,
+                incumbent_controller_id: row.get(4)?,
+                challenger_controller_id: row.get(5)?,
+                reason: row.get(6)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
@@ -1627,5 +1718,32 @@ mod tests {
         assert_eq!(got.last_op_id, "op-1");
         assert_eq!(got.last_logical_ts_unix_ms, 123);
         assert_eq!(got.last_event_type, "vm.update");
+    }
+
+    #[test]
+    fn replication_conflict_insert_and_query() {
+        let db = Database::open(":memory:").expect("open db");
+        let id = db
+            .insert_replication_conflict(
+                "vm/v1",
+                "op-old",
+                "op-new",
+                "ctrl-a",
+                "ctrl-b",
+                "same logical timestamp",
+            )
+            .expect("insert conflict");
+        assert!(id >= 1);
+        assert_eq!(
+            db.count_unresolved_replication_conflicts()
+                .expect("count conflicts"),
+            1
+        );
+        let rows = db
+            .list_unresolved_replication_conflicts(10)
+            .expect("list conflicts");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].resource_key, "vm/v1");
+        assert_eq!(rows[0].challenger_controller_id, "ctrl-b");
     }
 }

@@ -140,6 +140,10 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             .db
             .list_replication_acks()
             .map_err(|e| Status::internal(format!("listing replication acks: {e}")))?;
+        let unresolved_conflicts = self
+            .db
+            .count_unresolved_replication_conflicts()
+            .map_err(|e| Status::internal(format!("counting replication conflicts: {e}")))?;
 
         let outgoing = ack_rows
             .iter()
@@ -177,6 +181,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             outbox_size,
             outgoing,
             incoming,
+            unresolved_conflicts,
         }))
     }
 }
@@ -280,5 +285,6 @@ mod tests {
         assert_eq!(resp.incoming[0].peer_endpoint, "10.0.0.11:9090");
         assert_eq!(resp.incoming[0].last_pulled_event_id, 5);
         assert_eq!(resp.incoming[0].last_applied_event_id, 4);
+        assert_eq!(resp.unresolved_conflicts, 0);
     }
 }

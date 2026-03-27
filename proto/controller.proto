@@ -382,6 +382,7 @@ message GetReplicationStatusResponse {
   int64 outbox_size = 2;
   repeated ReplicationOutgoingStatus outgoing = 3;
   repeated ReplicationIncomingStatus incoming = 4;
+  int64 unresolved_conflicts = 5;
 }
 
 // SSH Key Management

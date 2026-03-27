@@ -204,6 +204,21 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
     let existing_head = db
         .get_replication_resource_head(payload_resource_key)
         .map_err(|e| format!("get resource head for event {}: {e}", event.event_id))?;
+    if let Some(existing) = existing_head.as_ref() {
+        if existing.last_logical_ts_unix_ms == logical_ts_unix_ms
+            && existing.last_controller_id != origin_controller_id
+            && existing.last_op_id != op_id
+        {
+            let _ = db.insert_replication_conflict(
+                payload_resource_key,
+                &existing.last_op_id,
+                op_id,
+                &existing.last_controller_id,
+                origin_controller_id,
+                "same logicalTsUnixMs with competing controllers; tie-breaker applied",
+            );
+        }
+    }
     if should_replace_head(
         existing_head.as_ref(),
         logical_ts_unix_ms,
@@ -389,5 +404,31 @@ mod tests {
             .expect("head exists");
         assert_eq!(head.last_op_id, "op-2");
         assert_eq!(head.last_logical_ts_unix_ms, 200);
+    }
+
+    #[test]
+    fn apply_replication_event_records_conflict_on_equal_logical_ts() {
+        let db = Database::open(":memory:").expect("open db");
+        let first = controller_proto::ReplicationEvent {
+            event_id: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v2".to_string(),
+            payload: br#"{"opId":"op-a","controllerId":"ctrl-a","logicalTsUnixMs":500,"eventType":"vm.update","resourceKey":"vm/v2","body":{"cpu":1}}"#.to_vec(),
+        };
+        let second = controller_proto::ReplicationEvent {
+            event_id: 2,
+            created_at: "2026-01-01T00:00:01Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v2".to_string(),
+            payload: br#"{"opId":"op-b","controllerId":"ctrl-b","logicalTsUnixMs":500,"eventType":"vm.update","resourceKey":"vm/v2","body":{"cpu":2}}"#.to_vec(),
+        };
+        apply_replication_event(&db, &first).expect("first");
+        apply_replication_event(&db, &second).expect("second");
+        assert_eq!(
+            db.count_unresolved_replication_conflicts()
+                .expect("count conflicts"),
+            1
+        );
     }
 }
