@@ -111,6 +111,7 @@ Current bounded TLC model coverage:
 - `ControllerReplication.tla` encodes `Outbox`, `Delivered`, `Applied`, `Head`, `ReceivedOps`, `Frontier`, and `Conflicts`.
 - Invariants checked include `TypeOK`, `NoDoubleApply`, `DeterministicWinner`, and `NoManualRequired`.
 - `CrossDcReplication.tla` encodes DC-aware delivery/anti-entropy and checks bounded cross-DC convergence with no-double-apply semantics.
+- Drift checks now include a trace fixture generated from controller replication Rust tests, in addition to static fixtures.
 
 Liveness:
 
