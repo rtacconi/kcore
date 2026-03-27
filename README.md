@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/kcore-logo.png" alt="KCore" width="300">
+</p>
+
 # kcore-rust
 
 `kcore-rust` is a Rust control plane for declarative VM lifecycle management on NixOS hosts.
