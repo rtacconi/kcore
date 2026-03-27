@@ -36,6 +36,8 @@ service Controller {
 
   // Node lifecycle
   rpc DrainNode(DrainNodeRequest) returns (DrainNodeResponse);
+  rpc ApproveNode(ApproveNodeRequest) returns (ApproveNodeResponse);
+  rpc RejectNode(RejectNodeRequest) returns (RejectNodeResponse);
 }
 
 message RegisterNodeRequest {
@@ -243,6 +245,7 @@ message NodeInfo {
   repeated string labels = 8;  // e.g., "dc=dc-a", "rack=rack-1"
   StorageBackendType storage_backend = 9;
   bool disable_vxlan = 10; // When true, VXLAN overlay networking is disabled
+  string approval_status = 11; // "pending", "approved", or "rejected"
 }
 
 message GetNodeRequest {
@@ -367,5 +370,25 @@ message DrainNodeResponse {
   bool success = 1;
   int32 vms_migrated = 2;
   string message = 3;
+}
+
+// Node Approval
+
+message ApproveNodeRequest {
+  string node_id = 1;
+}
+
+message ApproveNodeResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message RejectNodeRequest {
+  string node_id = 1;
+}
+
+message RejectNodeResponse {
+  bool success = 1;
+  string message = 2;
 }
 

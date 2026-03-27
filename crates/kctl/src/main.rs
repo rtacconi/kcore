@@ -383,6 +383,16 @@ enum NodeAction {
         #[arg(long = "disable-vxlan")]
         disable_vxlan: bool,
     },
+    /// Approve a pending node to join the cluster
+    Approve {
+        /// Node ID to approve
+        node_id: String,
+    },
+    /// Reject a pending node
+    Reject {
+        /// Node ID to reject
+        node_id: String,
+    },
     /// Apply a NixOS configuration to a node
     ApplyNix {
         /// Path to the NixOS configuration file
@@ -685,6 +695,20 @@ async fn main() {
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::network::list(&info, target_node.clone()).await
+        }
+
+        Command::Node {
+            action: NodeAction::Approve { node_id },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::node::approve(&info, node_id).await
+        }
+
+        Command::Node {
+            action: NodeAction::Reject { node_id },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::node::reject(&info, node_id).await
         }
 
         Command::Node {

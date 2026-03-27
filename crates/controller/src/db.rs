@@ -22,6 +22,7 @@ pub struct NodeRow {
     pub memory_used: i64,
     pub storage_backend: String,
     pub disable_vxlan: bool,
+    pub approval_status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -104,7 +105,8 @@ impl Database {
                 cpu_used INTEGER NOT NULL DEFAULT 0,
                 memory_used INTEGER NOT NULL DEFAULT 0,
                 storage_backend TEXT NOT NULL DEFAULT 'filesystem',
-                disable_vxlan INTEGER NOT NULL DEFAULT 0
+                disable_vxlan INTEGER NOT NULL DEFAULT 0,
+                approval_status TEXT NOT NULL DEFAULT 'approved'
             );
             CREATE TABLE IF NOT EXISTS vms (
                 id TEXT PRIMARY KEY,
@@ -283,7 +285,14 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 8;
+        if version < 9 {
+            let _ = conn.execute(
+                "ALTER TABLE nodes ADD COLUMN approval_status TEXT NOT NULL DEFAULT 'approved'",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 9;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -303,8 +312,8 @@ impl Database {
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
              ON CONFLICT(id) DO UPDATE SET
                 hostname=excluded.hostname,
                 address=excluded.address,
@@ -330,9 +339,19 @@ impl Database {
                 node.memory_used,
                 node.storage_backend,
                 node.disable_vxlan as i32,
+                node.approval_status,
             ],
         )?;
         Ok(())
+    }
+
+    pub fn set_node_approval(&self, node_id: &str, status: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "UPDATE nodes SET approval_status = ?2 WHERE id = ?1",
+            params![node_id, status],
+        )?;
+        Ok(rows > 0)
     }
 
     pub fn update_heartbeat(
@@ -343,7 +362,7 @@ impl Database {
     ) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let rows = conn.execute(
-            "UPDATE nodes SET last_heartbeat = datetime('now'), status = 'ready', cpu_used = ?2, memory_used = ?3 WHERE id = ?1",
+            "UPDATE nodes SET last_heartbeat = datetime('now'), status = 'ready', cpu_used = ?2, memory_used = ?3 WHERE id = ?1 AND approval_status = 'approved'",
             params![node_id, cpu_used, mem_used],
         )?;
         Ok(rows > 0)
@@ -352,7 +371,7 @@ impl Database {
     pub fn get_node(&self, node_id: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan FROM nodes WHERE id = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status FROM nodes WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![node_id], row_to_node)?;
         rows.next().transpose()
@@ -361,7 +380,7 @@ impl Database {
     pub fn list_nodes(&self) -> Result<Vec<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan FROM nodes",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status FROM nodes",
         )?;
         let rows = stmt.query_map([], row_to_node)?;
         rows.collect()
@@ -370,7 +389,7 @@ impl Database {
     pub fn get_node_by_address(&self, address: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan FROM nodes WHERE address = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status FROM nodes WHERE address = ?1",
         )?;
         let mut rows = stmt.query_map(params![address], row_to_node)?;
         rows.next().transpose()
@@ -755,6 +774,7 @@ fn row_to_node(row: &rusqlite::Row) -> Result<NodeRow, rusqlite::Error> {
         memory_used: row.get(9)?,
         storage_backend: row.get(10)?,
         disable_vxlan: disable_vxlan_int != 0,
+        approval_status: row.get(12)?,
     })
 }
 
@@ -844,6 +864,7 @@ mod tests {
             memory_used: 0,
             storage_backend: "filesystem".to_string(),
             disable_vxlan: false,
+            approval_status: "approved".to_string(),
         }
     }
 
@@ -987,6 +1008,64 @@ mod tests {
             .expect("get node")
             .expect("node exists");
         assert!(!got2.disable_vxlan);
+    }
+
+    #[test]
+    fn node_approval_status_roundtrip() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "pending".to_string();
+        db.upsert_node(&node).expect("insert node");
+
+        let got = db.get_node(&node.id).expect("get").expect("exists");
+        assert_eq!(got.approval_status, "pending");
+
+        db.set_node_approval(&node.id, "approved").expect("approve");
+        let got2 = db.get_node(&node.id).expect("get").expect("exists");
+        assert_eq!(got2.approval_status, "approved");
+
+        db.set_node_approval(&node.id, "rejected").expect("reject");
+        let got3 = db.get_node(&node.id).expect("get").expect("exists");
+        assert_eq!(got3.approval_status, "rejected");
+    }
+
+    #[test]
+    fn upsert_node_preserves_approval_status() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "pending".to_string();
+        db.upsert_node(&node).expect("insert");
+
+        db.set_node_approval(&node.id, "approved").expect("approve");
+
+        node.hostname = "updated-hostname".to_string();
+        node.approval_status = "pending".to_string();
+        db.upsert_node(&node).expect("upsert again");
+
+        let got = db.get_node(&node.id).expect("get").expect("exists");
+        assert_eq!(got.hostname, "updated-hostname");
+        assert_eq!(
+            got.approval_status, "approved",
+            "upsert should not overwrite approval_status"
+        );
+    }
+
+    #[test]
+    fn heartbeat_skips_non_approved_nodes() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "pending".to_string();
+        node.status = "pending".to_string();
+        db.upsert_node(&node).expect("insert");
+
+        let updated = db.update_heartbeat(&node.id, 1, 1000).expect("heartbeat");
+        assert!(
+            !updated,
+            "heartbeat should not update a non-approved node"
+        );
+
+        let got = db.get_node(&node.id).expect("get").expect("exists");
+        assert_eq!(got.status, "pending", "status should still be pending");
     }
 
     #[test]

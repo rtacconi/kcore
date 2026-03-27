@@ -288,19 +288,30 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .unwrap_or((0, 0));
         let storage_backend = normalize_storage_backend(req.storage_backend, false)?;
 
+        let existing = self
+            .db
+            .get_node(&req.node_id)
+            .map_err(|e| Status::internal(format!("checking node: {e}")))?;
+
+        let approval_status = match &existing {
+            Some(n) => n.approval_status.clone(),
+            None => "pending".to_string(),
+        };
+
         let node = NodeRow {
             id: req.node_id.clone(),
             hostname: req.hostname.clone(),
             address: req.address.clone(),
             cpu_cores: cpu,
             memory_bytes: mem,
-            status: "ready".into(),
+            status: if approval_status == "approved" { "ready".into() } else { "pending".into() },
             last_heartbeat: String::new(),
             gateway_interface: String::new(),
             cpu_used: 0,
             memory_used: 0,
             storage_backend,
             disable_vxlan: req.disable_vxlan,
+            approval_status: approval_status.clone(),
         };
 
         self.db
@@ -313,15 +324,24 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 .map_err(|e| Status::internal(format!("storing labels: {e}")))?;
         }
 
-        if let Err(e) = self.clients.connect(&req.address).await {
-            warn!(address = %req.address, error = %e, "failed to connect to node");
+        if approval_status == "approved" {
+            if let Err(e) = self.clients.connect(&req.address).await {
+                warn!(address = %req.address, error = %e, "failed to connect to node");
+            }
+            info!(node_id = %req.node_id, address = %req.address, "registered node (approved)");
+        } else {
+            info!(node_id = %req.node_id, address = %req.address, approval_status = %approval_status, "node registered with pending approval");
         }
 
-        info!(node_id = %req.node_id, address = %req.address, "registered node");
+        let message = if approval_status == "approved" {
+            "registered".to_string()
+        } else {
+            format!("registered (approval status: {approval_status})")
+        };
 
         Ok(Response::new(controller_proto::RegisterNodeResponse {
             success: true,
-            message: "registered".into(),
+            message,
         }))
     }
 
@@ -1220,6 +1240,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     labels,
                     storage_backend: storage_backend_to_proto(&n.storage_backend),
                     disable_vxlan: n.disable_vxlan,
+                    approval_status: n.approval_status,
                 }
             })
             .collect();
@@ -1266,6 +1287,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 labels,
                 storage_backend: storage_backend_to_proto(&node.storage_backend),
                 disable_vxlan: node.disable_vxlan,
+                approval_status: node.approval_status,
             }),
         }))
     }
@@ -1516,6 +1538,73 @@ impl controller_proto::controller_server::Controller for ControllerService {
             message: msg,
         }))
     }
+
+    async fn approve_node(
+        &self,
+        request: Request<controller_proto::ApproveNodeRequest>,
+    ) -> Result<Response<controller_proto::ApproveNodeResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        let node = self
+            .db
+            .get_node(&req.node_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.node_id)))?;
+
+        if node.approval_status == "approved" {
+            return Ok(Response::new(controller_proto::ApproveNodeResponse {
+                success: true,
+                message: "node is already approved".into(),
+            }));
+        }
+
+        self.db
+            .set_node_approval(&req.node_id, "approved")
+            .map_err(|e| Status::internal(format!("approving node: {e}")))?;
+        self.db
+            .update_node_status(&req.node_id, "ready")
+            .map_err(|e| Status::internal(format!("updating node status: {e}")))?;
+
+        if let Err(e) = self.clients.connect(&node.address).await {
+            warn!(address = %node.address, error = %e, "failed to connect to approved node");
+        }
+
+        info!(node_id = %req.node_id, "node approved");
+
+        Ok(Response::new(controller_proto::ApproveNodeResponse {
+            success: true,
+            message: format!("node '{}' approved", req.node_id),
+        }))
+    }
+
+    async fn reject_node(
+        &self,
+        request: Request<controller_proto::RejectNodeRequest>,
+    ) -> Result<Response<controller_proto::RejectNodeResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        let _node = self
+            .db
+            .get_node(&req.node_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.node_id)))?;
+
+        self.db
+            .set_node_approval(&req.node_id, "rejected")
+            .map_err(|e| Status::internal(format!("rejecting node: {e}")))?;
+        self.db
+            .update_node_status(&req.node_id, "rejected")
+            .map_err(|e| Status::internal(format!("updating node status: {e}")))?;
+
+        info!(node_id = %req.node_id, "node rejected");
+
+        Ok(Response::new(controller_proto::RejectNodeResponse {
+            success: true,
+            message: format!("node '{}' rejected", req.node_id),
+        }))
+    }
 }
 
 #[cfg(test)]
@@ -1549,6 +1638,7 @@ mod tests {
             memory_used: 0,
             storage_backend: "filesystem".to_string(),
             disable_vxlan: false,
+            approval_status: "approved".to_string(),
         }
     }
 
@@ -2223,5 +2313,160 @@ mod tests {
         .into_inner();
 
         assert!(resp.success);
+    }
+
+    #[tokio::test]
+    async fn new_node_registers_as_pending() {
+        let db = Database::open(":memory:").expect("open db");
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::register_node(
+                &svc,
+                Request::new(controller_proto::RegisterNodeRequest {
+                    node_id: "new-node".to_string(),
+                    hostname: "new-node".to_string(),
+                    address: "10.0.0.99:9091".to_string(),
+                    capacity: Some(controller_proto::NodeCapacity {
+                        cpu_cores: 4,
+                        memory_bytes: 8_000_000_000,
+                    }),
+                    labels: vec![],
+                    storage_backend: 1,
+                    disable_vxlan: false,
+                }),
+            )
+            .await
+            .expect("register should succeed")
+            .into_inner();
+
+        assert!(resp.success);
+        assert!(resp.message.contains("pending"));
+
+        let node = db.get_node("new-node").expect("get").expect("exists");
+        assert_eq!(node.approval_status, "pending");
+        assert_eq!(node.status, "pending");
+    }
+
+    #[tokio::test]
+    async fn approved_node_re_registers_as_approved() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "approved".to_string();
+        db.upsert_node(&node).expect("insert");
+
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::register_node(
+                &svc,
+                Request::new(controller_proto::RegisterNodeRequest {
+                    node_id: "node-1".to_string(),
+                    hostname: "node-1".to_string(),
+                    address: "127.0.0.1:9091".to_string(),
+                    capacity: Some(controller_proto::NodeCapacity {
+                        cpu_cores: 4,
+                        memory_bytes: 8_000_000_000,
+                    }),
+                    labels: vec![],
+                    storage_backend: 1,
+                    disable_vxlan: false,
+                }),
+            )
+            .await
+            .expect("re-register should succeed")
+            .into_inner();
+
+        assert!(resp.success);
+        assert_eq!(resp.message, "registered");
+
+        let n = db.get_node("node-1").expect("get").expect("exists");
+        assert_eq!(n.approval_status, "approved");
+        assert_eq!(n.status, "ready");
+    }
+
+    #[tokio::test]
+    async fn approve_node_transitions_to_ready() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "pending".to_string();
+        node.status = "pending".to_string();
+        db.upsert_node(&node).expect("insert");
+
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::approve_node(
+                &svc,
+                Request::new(controller_proto::ApproveNodeRequest {
+                    node_id: "node-1".to_string(),
+                }),
+            )
+            .await
+            .expect("approve should succeed")
+            .into_inner();
+
+        assert!(resp.success);
+
+        let n = db.get_node("node-1").expect("get").expect("exists");
+        assert_eq!(n.approval_status, "approved");
+        assert_eq!(n.status, "ready");
+    }
+
+    #[tokio::test]
+    async fn reject_node_marks_rejected() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "pending".to_string();
+        node.status = "pending".to_string();
+        db.upsert_node(&node).expect("insert");
+
+        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network());
+
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::reject_node(
+                &svc,
+                Request::new(controller_proto::RejectNodeRequest {
+                    node_id: "node-1".to_string(),
+                }),
+            )
+            .await
+            .expect("reject should succeed")
+            .into_inner();
+
+        assert!(resp.success);
+
+        let n = db.get_node("node-1").expect("get").expect("exists");
+        assert_eq!(n.approval_status, "rejected");
+        assert_eq!(n.status, "rejected");
+    }
+
+    #[test]
+    fn scheduler_skips_pending_nodes() {
+        let mut n = NodeRow {
+            id: "pending-node".into(),
+            hostname: "pending-node".into(),
+            address: "10.0.0.1:9091".into(),
+            cpu_cores: 8,
+            memory_bytes: 16_000_000_000,
+            status: "ready".into(),
+            last_heartbeat: String::new(),
+            gateway_interface: String::new(),
+            cpu_used: 0,
+            memory_used: 0,
+            storage_backend: "filesystem".into(),
+            disable_vxlan: false,
+            approval_status: "pending".into(),
+        };
+        assert!(
+            scheduler::select_node(&[n.clone()]).is_none(),
+            "pending node should not be selected"
+        );
+
+        n.approval_status = "approved".into();
+        assert!(
+            scheduler::select_node(&[n]).is_some(),
+            "approved node should be selected"
+        );
     }
 }

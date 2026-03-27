@@ -48,8 +48,8 @@ pub fn print_vm_detail(
 
 pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
     println!(
-        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}",
-        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS", "STORAGE"
+        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}",
+        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS", "STORAGE", "APPROVAL"
     );
     for n in nodes {
         let (cores, mem) = if let Some(cap) = &n.capacity {
@@ -58,14 +58,15 @@ pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
             (0, "n/a".to_string())
         };
         println!(
-            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}",
+            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}",
             n.node_id,
             n.hostname,
             n.address,
             cores,
             mem,
             n.status,
-            storage_backend_str(n.storage_backend)
+            storage_backend_str(n.storage_backend),
+            n.approval_status,
         );
     }
 }
@@ -75,6 +76,7 @@ pub fn print_node_detail(n: &controller_proto::NodeInfo) {
     println!("Hostname:  {}", n.hostname);
     println!("Address:   {}", n.address);
     println!("Status:    {}", n.status);
+    println!("Approval:  {}", n.approval_status);
     if let Some(cap) = &n.capacity {
         println!("CPU:       {} cores", cap.cpu_cores);
         println!(

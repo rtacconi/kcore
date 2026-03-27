@@ -7,6 +7,40 @@ use std::path::Path;
 use tokio::io::AsyncReadExt;
 use tokio_stream::wrappers::ReceiverStream;
 
+pub async fn approve(info: &ConnectionInfo, node_id: &str) -> Result<()> {
+    let mut client = client::controller_client(info).await?;
+    let resp = client
+        .approve_node(controller_proto::ApproveNodeRequest {
+            node_id: node_id.to_string(),
+        })
+        .await?
+        .into_inner();
+
+    if resp.success {
+        println!("{}", resp.message);
+        Ok(())
+    } else {
+        anyhow::bail!("approve failed: {}", resp.message)
+    }
+}
+
+pub async fn reject(info: &ConnectionInfo, node_id: &str) -> Result<()> {
+    let mut client = client::controller_client(info).await?;
+    let resp = client
+        .reject_node(controller_proto::RejectNodeRequest {
+            node_id: node_id.to_string(),
+        })
+        .await?
+        .into_inner();
+
+    if resp.success {
+        println!("{}", resp.message);
+        Ok(())
+    } else {
+        anyhow::bail!("reject failed: {}", resp.message)
+    }
+}
+
 pub async fn list_nodes(info: &ConnectionInfo) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client

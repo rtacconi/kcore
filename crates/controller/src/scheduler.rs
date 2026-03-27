@@ -6,7 +6,7 @@ use crate::db::NodeRow;
 pub fn select_node(nodes: &[NodeRow]) -> Option<&NodeRow> {
     nodes
         .iter()
-        .filter(|n| n.status == "ready")
+        .filter(|n| n.status == "ready" && n.approval_status == "approved")
         .max_by_key(|n| {
             let free_mem = n.memory_bytes - n.memory_used;
             let free_cpu = (n.cpu_cores - n.cpu_used) as i64;
@@ -25,6 +25,7 @@ pub fn select_node_for_vm(
         .iter()
         .filter(|n| {
             n.status == "ready"
+                && n.approval_status == "approved"
                 && (n.cpu_cores - n.cpu_used) >= requested_cpu
                 && (n.memory_bytes - n.memory_used) >= requested_memory
         })
@@ -53,6 +54,7 @@ mod tests {
             memory_used: mem_used,
             storage_backend: "filesystem".into(),
             disable_vxlan: false,
+            approval_status: "approved".into(),
         }
     }
 
