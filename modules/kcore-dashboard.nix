@@ -3,9 +3,11 @@
   config,
   lib,
   ...
-}: let
+}:
+let
   cfg = config.services.kcore-dashboard;
-in {
+in
+{
   options.services.kcore-dashboard = {
     enable = lib.mkEnableOption "kcore web dashboard (reads controller over gRPC)";
 
@@ -48,27 +50,26 @@ in {
   config = lib.mkIf cfg.enable {
     systemd.services.kcore-dashboard = {
       description = "kcore web dashboard";
-      after = ["network-online.target"];
-      wants = ["network-online.target"];
-      wantedBy = ["multi-user.target"];
+      after = [ "network-online.target" ];
+      wants = [ "network-online.target" ];
+      wantedBy = [ "multi-user.target" ];
       environment = {
         LEPTOS_SITE_ADDR = "${cfg.listenAddress}:${toString cfg.port}";
         LEPTOS_ENV = "PROD";
       };
-      serviceConfig =
-        {
-          Type = "simple";
-          User = "root";
-          ExecStart = lib.getExe cfg.package;
-          Restart = "on-failure";
-          RestartSec = "5s";
-          LimitNOFILE = 65536;
-        }
-        // lib.optionalAttrs (cfg.environmentFile != null) {
-          EnvironmentFile = cfg.environmentFile;
-        };
+      serviceConfig = {
+        Type = "simple";
+        User = "root";
+        ExecStart = lib.getExe cfg.package;
+        Restart = "on-failure";
+        RestartSec = "5s";
+        LimitNOFILE = 65536;
+      }
+      // lib.optionalAttrs (cfg.environmentFile != null) {
+        EnvironmentFile = cfg.environmentFile;
+      };
     };
 
-    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [cfg.port];
+    networking.firewall.allowedTCPPorts = lib.optionals cfg.openFirewall [ cfg.port ];
   };
 }

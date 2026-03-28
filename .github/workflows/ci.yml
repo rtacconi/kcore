@@ -60,10 +60,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install Nix
-        uses: DeterminateSystems/nix-installer-action@main
+        uses: DeterminateSystems/nix-installer-action@v21
 
       - name: Nix cache
-        uses: DeterminateSystems/magic-nix-cache-action@main
+        uses: DeterminateSystems/magic-nix-cache-action@v13
         continue-on-error: true
 
       - name: Statix lint
@@ -72,8 +72,11 @@ jobs:
       - name: Deadnix lint
         run: nix run nixpkgs#deadnix -- --fail .
 
-      - name: Nix flake check
-        run: nix flake check
+      - name: Nix flake evaluation
+        run: nix flake show --json > /dev/null
+
+      - name: Nix format check
+        run: nix build --no-link .#checks.x86_64-linux.fmt-nix
 
   semgrep:
     runs-on: ubuntu-latest

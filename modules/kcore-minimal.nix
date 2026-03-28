@@ -90,4 +90,3 @@
   # Systemd optimizations
   systemd.services.systemd-udevd.restartIfChanged = false;
 }
-
