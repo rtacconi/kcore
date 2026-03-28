@@ -399,6 +399,7 @@ message GetReplicationStatusResponse {
   repeated string zero_manual_slo_violations = 12;
   int64 failed_retryable_reservations = 13;
   int64 failed_non_retryable_reservations = 14;
+  int64 retry_exhausted_reservations = 15;
 }
 
 message ListReplicationConflictsRequest {

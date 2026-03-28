@@ -116,6 +116,7 @@ Current bounded TLC model coverage:
 - Reservation ledger failures are now classified (`failed_retryable`, `failed_non_retryable`, `retry_exhausted`) to support bounded retry policy and clearer SLO signals.
 - A reservation retry executor re-evaluates `failed_retryable` rows and either converges them to `reserved` (node recovered) or deterministically progresses to `retry_exhausted`.
 - VM create target-node failures now attempt deterministic alternative-node fallback before returning an error, keeping the default path operator-free.
+- Admin SLO status now includes explicit `retry_exhausted_reservations` visibility so exhausted bounded-retry terminals are observable independently of generic failed reservations.
 
 Liveness:
 

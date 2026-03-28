@@ -176,6 +176,10 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             .map_err(|e| {
                 Status::internal(format!("counting non-retryable failed reservations: {e}"))
             })?;
+        let retry_exhausted_reservations = self
+            .db
+            .count_retry_exhausted_replication_reservations()
+            .map_err(|e| Status::internal(format!("counting retry exhausted reservations: {e}")))?;
 
         let outgoing = ack_rows
             .iter()
@@ -232,6 +236,10 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         if failed_reservations > 0 {
             zero_manual_slo_violations.push(format!("failed_reservations={failed_reservations}"));
         }
+        if retry_exhausted_reservations > 0 {
+            zero_manual_slo_violations
+                .push(format!("retry_exhausted_reservations={retry_exhausted_reservations}"));
+        }
         let zero_manual_slo_healthy = zero_manual_slo_violations.is_empty();
 
         Ok(Response::new(controller_proto::GetReplicationStatusResponse {
@@ -249,6 +257,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             zero_manual_slo_violations,
             failed_retryable_reservations,
             failed_non_retryable_reservations,
+            retry_exhausted_reservations,
         }))
     }
 
@@ -415,6 +424,7 @@ mod tests {
         assert_eq!(resp.failed_reservations, 0);
         assert_eq!(resp.failed_retryable_reservations, 0);
         assert_eq!(resp.failed_non_retryable_reservations, 0);
+        assert_eq!(resp.retry_exhausted_reservations, 0);
         assert!(resp.zero_manual_slo_healthy);
         assert!(resp.zero_manual_slo_violations.is_empty());
     }
@@ -445,6 +455,15 @@ mod tests {
             3,
         )
         .expect("failed reservation");
+        db.record_replication_reservation_failure(
+            "node-capacity/node-r",
+            "vm/v11",
+            "op-r",
+            true,
+            "node not ready",
+            1,
+        )
+        .expect("retry exhausted reservation");
         db.upsert_replication_resource_head(&crate::db::ReplicationResourceHeadRow {
             resource_key: "vm/v9".to_string(),
             last_op_id: "op-a".to_string(),
@@ -475,6 +494,12 @@ mod tests {
         assert!(resp.failed_reservations > 0);
         assert_eq!(resp.failed_retryable_reservations, 0);
         assert!(resp.failed_non_retryable_reservations > 0);
+        assert!(resp.retry_exhausted_reservations > 0);
+        assert!(
+            resp.zero_manual_slo_violations
+                .iter()
+                .any(|v| v.contains("retry_exhausted_reservations="))
+        );
         assert!(!resp.zero_manual_slo_violations.is_empty());
     }
 
