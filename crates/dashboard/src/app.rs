@@ -648,6 +648,7 @@ fn storage_node_card(node: NodeStorageDto) -> impl IntoView {
     };
     let has_disks = !node.disks.is_empty();
     let disks = node.disks.clone();
+    let disk_inventory_ok = node.disk_inventory_ok;
     let luks_dd = if node.luks_method.is_empty() {
         "—".to_string()
     } else {
@@ -680,14 +681,14 @@ fn storage_node_card(node: NodeStorageDto) -> impl IntoView {
                             </tr>
                         </thead>
                         <tbody>
-                            {disks.into_iter().map(storage_disk_row).collect_view()}
+                            {disks.clone().into_iter().map(storage_disk_row).collect_view()}
                         </tbody>
                     </table>
                 </div>
             </Show>
             <Show when=move || !has_disks>
                 <p class="muted" style="margin-top: 0.5rem; font-size: 0.85rem;">
-                    {if node.disk_inventory_ok {
+                    {if disk_inventory_ok {
                         "No top-level block devices reported."
                     } else {
                         "Could not list disks (node unreachable or RPC failed)."

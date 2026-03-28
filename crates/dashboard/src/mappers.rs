@@ -170,14 +170,17 @@ pub fn storage_overview_from_proto(
                 disks: n
                     .disks
                     .into_iter()
-                    .map(|d| StorageDiskRowDto {
-                        name: d.name,
-                        path: d.path,
-                        size: d.size,
-                        model: d.model,
-                        fstype: d.fstype,
-                        mountpoint: d.mountpoint,
-                        role_hint: disk_role_hint(&d.mountpoint, &d.fstype),
+                    .map(|d| {
+                        let role_hint = disk_role_hint(&d.mountpoint, &d.fstype);
+                        StorageDiskRowDto {
+                            name: d.name,
+                            path: d.path,
+                            size: d.size,
+                            model: d.model,
+                            fstype: d.fstype,
+                            mountpoint: d.mountpoint,
+                            role_hint,
+                        }
                     })
                     .collect(),
             })
