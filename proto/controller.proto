@@ -397,6 +397,8 @@ message GetReplicationStatusResponse {
   int64 failed_reservations = 10;
   bool zero_manual_slo_healthy = 11;
   repeated string zero_manual_slo_violations = 12;
+  int64 failed_retryable_reservations = 13;
+  int64 failed_non_retryable_reservations = 14;
 }
 
 message ListReplicationConflictsRequest {

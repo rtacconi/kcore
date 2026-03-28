@@ -18,6 +18,7 @@ const IDLE_POLL_SECS: u64 = 2;
 const COMPENSATION_IDLE_SECS: u64 = 2;
 const MATERIALIZER_IDLE_SECS: u64 = 2;
 const MATERIALIZER_BATCH_SIZE: i64 = 256;
+const RESERVATION_MAX_RETRIES: i32 = 3;
 
 pub fn spawn_replication_pollers(
     db: Database,
@@ -408,12 +409,44 @@ fn evaluate_reservation(
         });
     };
     let reservation_key = format!("node-capacity/{node_id}");
-    let can_reserve = db
+    let node = db
         .get_node(node_id)
-        .map_err(|e| format!("load node for reservation {node_id}: {e}"))?
-        .map(|n| n.approval_status == "approved")
-        .unwrap_or(false);
-    if can_reserve {
+        .map_err(|e| format!("load node for reservation {node_id}: {e}"))?;
+    if let Some(node) = node {
+        if node.approval_status != "approved" {
+            let error = "node not approved";
+            let (status, retry_count) = db
+                .record_replication_reservation_failure(
+                    &reservation_key,
+                    resource_key,
+                    op_id,
+                    false,
+                    error,
+                    RESERVATION_MAX_RETRIES,
+                )
+                .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
+            return Ok(ReservationOutcome {
+                accepted: false,
+                reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
+            });
+        }
+        if node.status != "ready" {
+            let error = "node not ready";
+            let (status, retry_count) = db
+                .record_replication_reservation_failure(
+                    &reservation_key,
+                    resource_key,
+                    op_id,
+                    true,
+                    error,
+                    RESERVATION_MAX_RETRIES,
+                )
+                .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
+            return Ok(ReservationOutcome {
+                accepted: false,
+                reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
+            });
+        }
         db.upsert_replication_reservation(&reservation_key, resource_key, op_id, "reserved", "")
             .map_err(|e| format!("reserve token {reservation_key}: {e}"))?;
         Ok(ReservationOutcome {
@@ -421,12 +454,20 @@ fn evaluate_reservation(
             reason: reservation_key,
         })
     } else {
-        let error = "node missing or not approved";
-        db.upsert_replication_reservation(&reservation_key, resource_key, op_id, "failed", error)
+        let error = "node missing";
+        let (status, retry_count) = db
+            .record_replication_reservation_failure(
+                &reservation_key,
+                resource_key,
+                op_id,
+                false,
+                error,
+                RESERVATION_MAX_RETRIES,
+            )
             .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
         Ok(ReservationOutcome {
             accepted: false,
-            reason: format!("{reservation_key}: {error}"),
+            reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
         })
     }
 }
@@ -885,7 +926,33 @@ mod tests {
             .get_replication_reservation("node-capacity/missing-node", "vm/v9")
             .expect("reservation read")
             .expect("reservation row");
-        assert_eq!(reservation.status, "failed");
+        assert_eq!(reservation.status, "failed_non_retryable");
+    }
+
+    #[test]
+    fn vm_create_reservation_retryable_failure_tracks_budget() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node("node-r");
+        node.status = "not-ready".to_string();
+        db.upsert_node(&node).expect("insert node");
+        let body = serde_json::json!({
+            "vmId": "v-retry",
+            "nodeId": "node-r",
+            "name": "v-retry"
+        });
+
+        for _ in 0..3 {
+            let out = evaluate_reservation(&db, "vm.create", "vm/v-retry", "op-r", &body)
+                .expect("evaluate");
+            assert!(!out.accepted);
+        }
+
+        let reservation = db
+            .get_replication_reservation("node-capacity/node-r", "vm/v-retry")
+            .expect("reservation read")
+            .expect("reservation row");
+        assert_eq!(reservation.status, "retry_exhausted");
+        assert_eq!(reservation.retry_count, 3);
     }
 
     #[test]
@@ -987,6 +1054,8 @@ mod tests {
                 })
                 .map(|r| r.status)
                 .unwrap_or_else(|| "not_applicable".to_string());
+            let reservation_failed =
+                reservation_status.starts_with("failed_") || reservation_status == "retry_exhausted";
             let compensation_status = db
                 .get_compensation_job_status_for_loser_op(&op_id)
                 .ok()
@@ -995,7 +1064,7 @@ mod tests {
                 .unwrap_or_else(|| "not_applicable".to_string());
             let terminal_state = if head_op.as_deref() == Some(op_id.as_str()) {
                 "auto_accepted"
-            } else if reservation_status == "failed" {
+            } else if reservation_failed {
                 "auto_rejected"
             } else if payload
                 .get("safetyClass")
@@ -1009,7 +1078,7 @@ mod tests {
             };
             let expected_winner = if let Some(w) = head_op {
                 w
-            } else if reservation_status == "failed" {
+            } else if reservation_failed {
                 "none".to_string()
             } else {
                 op_id.clone()

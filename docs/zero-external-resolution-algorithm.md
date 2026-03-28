@@ -113,6 +113,7 @@ Current bounded TLC model coverage:
 - `CrossDcReplication.tla` encodes DC-aware delivery/anti-entropy and checks bounded cross-DC convergence with no-double-apply semantics.
 - Drift checks now include a trace fixture generated from controller replication Rust tests, in addition to static fixtures.
 - Drift checker rows now carry reservation/compensation branch signals so `auto_rejected` (reservation failure) and `auto_compensated` paths are validated directly.
+- Reservation ledger failures are now classified (`failed_retryable`, `failed_non_retryable`, `retry_exhausted`) to support bounded retry policy and clearer SLO signals.
 
 Liveness:
 

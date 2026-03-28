@@ -300,3 +300,4 @@ Status (incremental):
 - Generated traces now exercise both compensation lifecycle states (`queued` and `completed`) by processing one compensation job during export.
 - VM create now performs reservation-style preflight checks on target node readiness/approval/capacity before persisting intent, reducing avoidable reservation failures downstream.
 - Preflight capacity/readiness failures now include deterministic scheduling hints (up to three alternative compatible nodes), reducing operator trial-and-error.
+- Reservation failures are now classified as retryable vs non-retryable with a bounded retry budget (`retry_exhausted` terminal reservation status), and status metrics expose the split.

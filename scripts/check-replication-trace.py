@@ -4,7 +4,13 @@ import sys
 from pathlib import Path
 
 AUTO_TERMINALS = {"auto_accepted", "auto_rejected", "auto_compensated", "none"}
-RESERVATION_STATES = {"not_applicable", "reserved", "failed"}
+RESERVATION_STATES = {
+    "not_applicable",
+    "reserved",
+    "failed_retryable",
+    "failed_non_retryable",
+    "retry_exhausted",
+}
 COMPENSATION_STATES = {"not_applicable", "queued", "completed"}
 
 
@@ -60,7 +66,12 @@ def main() -> int:
             errors.append(
                 f"event[{idx}] has invalid compensation_status={event['compensation_status']}"
             )
-        if event["reservation_status"] == "failed" and event["terminal_state"] != "auto_rejected":
+        reservation_failed = event["reservation_status"] in {
+            "failed_retryable",
+            "failed_non_retryable",
+            "retry_exhausted",
+        }
+        if reservation_failed and event["terminal_state"] != "auto_rejected":
             errors.append(
                 f"event[{idx}] reservation failed must imply auto_rejected terminal"
             )
@@ -73,7 +84,7 @@ def main() -> int:
 
         key = event["resource_key"]
         prior = heads.get(key)
-        if event["reservation_status"] == "failed":
+        if reservation_failed:
             new_head = prior
         else:
             new_head = winner(prior, event)

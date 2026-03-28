@@ -134,6 +134,7 @@ pub struct ReplicationReservationRow {
     pub op_id: String,
     pub status: String,
     pub error: String,
+    pub retry_count: i32,
 }
 
 impl Database {
@@ -491,13 +492,21 @@ impl Database {
                     op_id TEXT NOT NULL,
                     status TEXT NOT NULL,
                     error TEXT NOT NULL DEFAULT '',
+                    retry_count INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                     PRIMARY KEY (reservation_key, resource_key)
                 );",
             );
         }
 
-        const CURRENT_VERSION: i32 = 19;
+        if version < 20 {
+            let _ = conn.execute(
+                "ALTER TABLE replication_reservations ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 20;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -999,25 +1008,107 @@ impl Database {
         status: &str,
         error: &str,
     ) -> Result<(), rusqlite::Error> {
+        self.upsert_replication_reservation_with_retry(
+            reservation_key,
+            resource_key,
+            op_id,
+            status,
+            error,
+            0,
+        )
+    }
+
+    pub fn upsert_replication_reservation_with_retry(
+        &self,
+        reservation_key: &str,
+        resource_key: &str,
+        op_id: &str,
+        status: &str,
+        error: &str,
+        retry_count: i32,
+    ) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO replication_reservations (
-                reservation_key, resource_key, op_id, status, error, updated_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+                reservation_key, resource_key, op_id, status, error, retry_count, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, datetime('now'))
              ON CONFLICT(reservation_key, resource_key) DO UPDATE SET
                 op_id=excluded.op_id,
                 status=excluded.status,
                 error=excluded.error,
+                retry_count=excluded.retry_count,
                 updated_at=datetime('now')",
-            params![reservation_key, resource_key, op_id, status, error],
+            params![
+                reservation_key,
+                resource_key,
+                op_id,
+                status,
+                error,
+                retry_count
+            ],
         )?;
         Ok(())
+    }
+
+    pub fn record_replication_reservation_failure(
+        &self,
+        reservation_key: &str,
+        resource_key: &str,
+        op_id: &str,
+        retryable: bool,
+        error: &str,
+        max_retries: i32,
+    ) -> Result<(String, i32), rusqlite::Error> {
+        let current_retry = self
+            .get_replication_reservation(reservation_key, resource_key)?
+            .map(|r| r.retry_count)
+            .unwrap_or(0);
+        let next_retry = current_retry + 1;
+        let status = if retryable {
+            if next_retry >= max_retries {
+                "retry_exhausted"
+            } else {
+                "failed_retryable"
+            }
+        } else {
+            "failed_non_retryable"
+        };
+        self.upsert_replication_reservation_with_retry(
+            reservation_key,
+            resource_key,
+            op_id,
+            status,
+            error,
+            next_retry,
+        )?;
+        Ok((status.to_string(), next_retry))
     }
 
     pub fn count_failed_replication_reservations(&self) -> Result<i64, rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.query_row(
-            "SELECT COUNT(*) FROM replication_reservations WHERE status = 'failed'",
+            "SELECT COUNT(*) FROM replication_reservations
+             WHERE status IN ('failed_retryable', 'failed_non_retryable', 'retry_exhausted')",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn count_failed_retryable_replication_reservations(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM replication_reservations WHERE status = 'failed_retryable'",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn count_failed_non_retryable_replication_reservations(
+        &self,
+    ) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM replication_reservations WHERE status = 'failed_non_retryable'",
             [],
             |row| row.get(0),
         )
@@ -1030,7 +1121,7 @@ impl Database {
     ) -> Result<Option<ReplicationReservationRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT reservation_key, resource_key, op_id, status, error
+            "SELECT reservation_key, resource_key, op_id, status, error, retry_count
              FROM replication_reservations
              WHERE reservation_key = ?1 AND resource_key = ?2",
         )?;
@@ -1041,6 +1132,7 @@ impl Database {
                 op_id: row.get(2)?,
                 status: row.get(3)?,
                 error: row.get(4)?,
+                retry_count: row.get(5)?,
             })
         })?;
         rows.next().transpose()
@@ -2235,6 +2327,58 @@ mod tests {
         assert_eq!(row.op_id, "op-1");
         assert_eq!(row.status, "reserved");
         assert!(row.error.is_empty());
+        assert_eq!(row.retry_count, 0);
+    }
+
+    #[test]
+    fn replication_reservation_failure_classification_and_budget() {
+        let db = Database::open(":memory:").expect("open db");
+        let (status1, retry1) = db
+            .record_replication_reservation_failure(
+                "node-capacity/node-x",
+                "vm/v1",
+                "op-1",
+                true,
+                "node not ready",
+                3,
+            )
+            .expect("failure 1");
+        assert_eq!(status1, "failed_retryable");
+        assert_eq!(retry1, 1);
+        let (status2, retry2) = db
+            .record_replication_reservation_failure(
+                "node-capacity/node-x",
+                "vm/v1",
+                "op-1",
+                true,
+                "node not ready",
+                3,
+            )
+            .expect("failure 2");
+        assert_eq!(status2, "failed_retryable");
+        assert_eq!(retry2, 2);
+        let (status3, retry3) = db
+            .record_replication_reservation_failure(
+                "node-capacity/node-x",
+                "vm/v1",
+                "op-1",
+                true,
+                "node not ready",
+                3,
+            )
+            .expect("failure 3");
+        assert_eq!(status3, "retry_exhausted");
+        assert_eq!(retry3, 3);
+        assert_eq!(
+            db.count_failed_retryable_replication_reservations()
+                .expect("count retryable"),
+            0
+        );
+        assert_eq!(
+            db.count_failed_replication_reservations()
+                .expect("count failed total"),
+            1
+        );
     }
 
     #[test]
@@ -2249,7 +2393,13 @@ mod tests {
             "conflict",
         )
         .expect("insert conflict");
-        db.upsert_replication_reservation("node-capacity/node-1", "vm/v1", "op-1", "failed", "x")
+        db.upsert_replication_reservation(
+            "node-capacity/node-1",
+            "vm/v1",
+            "op-1",
+            "failed_non_retryable",
+            "x",
+        )
             .expect("insert failed reservation");
         db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
             resource_key: "vm/v1".to_string(),

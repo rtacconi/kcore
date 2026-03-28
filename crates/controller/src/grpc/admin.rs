@@ -166,6 +166,16 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             .db
             .count_failed_replication_reservations()
             .map_err(|e| Status::internal(format!("counting failed reservations: {e}")))?;
+        let failed_retryable_reservations = self
+            .db
+            .count_failed_retryable_replication_reservations()
+            .map_err(|e| Status::internal(format!("counting retryable failed reservations: {e}")))?;
+        let failed_non_retryable_reservations = self
+            .db
+            .count_failed_non_retryable_replication_reservations()
+            .map_err(|e| {
+                Status::internal(format!("counting non-retryable failed reservations: {e}"))
+            })?;
 
         let outgoing = ack_rows
             .iter()
@@ -237,6 +247,8 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             failed_reservations,
             zero_manual_slo_healthy,
             zero_manual_slo_violations,
+            failed_retryable_reservations,
+            failed_non_retryable_reservations,
         }))
     }
 
@@ -401,6 +413,8 @@ mod tests {
         assert_eq!(resp.failed_compensation_jobs, 0);
         assert_eq!(resp.materialization_backlog, 0);
         assert_eq!(resp.failed_reservations, 0);
+        assert_eq!(resp.failed_retryable_reservations, 0);
+        assert_eq!(resp.failed_non_retryable_reservations, 0);
         assert!(resp.zero_manual_slo_healthy);
         assert!(resp.zero_manual_slo_violations.is_empty());
     }
@@ -422,8 +436,15 @@ mod tests {
             .expect("insert conflict2");
         db.insert_compensation_job(conflict_id, "vm/v10", "op-d")
             .expect("insert pending job");
-        db.upsert_replication_reservation("node-capacity/missing", "vm/v9", "op-z", "failed", "x")
-            .expect("failed reservation");
+        db.record_replication_reservation_failure(
+            "node-capacity/missing",
+            "vm/v9",
+            "op-z",
+            false,
+            "x",
+            3,
+        )
+        .expect("failed reservation");
         db.upsert_replication_resource_head(&crate::db::ReplicationResourceHeadRow {
             resource_key: "vm/v9".to_string(),
             last_op_id: "op-a".to_string(),
@@ -452,6 +473,8 @@ mod tests {
         assert!(resp.pending_compensation_jobs > 0);
         assert!(resp.materialization_backlog > 0);
         assert!(resp.failed_reservations > 0);
+        assert_eq!(resp.failed_retryable_reservations, 0);
+        assert!(resp.failed_non_retryable_reservations > 0);
         assert!(!resp.zero_manual_slo_violations.is_empty());
     }
 
