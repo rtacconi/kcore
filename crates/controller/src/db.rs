@@ -1114,6 +1114,42 @@ impl Database {
         )
     }
 
+    pub fn count_retry_exhausted_replication_reservations(&self) -> Result<i64, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.query_row(
+            "SELECT COUNT(*) FROM replication_reservations WHERE status = 'retry_exhausted'",
+            [],
+            |row| row.get(0),
+        )
+    }
+
+    pub fn list_retryable_replication_reservations(
+        &self,
+        limit: i64,
+        min_age_seconds: i64,
+    ) -> Result<Vec<ReplicationReservationRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT reservation_key, resource_key, op_id, status, error, retry_count
+             FROM replication_reservations
+             WHERE status = 'failed_retryable'
+               AND ((julianday('now') - julianday(updated_at)) * 86400) >= ?1
+             ORDER BY updated_at ASC
+             LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![min_age_seconds, limit], |row| {
+            Ok(ReplicationReservationRow {
+                reservation_key: row.get(0)?,
+                resource_key: row.get(1)?,
+                op_id: row.get(2)?,
+                status: row.get(3)?,
+                error: row.get(4)?,
+                retry_count: row.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
     pub fn get_replication_reservation(
         &self,
         reservation_key: &str,
@@ -2379,6 +2415,39 @@ mod tests {
                 .expect("count failed total"),
             1
         );
+        assert_eq!(
+            db.count_retry_exhausted_replication_reservations()
+                .expect("count exhausted"),
+            1
+        );
+    }
+
+    #[test]
+    fn list_retryable_replication_reservations_returns_only_retryable() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_replication_reservation_with_retry(
+            "node-capacity/node-a",
+            "vm/v-a",
+            "op-a",
+            "failed_retryable",
+            "node not ready",
+            1,
+        )
+        .expect("insert retryable");
+        db.upsert_replication_reservation_with_retry(
+            "node-capacity/node-b",
+            "vm/v-b",
+            "op-b",
+            "failed_non_retryable",
+            "node missing",
+            1,
+        )
+        .expect("insert non-retryable");
+        let rows = db
+            .list_retryable_replication_reservations(10, 0)
+            .expect("list retryable");
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].resource_key, "vm/v-a");
     }
 
     #[test]

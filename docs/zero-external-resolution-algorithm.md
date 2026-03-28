@@ -114,6 +114,7 @@ Current bounded TLC model coverage:
 - Drift checks now include a trace fixture generated from controller replication Rust tests, in addition to static fixtures.
 - Drift checker rows now carry reservation/compensation branch signals so `auto_rejected` (reservation failure) and `auto_compensated` paths are validated directly.
 - Reservation ledger failures are now classified (`failed_retryable`, `failed_non_retryable`, `retry_exhausted`) to support bounded retry policy and clearer SLO signals.
+- A reservation retry executor re-evaluates `failed_retryable` rows and either converges them to `reserved` (node recovered) or deterministically progresses to `retry_exhausted`.
 
 Liveness:
 

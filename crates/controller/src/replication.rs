@@ -19,6 +19,9 @@ const COMPENSATION_IDLE_SECS: u64 = 2;
 const MATERIALIZER_IDLE_SECS: u64 = 2;
 const MATERIALIZER_BATCH_SIZE: i64 = 256;
 const RESERVATION_MAX_RETRIES: i32 = 3;
+const RESERVATION_RETRY_IDLE_SECS: u64 = 2;
+const RESERVATION_RETRY_COOLDOWN_SECS: i64 = 5;
+const RESERVATION_RETRY_BATCH_SIZE: i64 = 32;
 
 pub fn spawn_replication_pollers(
     db: Database,
@@ -81,6 +84,23 @@ pub fn spawn_head_materializer(db: Database) {
                 Ok(false) => tokio::time::sleep(Duration::from_secs(MATERIALIZER_IDLE_SECS)).await,
                 Err(e) => {
                     warn!(error = %e, "replication head materializer loop failed");
+                    tokio::time::sleep(Duration::from_secs(ERROR_BACKOFF_SECS)).await;
+                }
+            }
+        }
+    });
+}
+
+pub fn spawn_reservation_retry_executor(db: Database) {
+    tokio::spawn(async move {
+        loop {
+            match process_reservation_retry_once(&db) {
+                Ok(true) => continue,
+                Ok(false) => {
+                    tokio::time::sleep(Duration::from_secs(RESERVATION_RETRY_IDLE_SECS)).await
+                }
+                Err(e) => {
+                    warn!(error = %e, "reservation retry executor loop failed");
                     tokio::time::sleep(Duration::from_secs(ERROR_BACKOFF_SECS)).await;
                 }
             }
@@ -470,6 +490,95 @@ fn evaluate_reservation(
             reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
         })
     }
+}
+
+fn process_reservation_retry_once(db: &Database) -> Result<bool, String> {
+    process_reservation_retry_once_with_min_age(db, RESERVATION_RETRY_COOLDOWN_SECS)
+}
+
+fn process_reservation_retry_once_with_min_age(
+    db: &Database,
+    min_age_seconds: i64,
+) -> Result<bool, String> {
+    let rows = db
+        .list_retryable_replication_reservations(RESERVATION_RETRY_BATCH_SIZE, min_age_seconds)
+        .map_err(|e| format!("list retryable reservations: {e}"))?;
+    let Some(row) = rows.into_iter().next() else {
+        return Ok(false);
+    };
+
+    let Some(node_id) = row.reservation_key.strip_prefix("node-capacity/") else {
+        db.record_replication_reservation_failure(
+            &row.reservation_key,
+            &row.resource_key,
+            &row.op_id,
+            false,
+            "malformed reservation key",
+            RESERVATION_MAX_RETRIES,
+        )
+        .map_err(|e| format!("mark malformed reservation key {}: {e}", row.reservation_key))?;
+        return Ok(true);
+    };
+
+    let node = db
+        .get_node(node_id)
+        .map_err(|e| format!("load node for retry reservation {node_id}: {e}"))?;
+    match node {
+        None => {
+            let _ = db
+                .record_replication_reservation_failure(
+                    &row.reservation_key,
+                    &row.resource_key,
+                    &row.op_id,
+                    false,
+                    "node missing",
+                    RESERVATION_MAX_RETRIES,
+                )
+                .map_err(|e| format!("record non-retryable reservation failure {}: {e}", row.resource_key))?;
+        }
+        Some(node) if node.approval_status != "approved" => {
+            let _ = db
+                .record_replication_reservation_failure(
+                    &row.reservation_key,
+                    &row.resource_key,
+                    &row.op_id,
+                    false,
+                    "node not approved",
+                    RESERVATION_MAX_RETRIES,
+                )
+                .map_err(|e| format!("record non-retryable reservation failure {}: {e}", row.resource_key))?;
+        }
+        Some(node) if node.status != "ready" => {
+            let _ = db
+                .record_replication_reservation_failure(
+                    &row.reservation_key,
+                    &row.resource_key,
+                    &row.op_id,
+                    true,
+                    "node not ready",
+                    RESERVATION_MAX_RETRIES,
+                )
+                .map_err(|e| format!("record retryable reservation failure {}: {e}", row.resource_key))?;
+        }
+        Some(_) => {
+            db.upsert_replication_reservation_with_retry(
+                &row.reservation_key,
+                &row.resource_key,
+                &row.op_id,
+                "reserved",
+                "",
+                row.retry_count,
+            )
+            .map_err(|e| format!("mark reservation reserved {}: {e}", row.resource_key))?;
+            info!(
+                reservation_key = %row.reservation_key,
+                resource_key = %row.resource_key,
+                retry_count = row.retry_count,
+                "reservation retry promoted to reserved"
+            );
+        }
+    }
+    Ok(true)
 }
 
 fn process_compensation_once(db: &Database) -> Result<bool, String> {
@@ -953,6 +1062,59 @@ mod tests {
             .expect("reservation row");
         assert_eq!(reservation.status, "retry_exhausted");
         assert_eq!(reservation.retry_count, 3);
+    }
+
+    #[test]
+    fn reservation_retry_executor_promotes_to_reserved_when_node_recovers() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node("node-r1");
+        node.status = "not-ready".to_string();
+        db.upsert_node(&node).expect("insert node");
+        db.upsert_replication_reservation_with_retry(
+            "node-capacity/node-r1",
+            "vm/v-r1",
+            "op-r1",
+            "failed_retryable",
+            "node not ready",
+            1,
+        )
+        .expect("insert reservation");
+
+        node.status = "ready".to_string();
+        db.upsert_node(&node).expect("update node");
+        assert!(process_reservation_retry_once_with_min_age(&db, 0).expect("retry once"));
+        let row = db
+            .get_replication_reservation("node-capacity/node-r1", "vm/v-r1")
+            .expect("get reservation")
+            .expect("row");
+        assert_eq!(row.status, "reserved");
+        assert_eq!(row.retry_count, 1);
+    }
+
+    #[test]
+    fn reservation_retry_executor_exhausts_budget_for_persistent_not_ready() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node("node-r2");
+        node.status = "not-ready".to_string();
+        db.upsert_node(&node).expect("insert node");
+        db.upsert_replication_reservation_with_retry(
+            "node-capacity/node-r2",
+            "vm/v-r2",
+            "op-r2",
+            "failed_retryable",
+            "node not ready",
+            1,
+        )
+        .expect("insert reservation");
+
+        assert!(process_reservation_retry_once_with_min_age(&db, 0).expect("retry once"));
+        assert!(process_reservation_retry_once_with_min_age(&db, 0).expect("retry once"));
+        let row = db
+            .get_replication_reservation("node-capacity/node-r2", "vm/v-r2")
+            .expect("get reservation")
+            .expect("row");
+        assert_eq!(row.status, "retry_exhausted");
+        assert_eq!(row.retry_count, 3);
     }
 
     #[test]
