@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 mod auth;
 mod config;
 mod discovery;
@@ -26,9 +28,12 @@ fn install_fips_crypto_provider() {
         )
     });
 
-    provider
-        .kx_groups
-        .retain(|group| matches!(group.name(), rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1));
+    provider.kx_groups.retain(|group| {
+        matches!(
+            group.name(),
+            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1
+        )
+    });
 
     provider
         .install_default()

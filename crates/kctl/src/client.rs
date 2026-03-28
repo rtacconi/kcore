@@ -45,8 +45,8 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
 
             let cert_pem = std::fs::read_to_string(cert)
                 .with_context(|| format!("reading client cert {cert}"))?;
-            let key_pem =
-                std::fs::read_to_string(key).with_context(|| format!("reading client key {key}"))?;
+            let key_pem = std::fs::read_to_string(key)
+                .with_context(|| format!("reading client key {key}"))?;
             tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
             if let Some(host) = endpoint_host(&address) {
                 tls = tls.domain_name(host.to_string());
@@ -59,7 +59,10 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
             Err(e) => errors.push(format!("{address}: {e}")),
         }
     }
-    anyhow::bail!("failed to connect to any controller endpoint: {}", errors.join(" | "))
+    anyhow::bail!(
+        "failed to connect to any controller endpoint: {}",
+        errors.join(" | ")
+    )
 }
 
 fn endpoint_host(address: &str) -> Option<&str> {

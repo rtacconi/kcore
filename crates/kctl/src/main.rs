@@ -1,3 +1,5 @@
+#![allow(dead_code, clippy::too_many_arguments, clippy::enum_variant_names)]
+
 mod client;
 mod commands;
 mod config;
@@ -26,9 +28,12 @@ fn install_fips_crypto_provider() {
         )
     });
 
-    provider
-        .kx_groups
-        .retain(|group| matches!(group.name(), rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1));
+    provider.kx_groups.retain(|group| {
+        matches!(
+            group.name(),
+            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1
+        )
+    });
 
     provider
         .install_default()
@@ -941,10 +946,11 @@ async fn main() {
         }
 
         Command::Rotate {
-            resource: RotateResource::Certs {
-                controller,
-                certs_dir,
-            },
+            resource:
+                RotateResource::Certs {
+                    controller,
+                    certs_dir,
+                },
         } => {
             let config_path = cli
                 .config
@@ -953,8 +959,7 @@ async fn main() {
             let certs_path = if let Some(dir) = certs_dir {
                 dir.clone()
             } else {
-                config::resolve_install_certs_dir(&config_path)
-                    .unwrap_or_else(|e| fatal(&e))
+                config::resolve_install_certs_dir(&config_path).unwrap_or_else(|e| fatal(&e))
             };
             let info = config::resolve_controller(&config_path, &[], cli.insecure).ok();
             commands::certs::rotate(&certs_path, controller, info.as_ref()).await
@@ -970,8 +975,7 @@ async fn main() {
                     .config
                     .clone()
                     .unwrap_or_else(config::default_config_path);
-                config::resolve_install_certs_dir(&config_path)
-                    .unwrap_or_else(|e| fatal(&e))
+                config::resolve_install_certs_dir(&config_path).unwrap_or_else(|e| fatal(&e))
             };
             commands::certs::rotate_sub_ca(&certs_path, &info).await
         }

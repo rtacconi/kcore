@@ -1,7 +1,8 @@
-{ lib, ... }: {
+{ lib, ... }:
+{
   # OS Release branding
   system.nixos.label = "kcore";
-  
+
   # /etc/os-release
   environment.etc."os-release".text = ''
     NAME="kcore"

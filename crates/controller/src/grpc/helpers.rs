@@ -30,7 +30,7 @@ pub fn state_fallback_without_runtime(auto_start: bool) -> i32 {
 }
 
 pub fn parse_datetime_to_timestamp(dt: &str) -> Option<prost_types::Timestamp> {
-    let parts: Vec<&str> = dt.split(|c| c == '-' || c == ' ' || c == ':').collect();
+    let parts: Vec<&str> = dt.split(['-', ' ', ':']).collect();
     if parts.len() < 6 {
         return None;
     }
@@ -42,7 +42,7 @@ pub fn parse_datetime_to_timestamp(dt: &str) -> Option<prost_types::Timestamp> {
     let sec: u32 = parts[5].parse().ok()?;
 
     let days = days_from_civil(year, month, day);
-    let secs = days as i64 * 86400 + hour as i64 * 3600 + min as i64 * 60 + sec as i64;
+    let secs = days * 86400 + hour as i64 * 3600 + min as i64 * 60 + sec as i64;
     Some(prost_types::Timestamp {
         seconds: secs,
         nanos: 0,
@@ -56,7 +56,7 @@ fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
     let m = m as u64;
     let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d as u64 - 1;
     let doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-    (era * 146097 + doe as i64 - 719468) as i64
+    era * 146097 + doe as i64 - 719468
 }
 
 pub fn parse_port_list(s: &str) -> Vec<i32> {
