@@ -1,3 +1,5 @@
+// TODO(tech-debt): Crate-wide `dead_code` suppression is temporary. Audit unused
+// items and either remove them or narrow to item-level `#[allow(dead_code)]`.
 #![allow(dead_code)]
 
 mod auth;
