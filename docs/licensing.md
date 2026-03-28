@@ -14,3 +14,5 @@ kcore uses an **open-core** model.
 | Production | kcore Standard or kcore Premium (subscribed nodes) |
 
 For prices, support tiers, and socket-based billing, see [PRICING.md](../PRICING.md) in the repository root.
+
+For the **partner program** (resellers, integrators, service providers), email [team@tacconiconsulting.com](mailto:team@tacconiconsulting.com?subject=kcore%20partner%20program).

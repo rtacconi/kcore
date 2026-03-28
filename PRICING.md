@@ -38,6 +38,10 @@ For how licensing relates to subscriptions, see [docs/licensing.md](docs/licensi
 - Each occupied socket on each subscribed node requires a subscription
 - For production clusters, all nodes should be subscribed at the same level
 
+## Partner program
+
+We run a partner program for resellers, integrators, and service providers. Contact [team@tacconiconsulting.com](mailto:team@tacconiconsulting.com?subject=kcore%20partner%20program).
+
 ## FAQ
 
 **Do I need a subscription to use kcore?**  

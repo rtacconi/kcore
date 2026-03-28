@@ -17,6 +17,10 @@ More detail: [docs/licensing.md](docs/licensing.md).
 
 Organizations that want the **official supported distribution** of kcore can purchase a subscription. Subscriptions provide access to **official signed ISO images**, the **stable production update channel**, **tested updates**, and **commercial support**.
 
+## Partner program
+
+We run a **partner program** for resellers, integrators, and service providers. Contact **[team@tacconiconsulting.com](mailto:team@tacconiconsulting.com?subject=kcore%20partner%20program)**.
+
 ## Community Edition
 
 Community Edition is suitable for **contributors**, **labs**, **homelabs**, and **evaluation** environments. No subscription is required to build or run from source.
