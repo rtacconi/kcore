@@ -152,7 +152,8 @@ fn normalize_address(addr: &str, default_port: u16) -> String {
 }
 
 fn normalize_addresses(addrs: &[String], default_port: u16) -> Vec<String> {
-    addrs.iter()
+    addrs
+        .iter()
         .map(|s| normalize_address(s.trim(), default_port))
         .filter(|s| !s.is_empty())
         .collect()
@@ -283,11 +284,7 @@ mod tests {
 
     #[test]
     fn resolve_controller_uses_flag_and_defaults_port() {
-        let info = resolve_controller(
-            Path::new("/nonexistent"),
-            &["10.0.0.10".into()],
-            true,
-        )
+        let info = resolve_controller(Path::new("/nonexistent"), &["10.0.0.10".into()], true)
             .expect("resolve controller");
         assert_eq!(info.address, "10.0.0.10:9090");
         assert_eq!(info.addresses, vec!["10.0.0.10:9090"]);

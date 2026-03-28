@@ -1,0 +1,15 @@
+---
+description: Never push to main; use pull requests so CI and required checks run before merge
+alwaysApply: true
+---
+
+# Git workflow — pull requests, not direct pushes to `main`
+
+- Do **not** push to the default branch (`main`). Never run `git push origin main`, `git push --set-upstream origin main` while on `main`, or equivalent that updates `origin/main` directly.
+- Ship changes by pushing a **feature branch** and opening a **pull request** into `main` so repository quality checks (CI, required reviews, Semgrep, etc.) run before merge.
+- When asked to land work: create or use a branch such as `fix/…` or `feat/…`, commit there, `git push -u origin <branch>`, then create the PR (`gh pr create --base main …` or the GitHub UI). Do not merge locally into `main` and push unless the user explicitly overrides this rule for an emergency.
+
+## Examples
+
+- Good: `git checkout -b fix/issue-123 && git push -u origin fix/issue-123` → open PR targeting `main`.
+- Bad: committing on `main` and `git push origin main`.

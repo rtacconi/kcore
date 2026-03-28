@@ -6,5 +6,5 @@
     ./cloud-init.nix
   ];
 
-  meta.maintainers = [];
+  meta.maintainers = [ ];
 }

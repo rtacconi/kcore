@@ -263,10 +263,7 @@ pub async fn update(
     target_node: Option<String>,
 ) -> Result<()> {
     let memory_bytes = match &memory {
-        Some(m) => {
-            let bytes = client::parse_size_bytes(m).map_err(|e| anyhow::anyhow!(e))?;
-            bytes
-        }
+        Some(m) => client::parse_size_bytes(m).map_err(|e| anyhow::anyhow!(e))?,
         None => 0,
     };
 

@@ -5,16 +5,18 @@ use anyhow::Result;
 use crate::config::ConnectionInfo;
 use crate::{client, pki};
 
-pub async fn rotate(certs_dir: &Path, controller: &str, info: Option<&ConnectionInfo>) -> Result<()> {
+pub async fn rotate(
+    certs_dir: &Path,
+    controller: &str,
+    info: Option<&ConnectionInfo>,
+) -> Result<()> {
     let controller_host = pki::host_from_address(controller)
         .map_err(|e| anyhow::anyhow!("invalid controller address: {e}"))?;
 
     pki::rotate_controller_cert(certs_dir, &controller_host)
         .map_err(|e| anyhow::anyhow!("rotating controller cert: {e}"))?;
 
-    println!(
-        "Controller certificate rotated with SAN: {controller_host}"
-    );
+    println!("Controller certificate rotated with SAN: {controller_host}");
     println!("  cert: {}", certs_dir.join("controller.crt").display());
     println!("  key:  {}", certs_dir.join("controller.key").display());
 
@@ -26,10 +28,7 @@ pub async fn rotate(certs_dir: &Path, controller: &str, info: Option<&Connection
 
         let mut ctrl = client::controller_client(info).await?;
         let resp = ctrl
-            .reload_tls(client::controller_proto::ReloadTlsRequest {
-                cert_pem,
-                key_pem,
-            })
+            .reload_tls(client::controller_proto::ReloadTlsRequest { cert_pem, key_pem })
             .await?
             .into_inner();
 
@@ -49,8 +48,8 @@ pub async fn rotate(certs_dir: &Path, controller: &str, info: Option<&Connection
 }
 
 pub async fn rotate_sub_ca(certs_dir: &Path, info: &ConnectionInfo) -> Result<()> {
-    let (sub_ca_cert_pem, sub_ca_key_pem) = pki::rotate_sub_ca(certs_dir)
-        .map_err(|e| anyhow::anyhow!("generating new sub-CA: {e}"))?;
+    let (sub_ca_cert_pem, sub_ca_key_pem) =
+        pki::rotate_sub_ca(certs_dir).map_err(|e| anyhow::anyhow!("generating new sub-CA: {e}"))?;
 
     println!("New sub-CA generated locally:");
     println!("  cert: {}", certs_dir.join("sub-ca.crt").display());
@@ -87,11 +86,16 @@ mod tests {
         let original_cert =
             std::fs::read_to_string(certs_dir.join("controller.crt")).expect("read cert");
 
-        rotate(&certs_dir, "10.0.0.2:9090", None).await.expect("rotate");
+        rotate(&certs_dir, "10.0.0.2:9090", None)
+            .await
+            .expect("rotate");
 
         let new_cert =
             std::fs::read_to_string(certs_dir.join("controller.crt")).expect("read new cert");
-        assert_ne!(original_cert, new_cert, "cert should have changed after rotation");
+        assert_ne!(
+            original_cert, new_cert,
+            "cert should have changed after rotation"
+        );
 
         let ca = std::fs::read_to_string(certs_dir.join("ca.crt")).expect("read ca");
         assert!(!ca.is_empty(), "CA cert should be unchanged");

@@ -143,10 +143,7 @@ pub async fn install(
     node_id: Option<&str>,
 ) -> Result<()> {
     let join_controllers = validate_install_controller_mode(join_controllers, run_controller)?;
-    let primary_controller = join_controllers
-        .first()
-        .cloned()
-        .unwrap_or_default();
+    let primary_controller = join_controllers.first().cloned().unwrap_or_default();
 
     let node_host =
         pki::host_from_address(&info.address).map_err(|e| anyhow::anyhow!("node address: {e}"))?;

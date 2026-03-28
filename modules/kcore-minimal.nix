@@ -1,4 +1,4 @@
-{ config, lib, pkgs, ... }:
+{ lib, pkgs, ... }:
 
 {
   # Minimal base system configuration
@@ -90,4 +90,3 @@
   # Systemd optimizations
   systemd.services.systemd-udevd.restartIfChanged = false;
 }
-

@@ -1,4 +1,4 @@
-.PHONY: all build check fmt clippy audit test test-all test-rust test-nix test-vm test-tla test-tla-trace coverage test-controller test-node-agent test-kctl test-rust-filter iso iso-remote kctl clean help
+.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace coverage test-controller test-node-agent test-kctl test-rust-filter iso iso-remote kctl clean help
 
 VERSION := $(shell cat VERSION)
 V ?= v$(VERSION)
@@ -13,6 +13,7 @@ check:
 	cargo clippy --all-targets -- --deny warnings
 	cargo fmt --check
 	cargo audit
+	$(MAKE) lint-nix
 
 fmt:
 	cargo fmt
@@ -22,6 +23,10 @@ clippy:
 
 audit:
 	cargo audit
+
+lint-nix:
+	statix check -c .statix.toml .
+	deadnix --fail .
 
 test: test-rust
 
@@ -89,6 +94,7 @@ help:
 	@echo "  fmt         Format Rust code"
 	@echo "  clippy      Run clippy lints"
 	@echo "  audit       Run cargo-audit for known vulnerabilities"
+	@echo "  lint-nix    Run statix and deadnix on Nix files"
 	@echo "  test        Run Rust tests (workspace)"
 	@echo "  test-all    Run Rust tests + Nix flake checks"
 	@echo "  test-rust   Run all Rust tests in workspace"

@@ -1,4 +1,5 @@
-{lib, ...}: let
+{ lib, ... }:
+let
   networkSubmodule = lib.types.submodule {
     options = {
       externalIP = lib.mkOption {
@@ -19,13 +20,13 @@
 
       allowedTCPPorts = lib.mkOption {
         type = lib.types.listOf lib.types.port;
-        default = [];
+        default = [ ];
         description = "TCP ports to forward from external IP to VMs.";
       };
 
       allowedUDPPorts = lib.mkOption {
         type = lib.types.listOf lib.types.port;
-        default = [];
+        default = [ ];
         description = "UDP ports to forward from external IP to VMs.";
       };
 
@@ -36,7 +37,11 @@
       };
 
       networkType = lib.mkOption {
-        type = lib.types.enum ["nat" "bridge" "vxlan"];
+        type = lib.types.enum [
+          "nat"
+          "bridge"
+          "vxlan"
+        ];
         default = "nat";
         description = "Network mode: nat (default, masquerade+DNAT), bridge (passthrough to physical NIC), or vxlan (overlay).";
       };
@@ -49,7 +54,7 @@
 
       vxlanPeers = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [];
+        default = [ ];
         description = "IP addresses of peer hosts for VXLAN FDB flooding.";
       };
 
@@ -75,7 +80,10 @@
       };
 
       imageFormat = lib.mkOption {
-        type = lib.types.enum ["raw" "qcow2"];
+        type = lib.types.enum [
+          "raw"
+          "qcow2"
+        ];
         default = "raw";
         description = "Disk image format passed to Cloud Hypervisor (image_type).";
       };
@@ -87,7 +95,11 @@
       };
 
       storageBackend = lib.mkOption {
-        type = lib.types.enum ["filesystem" "lvm" "zfs"];
+        type = lib.types.enum [
+          "filesystem"
+          "lvm"
+          "zfs"
+        ];
         default = "filesystem";
         description = "Storage backend requested for VM data volume provisioning.";
       };
@@ -142,12 +154,13 @@
 
       extraArgs = lib.mkOption {
         type = lib.types.listOf lib.types.str;
-        default = [];
+        default = [ ];
         description = "Extra command-line arguments passed to cloud-hypervisor.";
       };
     };
   };
-in {
+in
+{
   options.ch-vm.vms = {
     enable = lib.mkEnableOption "kcore declarative VM management";
 
@@ -176,13 +189,13 @@ in {
 
     networks = lib.mkOption {
       type = lib.types.attrsOf networkSubmodule;
-      default = {};
+      default = { };
       description = "Named networks, each backed by a bridge with NAT.";
     };
 
     virtualMachines = lib.mkOption {
       type = lib.types.attrsOf vmSubmodule;
-      default = {};
+      default = { };
       description = "Named virtual machines managed by Cloud Hypervisor.";
     };
   };

@@ -197,17 +197,22 @@ async fn poll_once(
     Ok(true)
 }
 
-fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationEvent) -> Result<(), String> {
-    let payload: Value = serde_json::from_slice(&event.payload)
-        .map_err(|e| format!("invalid replication payload for event {}: {e}", event.event_id))?;
-    let payload_obj = payload
-        .as_object()
-        .ok_or_else(|| {
-            format!(
-                "invalid replication payload type for event {}: expected object",
-                event.event_id
-            )
-        })?;
+fn apply_replication_event(
+    db: &Database,
+    event: &controller_proto::ReplicationEvent,
+) -> Result<(), String> {
+    let payload: Value = serde_json::from_slice(&event.payload).map_err(|e| {
+        format!(
+            "invalid replication payload for event {}: {e}",
+            event.event_id
+        )
+    })?;
+    let payload_obj = payload.as_object().ok_or_else(|| {
+        format!(
+            "invalid replication payload type for event {}: expected object",
+            event.event_id
+        )
+    })?;
 
     let origin_controller_id = payload_obj
         .get("controllerId")
@@ -251,8 +256,7 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
         .and_then(|v| v.as_i64())
         .unwrap_or(0);
     let validity = parse_validity_class(payload_obj.get("validity").and_then(|v| v.as_str()));
-    let safety_class =
-        parse_safety_class(payload_obj.get("safetyClass").and_then(|v| v.as_str()));
+    let safety_class = parse_safety_class(payload_obj.get("safetyClass").and_then(|v| v.as_str()));
     let body = payload_obj.get("body").cloned().unwrap_or(Value::Null);
 
     if db
@@ -338,18 +342,20 @@ fn apply_replication_event(db: &Database, event: &controller_proto::ReplicationE
         };
         let conflict_id = db
             .insert_replication_conflict_with_resolved(
-            payload_resource_key,
-            &existing.last_op_id,
-            op_id,
-            &existing.last_controller_id,
-            origin_controller_id,
-            &reason,
-            loser_state != crate::replication_policy::ReconcileTerminalState::AutoCompensated,
-        )
-        .map_err(|e| format!("insert conflict for event {}: {e}", event.event_id))?;
+                payload_resource_key,
+                &existing.last_op_id,
+                op_id,
+                &existing.last_controller_id,
+                origin_controller_id,
+                &reason,
+                loser_state != crate::replication_policy::ReconcileTerminalState::AutoCompensated,
+            )
+            .map_err(|e| format!("insert conflict for event {}: {e}", event.event_id))?;
         if loser_state == crate::replication_policy::ReconcileTerminalState::AutoCompensated {
             db.insert_compensation_job(conflict_id, payload_resource_key, loser_op_id)
-                .map_err(|e| format!("insert compensation job for event {}: {e}", event.event_id))?;
+                .map_err(|e| {
+                    format!("insert compensation job for event {}: {e}", event.event_id)
+                })?;
         }
     }
 
@@ -447,7 +453,9 @@ fn evaluate_reservation(
                 .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
             return Ok(ReservationOutcome {
                 accepted: false,
-                reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
+                reason: format!(
+                    "{reservation_key}: {error}; status={status}; retry_count={retry_count}"
+                ),
             });
         }
         if node.status != "ready" {
@@ -464,7 +472,9 @@ fn evaluate_reservation(
                 .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
             return Ok(ReservationOutcome {
                 accepted: false,
-                reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
+                reason: format!(
+                    "{reservation_key}: {error}; status={status}; retry_count={retry_count}"
+                ),
             });
         }
         db.upsert_replication_reservation(&reservation_key, resource_key, op_id, "reserved", "")
@@ -487,7 +497,9 @@ fn evaluate_reservation(
             .map_err(|e| format!("record reservation failure {reservation_key}: {e}"))?;
         Ok(ReservationOutcome {
             accepted: false,
-            reason: format!("{reservation_key}: {error}; status={status}; retry_count={retry_count}"),
+            reason: format!(
+                "{reservation_key}: {error}; status={status}; retry_count={retry_count}"
+            ),
         })
     }
 }
@@ -516,7 +528,12 @@ fn process_reservation_retry_once_with_min_age(
             "malformed reservation key",
             RESERVATION_MAX_RETRIES,
         )
-        .map_err(|e| format!("mark malformed reservation key {}: {e}", row.reservation_key))?;
+        .map_err(|e| {
+            format!(
+                "mark malformed reservation key {}: {e}",
+                row.reservation_key
+            )
+        })?;
         return Ok(true);
     };
 
@@ -534,7 +551,12 @@ fn process_reservation_retry_once_with_min_age(
                     "node missing",
                     RESERVATION_MAX_RETRIES,
                 )
-                .map_err(|e| format!("record non-retryable reservation failure {}: {e}", row.resource_key))?;
+                .map_err(|e| {
+                    format!(
+                        "record non-retryable reservation failure {}: {e}",
+                        row.resource_key
+                    )
+                })?;
         }
         Some(node) if node.approval_status != "approved" => {
             let _ = db
@@ -546,7 +568,12 @@ fn process_reservation_retry_once_with_min_age(
                     "node not approved",
                     RESERVATION_MAX_RETRIES,
                 )
-                .map_err(|e| format!("record non-retryable reservation failure {}: {e}", row.resource_key))?;
+                .map_err(|e| {
+                    format!(
+                        "record non-retryable reservation failure {}: {e}",
+                        row.resource_key
+                    )
+                })?;
         }
         Some(node) if node.status != "ready" => {
             let _ = db
@@ -558,7 +585,12 @@ fn process_reservation_retry_once_with_min_age(
                     "node not ready",
                     RESERVATION_MAX_RETRIES,
                 )
-                .map_err(|e| format!("record retryable reservation failure {}: {e}", row.resource_key))?;
+                .map_err(|e| {
+                    format!(
+                        "record retryable reservation failure {}: {e}",
+                        row.resource_key
+                    )
+                })?;
         }
         Some(_) => {
             db.upsert_replication_reservation_with_retry(
@@ -768,12 +800,13 @@ async fn connect_admin(
         let ca_pem = std::fs::read_to_string(&tls.ca_file).map_err(|e| e.to_string())?;
         let cert_pem = std::fs::read_to_string(&tls.cert_file).map_err(|e| e.to_string())?;
         let key_pem = std::fs::read_to_string(&tls.key_file).map_err(|e| e.to_string())?;
-        ep = ep.tls_config(
-            ClientTlsConfig::new()
-                .ca_certificate(Certificate::from_pem(ca_pem))
-                .identity(Identity::from_pem(cert_pem, key_pem)),
-        )
-        .map_err(|e| e.to_string())?;
+        ep = ep
+            .tls_config(
+                ClientTlsConfig::new()
+                    .ca_certificate(Certificate::from_pem(ca_pem))
+                    .identity(Identity::from_pem(cert_pem, key_pem)),
+            )
+            .map_err(|e| e.to_string())?;
     }
     let channel = ep.connect().await.map_err(|e| e.to_string())?;
     Ok(controller_proto::controller_admin_client::ControllerAdminClient::new(channel))
@@ -854,8 +887,14 @@ mod tests {
 
     #[test]
     fn normalize_endpoint_adds_scheme() {
-        assert_eq!(normalize_endpoint("10.0.0.10:9090", true), "https://10.0.0.10:9090");
-        assert_eq!(normalize_endpoint("10.0.0.10:9090", false), "http://10.0.0.10:9090");
+        assert_eq!(
+            normalize_endpoint("10.0.0.10:9090", true),
+            "https://10.0.0.10:9090"
+        );
+        assert_eq!(
+            normalize_endpoint("10.0.0.10:9090", false),
+            "http://10.0.0.10:9090"
+        );
         assert_eq!(
             normalize_endpoint("https://10.0.0.10:9090", true),
             "https://10.0.0.10:9090"
@@ -978,7 +1017,10 @@ mod tests {
                 .expect("count conflicts"),
             1
         );
-        assert_eq!(db.count_pending_compensation_jobs().expect("pending jobs"), 1);
+        assert_eq!(
+            db.count_pending_compensation_jobs().expect("pending jobs"),
+            1
+        );
         process_compensation_once(&db).expect("process one");
         assert_eq!(
             db.count_unresolved_replication_conflicts()
@@ -1027,11 +1069,10 @@ mod tests {
             payload: br#"{"opId":"op-9","controllerId":"ctrl-a","logicalTsUnixMs":1000,"eventType":"vm.create","resourceKey":"vm/v9","body":{"vmId":"v9","nodeId":"missing-node","name":"v9"}}"#.to_vec(),
         };
         apply_replication_event(&db, &ev).expect("apply");
-        assert!(
-            db.get_replication_resource_head("vm/v9")
-                .expect("get head")
-                .is_none()
-        );
+        assert!(db
+            .get_replication_resource_head("vm/v9")
+            .expect("get head")
+            .is_none());
         let reservation = db
             .get_replication_reservation("node-capacity/missing-node", "vm/v9")
             .expect("reservation read")
@@ -1127,7 +1168,8 @@ mod tests {
         let db = Database::open(":memory:").expect("open db");
         let mut retry_node = test_node("node-retry-trace");
         retry_node.status = "not-ready".to_string();
-        db.upsert_node(&retry_node).expect("insert retry trace node");
+        db.upsert_node(&retry_node)
+            .expect("insert retry trace node");
         let events = vec![
             (
                 controller_proto::ReplicationEvent {
@@ -1250,13 +1292,20 @@ mod tests {
                 })
                 .map(|r| r.status)
                 .unwrap_or_else(|| "not_applicable".to_string());
-            let reservation_failed =
-                reservation_status.starts_with("failed_") || reservation_status == "retry_exhausted";
+            let reservation_failed = reservation_status.starts_with("failed_")
+                || reservation_status == "retry_exhausted";
             let compensation_status = db
                 .get_compensation_job_status_for_loser_op(&op_id)
                 .ok()
                 .flatten()
-                .map(|s| if s == "completed" { "completed" } else { "queued" }.to_string())
+                .map(|s| {
+                    if s == "completed" {
+                        "completed"
+                    } else {
+                        "queued"
+                    }
+                    .to_string()
+                })
                 .unwrap_or_else(|| "not_applicable".to_string());
             let terminal_state = if head_op.as_deref() == Some(op_id.as_str()) {
                 "auto_accepted"

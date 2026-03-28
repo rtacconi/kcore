@@ -1,0 +1,93 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake perl
+
+      - name: Cache cargo registry and build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Check formatting
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- --deny warnings
+
+      - name: Run tests
+        run: cargo test --workspace
+
+      - name: Security audit
+        run: cargo audit
+
+  nix-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Nix
+        uses: DeterminateSystems/nix-installer-action@v21
+
+      - name: Nix cache
+        uses: DeterminateSystems/magic-nix-cache-action@v13
+        continue-on-error: true
+
+      - name: Statix lint
+        run: nix run nixpkgs#statix -- check -c .statix.toml .
+
+      - name: Deadnix lint
+        run: nix run nixpkgs#deadnix -- --fail .
+
+      - name: Nix flake evaluation
+        run: nix flake show --json > /dev/null
+
+      - name: Nix format check
+        run: nix build --no-link .#checks.x86_64-linux.fmt-nix
+
+  semgrep:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' && vars.SEMGREP_APP_TOKEN != ''
+    container:
+      image: semgrep/semgrep
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep
+        run: semgrep ci
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
