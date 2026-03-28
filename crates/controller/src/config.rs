@@ -67,8 +67,24 @@ fn default_netmask() -> String {
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
-        let contents = std::fs::read_to_string(Path::new(path))
-            .with_context(|| format!("reading config {path}"))?;
+        let input_path = Path::new(path);
+
+        // Canonicalize to prevent path traversal attacks by resolving
+        // any ".." sequences and symlinks to the actual file path
+        let canonical_path = input_path
+            .canonicalize()
+            .with_context(|| format!("resolving config path {}", input_path.display()))?;
+
+        // Verify the resolved path points to a regular file
+        if !canonical_path.is_file() {
+            anyhow::bail!(
+                "config path '{}' is not a regular file",
+                canonical_path.display()
+            );
+        }
+
+        let contents = std::fs::read_to_string(&canonical_path)
+            .with_context(|| format!("reading config {}", canonical_path.display()))?;
         let cfg: Config = serde_yaml::from_str(&contents).context("parsing config")?;
         cfg.validate()?;
         Ok(cfg)
