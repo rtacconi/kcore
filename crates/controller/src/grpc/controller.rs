@@ -11,11 +11,11 @@ use crate::db::{Database, NetworkRow, NodeRow, VmRow};
 use crate::node_proto;
 use crate::{nixgen, node_client::NodeClients, scheduler};
 
+use super::helpers::compute_vni;
 use super::helpers::{
     controller_state_from_node_state, parse_datetime_to_timestamp, parse_port_list,
     short_vm_id_seed, state_fallback_without_runtime,
 };
-use super::helpers::compute_vni;
 use super::signing;
 use super::validation::{
     derive_image_format, derive_image_format_from_path, derive_local_image_path,
@@ -471,7 +471,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
             address: req.address.clone(),
             cpu_cores: cpu,
             memory_bytes: mem,
-            status: if approval_status == "approved" { "ready".into() } else { "pending".into() },
+            status: if approval_status == "approved" {
+                "ready".into()
+            } else {
+                "pending".into()
+            },
             last_heartbeat: String::new(),
             gateway_interface: String::new(),
             cpu_used: 0,
@@ -541,7 +545,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         let found = self
             .db
-            .update_heartbeat(&req.node_id, cpu_used, mem_used, req.cert_expiry_days, &req.luks_method)
+            .update_heartbeat(
+                &req.node_id,
+                cpu_used,
+                mem_used,
+                req.cert_expiry_days,
+                &req.luks_method,
+            )
             .map_err(|e| Status::internal(e.to_string()))?;
 
         if !found {
@@ -1945,12 +1955,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             ));
         }
 
-        let node_host = node
-            .address
-            .split(':')
-            .next()
-            .unwrap_or("")
-            .to_string();
+        let node_host = node.address.split(':').next().unwrap_or("").to_string();
         if node_host.is_empty() {
             return Err(Status::internal(format!(
                 "cannot determine host from node address '{}'",
@@ -2164,46 +2169,42 @@ impl controller_proto::controller_server::Controller for ControllerService {
         let mut total_block_devices: i32 = 0;
 
         for node in &approved {
-            let (disks, disk_inventory_ok) =
-                match self.ensure_admin_client_for_node(node).await {
-                    Ok(mut admin) => match admin
-                        .list_disks(node_proto::ListDisksRequest {})
-                        .await
-                    {
-                        Ok(resp) => {
-                            let disks: Vec<controller_proto::StorageDiskDetail> = resp
-                                .into_inner()
-                                .disks
-                                .into_iter()
-                                .map(|d| controller_proto::StorageDiskDetail {
-                                    name: d.name,
-                                    path: d.path,
-                                    size: d.size,
-                                    model: d.model,
-                                    fstype: d.fstype,
-                                    mountpoint: d.mountpoint,
-                                })
-                                .collect();
-                            (disks, true)
-                        }
-                        Err(e) => {
-                            warn!(
-                                node_id = %node.id,
-                                error = %e,
-                                "ListDisks failed for storage overview"
-                            );
-                            (vec![], false)
-                        }
-                    },
+            let (disks, disk_inventory_ok) = match self.ensure_admin_client_for_node(node).await {
+                Ok(mut admin) => match admin.list_disks(node_proto::ListDisksRequest {}).await {
+                    Ok(resp) => {
+                        let disks: Vec<controller_proto::StorageDiskDetail> = resp
+                            .into_inner()
+                            .disks
+                            .into_iter()
+                            .map(|d| controller_proto::StorageDiskDetail {
+                                name: d.name,
+                                path: d.path,
+                                size: d.size,
+                                model: d.model,
+                                fstype: d.fstype,
+                                mountpoint: d.mountpoint,
+                            })
+                            .collect();
+                        (disks, true)
+                    }
                     Err(e) => {
                         warn!(
                             node_id = %node.id,
                             error = %e,
-                            "cannot reach node for storage overview"
+                            "ListDisks failed for storage overview"
                         );
                         (vec![], false)
                     }
-                };
+                },
+                Err(e) => {
+                    warn!(
+                        node_id = %node.id,
+                        error = %e,
+                        "cannot reach node for storage overview"
+                    );
+                    (vec![], false)
+                }
+            };
 
             if disk_inventory_ok {
                 nodes_disk_inventory_ok += 1;
@@ -2221,19 +2222,21 @@ impl controller_proto::controller_server::Controller for ControllerService {
             });
         }
 
-        Ok(Response::new(controller_proto::GetStorageOverviewResponse {
-            approved_nodes: approved.len() as i32,
-            nodes_disk_inventory_ok,
-            backend_filesystem_nodes,
-            backend_lvm_nodes,
-            backend_zfs_nodes,
-            backend_unspecified_nodes,
-            nodes_luks_tpm2,
-            nodes_luks_keyfile,
-            nodes_luks_unknown,
-            total_block_devices,
-            nodes: nodes_out,
-        }))
+        Ok(Response::new(
+            controller_proto::GetStorageOverviewResponse {
+                approved_nodes: approved.len() as i32,
+                nodes_disk_inventory_ok,
+                backend_filesystem_nodes,
+                backend_lvm_nodes,
+                backend_zfs_nodes,
+                backend_unspecified_nodes,
+                nodes_luks_tpm2,
+                nodes_luks_keyfile,
+                nodes_luks_unknown,
+                total_block_devices,
+                nodes: nodes_out,
+            },
+        ))
     }
 
     // TODO(rbac): restrict to admin role when RBAC is implemented
@@ -2360,10 +2363,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384".into(),
                     "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256".into(),
                 ],
-                kx_groups: vec![
-                    "secp384r1 (P-384)".into(),
-                    "secp256r1 (P-256)".into(),
-                ],
+                kx_groups: vec!["secp384r1 (P-384)".into(), "secp256r1 (P-256)".into()],
                 excluded_algorithms: vec![
                     "ChaCha20-Poly1305".into(),
                     "X25519".into(),
@@ -3124,24 +3124,25 @@ mod tests {
             hook,
         );
 
-        let resp = <ControllerService as controller_proto::controller_server::Controller>::create_network(
-            &svc,
-            Request::new(controller_proto::CreateNetworkRequest {
-                name: "overlay-1".to_string(),
-                external_ip: "203.0.113.10".to_string(),
-                gateway_ip: "10.250.0.1".to_string(),
-                internal_netmask: "255.255.255.0".to_string(),
-                target_node: node.id.clone(),
-                allowed_tcp_ports: vec![],
-                allowed_udp_ports: vec![],
-                vlan_id: 0,
-                network_type: "vxlan".to_string(),
-                enable_outbound_nat: true,
-            }),
-        )
-        .await
-        .expect("create vxlan network")
-        .into_inner();
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::create_network(
+                &svc,
+                Request::new(controller_proto::CreateNetworkRequest {
+                    name: "overlay-1".to_string(),
+                    external_ip: "203.0.113.10".to_string(),
+                    gateway_ip: "10.250.0.1".to_string(),
+                    internal_netmask: "255.255.255.0".to_string(),
+                    target_node: node.id.clone(),
+                    allowed_tcp_ports: vec![],
+                    allowed_udp_ports: vec![],
+                    vlan_id: 0,
+                    network_type: "vxlan".to_string(),
+                    enable_outbound_nat: true,
+                }),
+            )
+            .await
+            .expect("create vxlan network")
+            .into_inner();
 
         assert!(resp.success);
 
@@ -3170,23 +3171,24 @@ mod tests {
             hook,
         );
 
-        let err = <ControllerService as controller_proto::controller_server::Controller>::create_network(
-            &svc,
-            Request::new(controller_proto::CreateNetworkRequest {
-                name: "bad-net".to_string(),
-                external_ip: "203.0.113.10".to_string(),
-                gateway_ip: "10.250.0.1".to_string(),
-                internal_netmask: "255.255.255.0".to_string(),
-                target_node: node.id.clone(),
-                allowed_tcp_ports: vec![],
-                allowed_udp_ports: vec![],
-                vlan_id: 0,
-                network_type: "wireguard".to_string(),
-                enable_outbound_nat: false,
-            }),
-        )
-        .await
-        .expect_err("invalid type should be rejected");
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_network(
+                &svc,
+                Request::new(controller_proto::CreateNetworkRequest {
+                    name: "bad-net".to_string(),
+                    external_ip: "203.0.113.10".to_string(),
+                    gateway_ip: "10.250.0.1".to_string(),
+                    internal_netmask: "255.255.255.0".to_string(),
+                    target_node: node.id.clone(),
+                    allowed_tcp_ports: vec![],
+                    allowed_udp_ports: vec![],
+                    vlan_id: 0,
+                    network_type: "wireguard".to_string(),
+                    enable_outbound_nat: false,
+                }),
+            )
+            .await
+            .expect_err("invalid type should be rejected");
 
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
@@ -3224,35 +3226,38 @@ mod tests {
         .await
         .expect("create vxlan network");
 
-        let create_resp = <ControllerService as controller_proto::controller_server::Controller>::create_vm(
-            &svc,
-            Request::new(controller_proto::CreateVmRequest {
-                spec: Some(controller_proto::VmSpec {
-                    id: String::new(),
-                    name: "app-1".to_string(),
-                    cpu: 1,
-                    memory_bytes: 512 * 1024 * 1024,
-                    disks: vec![],
-                    nics: vec![controller_proto::Nic {
-                        network: "vx-net".to_string(),
-                        model: String::new(),
-                        mac_address: String::new(),
-                    }],
+        let create_resp =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(controller_proto::CreateVmRequest {
+                    spec: Some(controller_proto::VmSpec {
+                        id: String::new(),
+                        name: "app-1".to_string(),
+                        cpu: 1,
+                        memory_bytes: 512 * 1024 * 1024,
+                        disks: vec![],
+                        nics: vec![controller_proto::Nic {
+                            network: "vx-net".to_string(),
+                            model: String::new(),
+                            mac_address: String::new(),
+                        }],
+                    }),
+                    image_url: "https://example.com/img.raw".to_string(),
+                    image_sha256:
+                        "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+                            .to_string(),
+                    cloud_init_user_data: String::new(),
+                    target_node: node.id.clone(),
+                    ssh_key_names: vec![],
+                    storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+                    storage_size_bytes: 10 * 1024 * 1024 * 1024,
+                    image_path: String::new(),
+                    image_format: String::new(),
                 }),
-                image_url: "https://example.com/img.raw".to_string(),
-                image_sha256: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb".to_string(),
-                cloud_init_user_data: String::new(),
-                target_node: node.id.clone(),
-                ssh_key_names: vec![],
-                storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
-                storage_size_bytes: 10 * 1024 * 1024 * 1024,
-                image_path: String::new(),
-                image_format: String::new(),
-            }),
-        )
-        .await
-        .expect("create vm on vxlan network")
-        .into_inner();
+            )
+            .await
+            .expect("create vm on vxlan network")
+            .into_inner();
 
         let vm_id = create_resp.vm_id;
         let vm = db.get_vm(&vm_id).expect("get vm").expect("vm exists");
@@ -3275,23 +3280,24 @@ mod tests {
             hook,
         );
 
-        let err = <ControllerService as controller_proto::controller_server::Controller>::create_network(
-            &svc,
-            Request::new(controller_proto::CreateNetworkRequest {
-                name: "overlay-blocked".to_string(),
-                external_ip: "203.0.113.10".to_string(),
-                gateway_ip: "10.250.0.1".to_string(),
-                internal_netmask: "255.255.255.0".to_string(),
-                target_node: node.id.clone(),
-                allowed_tcp_ports: vec![],
-                allowed_udp_ports: vec![],
-                vlan_id: 0,
-                network_type: "vxlan".to_string(),
-                enable_outbound_nat: false,
-            }),
-        )
-        .await
-        .expect_err("vxlan should be rejected on disabled node");
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::create_network(
+                &svc,
+                Request::new(controller_proto::CreateNetworkRequest {
+                    name: "overlay-blocked".to_string(),
+                    external_ip: "203.0.113.10".to_string(),
+                    gateway_ip: "10.250.0.1".to_string(),
+                    internal_netmask: "255.255.255.0".to_string(),
+                    target_node: node.id.clone(),
+                    allowed_tcp_ports: vec![],
+                    allowed_udp_ports: vec![],
+                    vlan_id: 0,
+                    network_type: "vxlan".to_string(),
+                    enable_outbound_nat: false,
+                }),
+            )
+            .await
+            .expect_err("vxlan should be rejected on disabled node");
 
         assert_eq!(err.code(), tonic::Code::FailedPrecondition);
         assert!(err.message().contains("VXLAN is disabled"));
@@ -3313,24 +3319,25 @@ mod tests {
             hook,
         );
 
-        let resp = <ControllerService as controller_proto::controller_server::Controller>::create_network(
-            &svc,
-            Request::new(controller_proto::CreateNetworkRequest {
-                name: "nat-allowed".to_string(),
-                external_ip: "203.0.113.10".to_string(),
-                gateway_ip: "10.250.0.1".to_string(),
-                internal_netmask: "255.255.255.0".to_string(),
-                target_node: node.id.clone(),
-                allowed_tcp_ports: vec![],
-                allowed_udp_ports: vec![],
-                vlan_id: 0,
-                network_type: "nat".to_string(),
-                enable_outbound_nat: false,
-            }),
-        )
-        .await
-        .expect("nat should succeed on vxlan-disabled node")
-        .into_inner();
+        let resp =
+            <ControllerService as controller_proto::controller_server::Controller>::create_network(
+                &svc,
+                Request::new(controller_proto::CreateNetworkRequest {
+                    name: "nat-allowed".to_string(),
+                    external_ip: "203.0.113.10".to_string(),
+                    gateway_ip: "10.250.0.1".to_string(),
+                    internal_netmask: "255.255.255.0".to_string(),
+                    target_node: node.id.clone(),
+                    allowed_tcp_ports: vec![],
+                    allowed_udp_ports: vec![],
+                    vlan_id: 0,
+                    network_type: "nat".to_string(),
+                    enable_outbound_nat: false,
+                }),
+            )
+            .await
+            .expect("nat should succeed on vxlan-disabled node")
+            .into_inner();
 
         assert!(resp.success);
     }
@@ -3338,7 +3345,13 @@ mod tests {
     #[tokio::test]
     async fn new_node_registers_as_pending() {
         let db = Database::open(":memory:").expect("open db");
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca(), None);
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+            None,
+        );
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::register_node(
@@ -3416,7 +3429,13 @@ mod tests {
         node.approval_status = "approved".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca(), None);
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+            None,
+        );
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::register_node(
@@ -3456,7 +3475,13 @@ mod tests {
         node.status = "pending".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca(), None);
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+            None,
+        );
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::approve_node(
@@ -3484,7 +3509,13 @@ mod tests {
         node.status = "pending".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let svc = ControllerService::new(db.clone(), NodeClients::new(None), test_network(), empty_sub_ca(), None);
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+            None,
+        );
 
         let resp =
             <ControllerService as controller_proto::controller_server::Controller>::reject_node(

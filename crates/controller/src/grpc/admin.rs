@@ -169,7 +169,9 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         let failed_retryable_reservations = self
             .db
             .count_failed_retryable_replication_reservations()
-            .map_err(|e| Status::internal(format!("counting retryable failed reservations: {e}")))?;
+            .map_err(|e| {
+                Status::internal(format!("counting retryable failed reservations: {e}"))
+            })?;
         let failed_non_retryable_reservations = self
             .db
             .count_failed_non_retryable_replication_reservations()
@@ -217,15 +219,18 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             zero_manual_slo_violations.push(format!("unresolved_conflicts={unresolved_conflicts}"));
         }
         if pending_compensation_jobs > 0 {
-            zero_manual_slo_violations
-                .push(format!("pending_compensation_jobs={pending_compensation_jobs}"));
+            zero_manual_slo_violations.push(format!(
+                "pending_compensation_jobs={pending_compensation_jobs}"
+            ));
         }
         if failed_compensation_jobs > 0 {
-            zero_manual_slo_violations
-                .push(format!("failed_compensation_jobs={failed_compensation_jobs}"));
+            zero_manual_slo_violations.push(format!(
+                "failed_compensation_jobs={failed_compensation_jobs}"
+            ));
         }
         if materialization_backlog > 0 {
-            zero_manual_slo_violations.push(format!("materialization_backlog={materialization_backlog}"));
+            zero_manual_slo_violations
+                .push(format!("materialization_backlog={materialization_backlog}"));
         }
         if oldest_unresolved_conflict_age_seconds > ZERO_MANUAL_MAX_UNRESOLVED_AGE_SECS {
             zero_manual_slo_violations.push(format!(
@@ -237,28 +242,31 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
             zero_manual_slo_violations.push(format!("failed_reservations={failed_reservations}"));
         }
         if retry_exhausted_reservations > 0 {
-            zero_manual_slo_violations
-                .push(format!("retry_exhausted_reservations={retry_exhausted_reservations}"));
+            zero_manual_slo_violations.push(format!(
+                "retry_exhausted_reservations={retry_exhausted_reservations}"
+            ));
         }
         let zero_manual_slo_healthy = zero_manual_slo_violations.is_empty();
 
-        Ok(Response::new(controller_proto::GetReplicationStatusResponse {
-            outbox_head_event_id,
-            outbox_size,
-            outgoing,
-            incoming,
-            unresolved_conflicts,
-            pending_compensation_jobs,
-            failed_compensation_jobs,
-            materialization_backlog,
-            oldest_unresolved_conflict_age_seconds,
-            failed_reservations,
-            zero_manual_slo_healthy,
-            zero_manual_slo_violations,
-            failed_retryable_reservations,
-            failed_non_retryable_reservations,
-            retry_exhausted_reservations,
-        }))
+        Ok(Response::new(
+            controller_proto::GetReplicationStatusResponse {
+                outbox_head_event_id,
+                outbox_size,
+                outgoing,
+                incoming,
+                unresolved_conflicts,
+                pending_compensation_jobs,
+                failed_compensation_jobs,
+                materialization_backlog,
+                oldest_unresolved_conflict_age_seconds,
+                failed_reservations,
+                zero_manual_slo_healthy,
+                zero_manual_slo_violations,
+                failed_retryable_reservations,
+                failed_non_retryable_reservations,
+                retry_exhausted_reservations,
+            },
+        ))
     }
 
     async fn list_replication_conflicts(
@@ -372,10 +380,7 @@ mod tests {
         )
         .await
         .expect("ack should succeed");
-        assert_eq!(
-            db.get_replication_ack("peer-a").expect("get ack"),
-            Some(9)
-        );
+        assert_eq!(db.get_replication_ack("peer-a").expect("get ack"), Some(9));
     }
 
     #[tokio::test]
@@ -385,7 +390,8 @@ mod tests {
             .expect("append");
         db.append_replication_outbox("vm.update", "vm/v1", br#"{}"#)
             .expect("append");
-        db.upsert_replication_ack("peer-ctrl-b", 1).expect("ack outgoing");
+        db.upsert_replication_ack("peer-ctrl-b", 1)
+            .expect("ack outgoing");
         db.upsert_replication_ack("pull/10.0.0.11:9090", 5)
             .expect("ack pull");
         db.upsert_replication_ack("apply/10.0.0.11:9090", 4)
@@ -435,14 +441,7 @@ mod tests {
         db.insert_replication_conflict("vm/v9", "op-a", "op-b", "ctrl-a", "ctrl-b", "test")
             .expect("insert conflict");
         let conflict_id = db
-            .insert_replication_conflict(
-                "vm/v10",
-                "op-c",
-                "op-d",
-                "ctrl-a",
-                "ctrl-b",
-                "test2",
-            )
+            .insert_replication_conflict("vm/v10", "op-c", "op-d", "ctrl-a", "ctrl-b", "test2")
             .expect("insert conflict2");
         db.insert_compensation_job(conflict_id, "vm/v10", "op-d")
             .expect("insert pending job");
@@ -495,11 +494,10 @@ mod tests {
         assert_eq!(resp.failed_retryable_reservations, 0);
         assert!(resp.failed_non_retryable_reservations > 0);
         assert!(resp.retry_exhausted_reservations > 0);
-        assert!(
-            resp.zero_manual_slo_violations
-                .iter()
-                .any(|v| v.contains("retry_exhausted_reservations="))
-        );
+        assert!(resp
+            .zero_manual_slo_violations
+            .iter()
+            .any(|v| v.contains("retry_exhausted_reservations=")));
         assert!(!resp.zero_manual_slo_violations.is_empty());
     }
 

@@ -198,11 +198,11 @@ async fn all_dashboard_pages_against_mock_controller() {
         storage.contains("mock-host-alpha"),
         "storage must show node hostname"
     );
+    assert!(storage.contains("node-mock-a"), "storage must show node id");
     assert!(
-        storage.contains("node-mock-a"),
-        "storage must show node id"
+        storage.contains("LVM"),
+        "storage must show LVM backend count or label"
     );
-    assert!(storage.contains("LVM"), "storage must show LVM backend count or label");
     assert!(
         storage.contains("/dev/nvme0n1"),
         "storage must list disk path from mock"

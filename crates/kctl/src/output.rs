@@ -49,7 +49,16 @@ pub fn print_vm_detail(
 pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
     println!(
         "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}  {:<8}",
-        "ID", "HOSTNAME", "ADDRESS", "CORES", "MEMORY", "STATUS", "STORAGE", "APPROVAL", "CERT EXPIRY", "LUKS"
+        "ID",
+        "HOSTNAME",
+        "ADDRESS",
+        "CORES",
+        "MEMORY",
+        "STATUS",
+        "STORAGE",
+        "APPROVAL",
+        "CERT EXPIRY",
+        "LUKS"
     );
     for n in nodes {
         let (cores, mem) = if let Some(cap) = &n.capacity {
@@ -182,7 +191,11 @@ pub fn print_compliance_report(r: &controller_proto::GetComplianceReportResponse
     );
     field(
         "mTLS",
-        if r.mtls_enabled { "enabled" } else { "disabled" },
+        if r.mtls_enabled {
+            "enabled"
+        } else {
+            "disabled"
+        },
     );
     field("Protocol", "gRPC over mTLS (X.509 client certificates)");
 
@@ -244,7 +257,10 @@ pub fn print_compliance_report(r: &controller_proto::GetComplianceReportResponse
     field("Method", "LUKS2 full-disk encryption (mandatory)");
     field("TPM2-sealed", &format!("{} nodes", r.nodes_luks_tpm2));
     field("Key-file", &format!("{} nodes", r.nodes_luks_keyfile));
-    field("Unknown/unreported", &format!("{} nodes", r.nodes_luks_unknown));
+    field(
+        "Unknown/unreported",
+        &format!("{} nodes", r.nodes_luks_unknown),
+    );
 
     section(
         "Infrastructure",
@@ -339,7 +355,7 @@ fn days_to_ymd(mut days: u64) -> (u64, u64, u64) {
 }
 
 fn is_leap(y: u64) -> bool {
-    (y % 4 == 0 && y % 100 != 0) || y % 400 == 0
+    (y.is_multiple_of(4) && !y.is_multiple_of(100)) || y.is_multiple_of(400)
 }
 
 fn storage_backend_str(value: i32) -> &'static str {

@@ -57,7 +57,12 @@ pub fn loser_terminal_state(
 }
 
 pub fn parse_validity_class(value: Option<&str>) -> ValidityClass {
-    match value.unwrap_or("valid").trim().to_ascii_lowercase().as_str() {
+    match value
+        .unwrap_or("valid")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
         "invalid" => ValidityClass::Invalid,
         _ => ValidityClass::Valid,
     }

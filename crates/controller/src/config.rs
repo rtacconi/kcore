@@ -67,6 +67,7 @@ fn default_netmask() -> String {
 
 impl Config {
     pub fn load(path: &str) -> Result<Self> {
+        crate::path_safety::assert_safe_path(path, "config file path")?;
         let contents = std::fs::read_to_string(Path::new(path))
             .with_context(|| format!("reading config {path}"))?;
         let cfg: Config = serde_yaml::from_str(&contents).context("parsing config")?;
@@ -75,6 +76,7 @@ impl Config {
     }
 
     fn validate(&self) -> Result<()> {
+        crate::path_safety::assert_safe_path(&self.db_path, "dbPath")?;
         if self.listen_addr.parse::<std::net::SocketAddr>().is_err() {
             anyhow::bail!(
                 "listen_addr '{}' is not a valid socket address",
@@ -87,9 +89,16 @@ impl Config {
                 ("tls.cert_file", &tls.cert_file),
                 ("tls.key_file", &tls.key_file),
             ] {
+                crate::path_safety::assert_safe_path(path, label)?;
                 if !std::path::Path::new(path).exists() {
                     anyhow::bail!("{label} '{}' does not exist", path);
                 }
+            }
+            if let Some(p) = &tls.sub_ca_cert_file {
+                crate::path_safety::assert_safe_path(p, "tls.sub_ca_cert_file")?;
+            }
+            if let Some(p) = &tls.sub_ca_key_file {
+                crate::path_safety::assert_safe_path(p, "tls.sub_ca_key_file")?;
             }
         }
         if self.default_network.gateway_interface.trim().is_empty() {
@@ -208,6 +217,39 @@ replication:
         std::fs::write(&path, "defaultNetwork: [").expect("write invalid config");
         let err = Config::load(path.to_str().expect("path str")).expect_err("invalid yaml");
         assert!(err.to_string().contains("parsing config"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_rejects_parent_dir_in_config_file_argument() {
+        let err = Config::load("../nonexistent-kcore-config.yaml").expect_err("traversal");
+        let s = format!("{err:#}");
+        assert!(
+            s.contains("config file path") && s.contains(".."),
+            "unexpected error: {s}"
+        );
+    }
+
+    #[test]
+    fn load_rejects_parent_dir_in_db_path_field() {
+        let path = temp_config_path("bad-db");
+        std::fs::write(
+            &path,
+            r#"
+dbPath: ../../../tmp/evil.db
+defaultNetwork:
+  gatewayInterface: eno1
+  externalIp: 203.0.113.10
+  gatewayIp: 10.0.0.1
+"#,
+        )
+        .expect("write config");
+        let err = Config::load(path.to_str().expect("path str")).expect_err("bad db path");
+        let s = format!("{err:#}");
+        assert!(
+            s.contains("dbPath") && s.contains(".."),
+            "unexpected error: {s}"
+        );
         let _ = std::fs::remove_file(path);
     }
 }

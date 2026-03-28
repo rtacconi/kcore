@@ -11,43 +11,57 @@ pub mod node_proto {
     tonic::include_proto!("kcore.node");
 }
 
+/// Read PEM text from `file_path`. Always calls `crate::path_safety::assert_safe_path` before
+/// `std::fs::read_to_string` so `ConnectionInfo` fields `ca`, `cert`, and `key` cannot be used for
+/// directory traversal.
 pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
     let addresses = if info.addresses.is_empty() {
         vec![info.address.clone()]
     } else {
         info.addresses.clone()
     };
+
+    let tls_pems: Option<(String, String, String)> = if info.insecure {
+        None
+    } else {
+        let ca_path = info
+            .ca
+            .as_deref()
+            .context("missing CA certificate path for TLS connection")?;
+        let client_cert_path = info
+            .cert
+            .as_deref()
+            .context("missing client certificate path for mTLS connection")?;
+        let client_key_path = info
+            .key
+            .as_deref()
+            .context("missing client key path for mTLS connection")?;
+        crate::path_safety::assert_safe_path(ca_path, "TLS CA certificate path")?;
+        crate::path_safety::assert_safe_path(client_cert_path, "TLS client certificate path")?;
+        crate::path_safety::assert_safe_path(client_key_path, "TLS client private key path")?;
+        let ca_pem = std::fs::read_to_string(ca_path)
+            .with_context(|| format!("reading TLS CA certificate at {ca_path}"))?;
+        let client_cert_pem = std::fs::read_to_string(client_cert_path)
+            .with_context(|| format!("reading TLS client certificate at {client_cert_path}"))?;
+        let client_key_pem = std::fs::read_to_string(client_key_path)
+            .with_context(|| format!("reading TLS client private key at {client_key_path}"))?;
+        Some((ca_pem, client_cert_pem, client_key_pem))
+    };
+
     let mut errors = Vec::new();
     for address in addresses {
         let scheme = if info.insecure { "http" } else { "https" };
         let uri = format!("{scheme}://{}", address);
         let mut endpoint = Endpoint::from_shared(uri.clone())?;
 
-        if !info.insecure {
-            let ca = info
-                .ca
-                .as_ref()
-                .context("missing CA certificate path for TLS connection")?;
-            let cert = info
-                .cert
-                .as_ref()
-                .context("missing client certificate path for mTLS connection")?;
-            let key = info
-                .key
-                .as_ref()
-                .context("missing client key path for mTLS connection")?;
-
+        if let Some((ca_pem, client_cert_pem, client_key_pem)) = &tls_pems {
             let mut tls = ClientTlsConfig::new();
 
-            let ca_pem =
-                std::fs::read_to_string(ca).with_context(|| format!("reading CA cert {ca}"))?;
-            tls = tls.ca_certificate(Certificate::from_pem(ca_pem));
-
-            let cert_pem = std::fs::read_to_string(cert)
-                .with_context(|| format!("reading client cert {cert}"))?;
-            let key_pem =
-                std::fs::read_to_string(key).with_context(|| format!("reading client key {key}"))?;
-            tls = tls.identity(Identity::from_pem(cert_pem, key_pem));
+            tls = tls.ca_certificate(Certificate::from_pem(ca_pem.as_bytes()));
+            tls = tls.identity(Identity::from_pem(
+                client_cert_pem.as_bytes(),
+                client_key_pem.as_bytes(),
+            ));
             if let Some(host) = endpoint_host(&address) {
                 tls = tls.domain_name(host.to_string());
             }
@@ -59,7 +73,10 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
             Err(e) => errors.push(format!("{address}: {e}")),
         }
     }
-    anyhow::bail!("failed to connect to any controller endpoint: {}", errors.join(" | "))
+    anyhow::bail!(
+        "failed to connect to any controller endpoint: {}",
+        errors.join(" | ")
+    )
 }
 
 fn endpoint_host(address: &str) -> Option<&str> {
@@ -211,6 +228,44 @@ mod tests {
 
     fn ensure_crypto_provider() {
         let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
+
+    #[tokio::test]
+    async fn connect_rejects_path_traversal_in_tls_paths() {
+        ensure_crypto_provider();
+        let info = ConnectionInfo {
+            address: "127.0.0.1:9090".to_string(),
+            addresses: vec![],
+            insecure: false,
+            cert: Some("/tmp/fake.crt".to_string()),
+            key: Some("/tmp/fake.key".to_string()),
+            ca: Some("../../../etc/passwd".to_string()),
+        };
+        let err = super::connect(&info).await.expect_err("traversal");
+        let s = format!("{err:#}");
+        assert!(
+            s.contains("TLS CA certificate path") && s.contains(".."),
+            "unexpected error: {s}"
+        );
+    }
+
+    #[tokio::test]
+    async fn connect_rejects_path_traversal_in_client_key_path() {
+        ensure_crypto_provider();
+        let info = ConnectionInfo {
+            address: "127.0.0.1:9090".to_string(),
+            addresses: vec![],
+            insecure: false,
+            cert: Some("/tmp/fake.crt".to_string()),
+            key: Some("../../etc/passwd".to_string()),
+            ca: Some("/tmp/fake-ca.crt".to_string()),
+        };
+        let err = super::connect(&info).await.expect_err("traversal");
+        let s = format!("{err:#}");
+        assert!(
+            s.contains("TLS client private key path") && s.contains(".."),
+            "unexpected error: {s}"
+        );
     }
 
     #[tokio::test]
