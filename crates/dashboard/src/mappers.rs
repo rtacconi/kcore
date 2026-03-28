@@ -3,7 +3,8 @@
 use crate::controller_client::controller_proto;
 use crate::dto::{
     AccessControlEntryDto, ComplianceDto, HostInterfaceDto, NetworkOverviewDto, NetworkRowDto,
-    NodeNetworkDto, NodeSummaryDto, ReplicationStatusDto, VmRowDto, VmsPageDto,
+    NodeNetworkDto, NodeStorageDto, NodeSummaryDto, ReplicationStatusDto, StorageDiskRowDto,
+    StorageOverviewDto, VmRowDto, VmsPageDto,
 };
 use crate::format::{self, paginate_by_name, VM_PAGE_SIZE};
 
@@ -109,6 +110,78 @@ fn classify_interface(name: &str) -> &'static str {
         "container"
     } else {
         "other"
+    }
+}
+
+fn disk_role_hint(mountpoint: &str, fstype: &str) -> String {
+    let mp = mountpoint.trim();
+    let fs = fstype.trim();
+    if mp == "/" {
+        return "OS (root)".into();
+    }
+    if mp.starts_with("/boot") {
+        return "OS (boot)".into();
+    }
+    if mp.starts_with("/nix") {
+        return "OS (Nix store)".into();
+    }
+    if mp.contains("kcore") {
+        return "Data (kcore)".into();
+    }
+    if !mp.is_empty() {
+        return "Mounted".into();
+    }
+    if fs.eq_ignore_ascii_case("zfs") {
+        return "ZFS component".into();
+    }
+    if fs.contains("LVM") || fs.eq_ignore_ascii_case("lvm2_member") {
+        return "LVM PV".into();
+    }
+    if !fs.is_empty() {
+        return "See partitions".into();
+    }
+    "Block device".into()
+}
+
+pub fn storage_overview_from_proto(
+    r: controller_proto::GetStorageOverviewResponse,
+) -> StorageOverviewDto {
+    StorageOverviewDto {
+        approved_nodes: r.approved_nodes,
+        nodes_disk_inventory_ok: r.nodes_disk_inventory_ok,
+        backend_filesystem_nodes: r.backend_filesystem_nodes,
+        backend_lvm_nodes: r.backend_lvm_nodes,
+        backend_zfs_nodes: r.backend_zfs_nodes,
+        backend_unspecified_nodes: r.backend_unspecified_nodes,
+        nodes_luks_tpm2: r.nodes_luks_tpm2,
+        nodes_luks_keyfile: r.nodes_luks_keyfile,
+        nodes_luks_unknown: r.nodes_luks_unknown,
+        total_block_devices: r.total_block_devices,
+        nodes: r
+            .nodes
+            .into_iter()
+            .map(|n| NodeStorageDto {
+                node_id: n.node_id,
+                hostname: n.hostname,
+                address: n.address,
+                storage_backend: format::storage_backend_label(n.storage_backend).to_string(),
+                luks_method: n.luks_method,
+                disk_inventory_ok: n.disk_inventory_ok,
+                disks: n
+                    .disks
+                    .into_iter()
+                    .map(|d| StorageDiskRowDto {
+                        name: d.name,
+                        path: d.path,
+                        size: d.size,
+                        model: d.model,
+                        fstype: d.fstype,
+                        mountpoint: d.mountpoint,
+                        role_hint: disk_role_hint(&d.mountpoint, &d.fstype),
+                    })
+                    .collect(),
+            })
+            .collect(),
     }
 }
 
@@ -367,6 +440,42 @@ mod tests {
         assert_eq!(dto.nodes[0].interfaces.len(), 2);
         assert_eq!(dto.nodes[0].interfaces[0].kind, "physical");
         assert_eq!(dto.nodes[0].interfaces[1].kind, "bridge");
+    }
+
+    #[test]
+    fn storage_overview_maps_nodes_and_hints() {
+        let r = controller_proto::GetStorageOverviewResponse {
+            approved_nodes: 1,
+            nodes_disk_inventory_ok: 1,
+            backend_filesystem_nodes: 1,
+            backend_lvm_nodes: 0,
+            backend_zfs_nodes: 0,
+            backend_unspecified_nodes: 0,
+            nodes_luks_tpm2: 0,
+            nodes_luks_keyfile: 0,
+            nodes_luks_unknown: 1,
+            total_block_devices: 1,
+            nodes: vec![controller_proto::NodeStorageOverview {
+                node_id: "n1".into(),
+                hostname: "h1".into(),
+                address: "10.0.0.1:1".into(),
+                storage_backend: controller_proto::StorageBackendType::Zfs as i32,
+                luks_method: String::new(),
+                disk_inventory_ok: true,
+                disks: vec![controller_proto::StorageDiskDetail {
+                    name: "sdx".into(),
+                    path: "/dev/sdx".into(),
+                    size: "1G".into(),
+                    model: String::new(),
+                    fstype: String::new(),
+                    mountpoint: "/".into(),
+                }],
+            }],
+        };
+        let dto = storage_overview_from_proto(r);
+        assert_eq!(dto.nodes.len(), 1);
+        assert_eq!(dto.nodes[0].storage_backend, "ZFS");
+        assert_eq!(dto.nodes[0].disks[0].role_hint, "OS (root)");
     }
 
     #[test]

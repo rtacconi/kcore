@@ -1,5 +1,15 @@
 //! Display helpers shared by UI and tests.
 
+/// VM/data-plane storage backend from `kcore.controller.StorageBackendType` (i32).
+pub fn storage_backend_label(backend: i32) -> &'static str {
+    match backend {
+        1 => "Filesystem",
+        2 => "LVM",
+        3 => "ZFS",
+        _ => "Unspecified",
+    }
+}
+
 /// VM state from `kcore.controller.VmState` (i32).
 pub fn vm_state_label(state: i32) -> &'static str {
     match state {
@@ -75,6 +85,14 @@ pub fn paginate_by_name<T: Clone>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn storage_backend_labels() {
+        assert_eq!(storage_backend_label(1), "Filesystem");
+        assert_eq!(storage_backend_label(2), "LVM");
+        assert_eq!(storage_backend_label(3), "ZFS");
+        assert_eq!(storage_backend_label(0), "Unspecified");
+    }
 
     #[test]
     fn vm_state_labels() {

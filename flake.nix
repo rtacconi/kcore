@@ -225,6 +225,11 @@
                     DC_ID="DC1"
                     LUKS_METHOD=""
                     DATA_DISKS=()
+                    DATA_DISK_MODE="filesystem"
+                    LVM_VG_NAME=""
+                    LVM_LV_PREFIX="kcore-"
+                    ZFS_POOL_NAME=""
+                    ZFS_DATASET_PREFIX="kcore-"
 
                     while [[ $# -gt 0 ]]; do
                       case "$1" in
@@ -272,9 +277,29 @@
                           LUKS_METHOD="''${2:-}"
                           shift 2
                           ;;
+                        --data-disk-mode)
+                          DATA_DISK_MODE="''${2:-}"
+                          shift 2
+                          ;;
+                        --lvm-vg-name)
+                          LVM_VG_NAME="''${2:-}"
+                          shift 2
+                          ;;
+                        --lvm-lv-prefix)
+                          LVM_LV_PREFIX="''${2:-}"
+                          shift 2
+                          ;;
+                        --zfs-pool-name)
+                          ZFS_POOL_NAME="''${2:-}"
+                          shift 2
+                          ;;
+                        --zfs-dataset-prefix)
+                          ZFS_DATASET_PREFIX="''${2:-}"
+                          shift 2
+                          ;;
                         *)
                           echo "Unknown argument: $1"
-                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--controller 192.168.40.135[:9090]]... [--dc-id DC1] [--run-controller] [--disable-vxlan] [--luks-method tpm2|key-file] [--yes --wipe --non-interactive --reboot]"
+                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--data-disk-mode filesystem|lvm|zfs] [--lvm-vg-name VG] [--lvm-lv-prefix PREFIX] [--zfs-pool-name POOL] [--zfs-dataset-prefix PREFIX] [--controller 192.168.40.135[:9090]]... [--dc-id DC1] [--run-controller] [--disable-vxlan] [--luks-method tpm2|key-file] [--yes --wipe --non-interactive --reboot]"
                           exit 1
                           ;;
                       esac

@@ -248,6 +248,13 @@ impl Controller for ManyVmsController {
         Err(Status::unimplemented(""))
     }
 
+    async fn get_storage_overview(
+        &self,
+        _: TRequest<GetStorageOverviewRequest>,
+    ) -> Result<Response<GetStorageOverviewResponse>, Status> {
+        Ok(Response::new(GetStorageOverviewResponse::default()))
+    }
+
     async fn get_compliance_report(
         &self,
         _: TRequest<GetComplianceReportRequest>,

@@ -58,6 +58,7 @@ async fn all_dashboard_pages_against_mock_controller() {
     assert!(home.contains(r#"href="/compliance""#));
     assert!(home.contains(r#"href="/vms""#));
     assert!(home.contains(r#"href="/networks""#));
+    assert!(home.contains(r#"href="/storage""#));
     assert!(home.contains("kcore"));
     assert!(home.contains("Dashboard"));
     assert!(home.contains("kcorehypervisor.com"));
@@ -182,6 +183,35 @@ async fn all_dashboard_pages_against_mock_controller() {
     assert!(nets.contains("10.0.0.1"), "SDN must show gateway");
     assert!(nets.contains("nat"), "SDN must show network type");
 
+    // ── Storage ──────────────────────────────────────────────────────
+    let (status, storage) = fetch(&app, "/storage").await;
+    assert_eq!(status, StatusCode::OK, "/storage status");
+    assert!(
+        storage.contains("Cluster"),
+        "storage must show cluster section"
+    );
+    assert!(
+        storage.contains("VM / data storage type"),
+        "storage must show backend section"
+    );
+    assert!(
+        storage.contains("mock-host-alpha"),
+        "storage must show node hostname"
+    );
+    assert!(
+        storage.contains("node-mock-a"),
+        "storage must show node id"
+    );
+    assert!(storage.contains("LVM"), "storage must show LVM backend count or label");
+    assert!(
+        storage.contains("/dev/nvme0n1"),
+        "storage must list disk path from mock"
+    );
+    assert!(
+        storage.contains("Data (kcore)"),
+        "storage must show mount hint for kcore path"
+    );
+
     // ── 404 for unknown path ─────────────────────────────────────────
     let (status, body404) = fetch(&app, "/nonexistent-page-xyz").await;
     assert!(
@@ -200,6 +230,7 @@ async fn all_dashboard_pages_against_mock_controller() {
         ("/compliance", &compliance),
         ("/vms", &vms),
         ("/networks", &nets),
+        ("/storage", &storage),
     ] {
         assert!(body.contains("nav"), "{page} must have navigation element");
         assert!(body.contains("kcore"), "{page} must show brand name");

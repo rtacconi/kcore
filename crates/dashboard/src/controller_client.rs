@@ -100,6 +100,18 @@ pub async fn get_network_overview(
     Ok(resp.into_inner())
 }
 
+pub async fn get_storage_overview(
+    cfg: &DashboardConfig,
+) -> Result<controller_proto::GetStorageOverviewResponse> {
+    let channel = connect_channel(cfg).await?;
+    let mut client = controller_proto::controller_client::ControllerClient::new(channel);
+    let resp = client
+        .get_storage_overview(controller_proto::GetStorageOverviewRequest {})
+        .await
+        .context("GetStorageOverview RPC")?;
+    Ok(resp.into_inner())
+}
+
 pub async fn get_replication_status(
     cfg: &DashboardConfig,
 ) -> Result<controller_proto::GetReplicationStatusResponse> {

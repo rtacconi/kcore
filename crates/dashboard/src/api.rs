@@ -3,10 +3,13 @@
 use leptos::prelude::*;
 
 use crate::controller_client;
-use crate::dto::{ComplianceDto, NetworkOverviewDto, NetworkRowDto, ReplicationStatusDto, VmsPageDto};
+use crate::dto::{
+    ComplianceDto, NetworkOverviewDto, NetworkRowDto, ReplicationStatusDto, StorageOverviewDto,
+    VmsPageDto,
+};
 use crate::mappers::{
     compliance_from_proto, network_overview_from_proto, networks_from_proto,
-    replication_status_from_proto, vms_page_from_proto,
+    replication_status_from_proto, storage_overview_from_proto, vms_page_from_proto,
 };
 use crate::state::dashboard_config;
 
@@ -46,6 +49,15 @@ pub async fn get_network_overview_dto() -> Result<NetworkOverviewDto, ServerFnEr
         .await
         .map_err(map_err)?;
     Ok(network_overview_from_proto(overview))
+}
+
+#[server(GetStorageOverview, "/api")]
+pub async fn get_storage_overview_dto() -> Result<StorageOverviewDto, ServerFnError> {
+    let cfg = dashboard_config();
+    let overview = controller_client::get_storage_overview(cfg)
+        .await
+        .map_err(map_err)?;
+    Ok(storage_overview_from_proto(overview))
 }
 
 #[server(GetReplicationStatus, "/api")]

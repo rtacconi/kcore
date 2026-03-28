@@ -258,6 +258,50 @@ impl Controller for MockController {
         }))
     }
 
+    async fn get_storage_overview(
+        &self,
+        _: Request<GetStorageOverviewRequest>,
+    ) -> Result<Response<GetStorageOverviewResponse>, Status> {
+        Ok(Response::new(GetStorageOverviewResponse {
+            approved_nodes: 1,
+            nodes_disk_inventory_ok: 1,
+            backend_filesystem_nodes: 0,
+            backend_lvm_nodes: 1,
+            backend_zfs_nodes: 0,
+            backend_unspecified_nodes: 0,
+            nodes_luks_tpm2: 0,
+            nodes_luks_keyfile: 1,
+            nodes_luks_unknown: 0,
+            total_block_devices: 2,
+            nodes: vec![NodeStorageOverview {
+                node_id: "node-mock-a".into(),
+                hostname: "mock-host-alpha".into(),
+                address: "10.0.0.10:9443".into(),
+                storage_backend: StorageBackendType::Lvm as i32,
+                luks_method: "key-file".into(),
+                disk_inventory_ok: true,
+                disks: vec![
+                    StorageDiskDetail {
+                        name: "sda".into(),
+                        path: "/dev/sda".into(),
+                        size: "500G".into(),
+                        model: "Mock SSD".into(),
+                        fstype: String::new(),
+                        mountpoint: String::new(),
+                    },
+                    StorageDiskDetail {
+                        name: "nvme0n1".into(),
+                        path: "/dev/nvme0n1".into(),
+                        size: "2T".into(),
+                        model: "Mock NVMe".into(),
+                        fstype: "zfs".into(),
+                        mountpoint: "/var/lib/kcore".into(),
+                    },
+                ],
+            }],
+        }))
+    }
+
     async fn get_compliance_report(
         &self,
         _: Request<GetComplianceReportRequest>,
