@@ -1,10 +1,11 @@
 use crate::api::{
-    get_compliance_dto, get_network_overview_dto, get_replication_status_dto, list_networks_dto,
-    list_vms_page,
+    get_compliance_dto, get_network_overview_dto, get_replication_status_dto, get_storage_overview_dto,
+    list_networks_dto, list_vms_page,
 };
 use crate::dto::{
     ComplianceDto, HostInterfaceDto, NetworkOverviewDto, NetworkRowDto, NodeNetworkDto,
-    NodeSummaryDto, ReplicationStatusDto, VmRowDto, VmsPageDto,
+    NodeStorageDto, NodeSummaryDto, ReplicationStatusDto, StorageDiskRowDto, StorageOverviewDto,
+    VmRowDto, VmsPageDto,
 };
 use leptos::prelude::*;
 use leptos_meta::{provide_meta_context, Link, Meta, MetaTags, Stylesheet, Title};
@@ -54,6 +55,7 @@ pub fn App() -> impl IntoView {
                     <a href="/compliance">"Compliance"</a>
                     <a href="/vms">"Virtual machines"</a>
                     <a href="/networks">"Networks"</a>
+                    <a href="/storage">"Storage"</a>
                 </nav>
             </header>
             <main class="page">
@@ -63,6 +65,7 @@ pub fn App() -> impl IntoView {
                         <Route path=path!("/compliance") view=CompliancePage/>
                         <Route path=path!("/vms") view=VmsPage/>
                         <Route path=path!("/networks") view=NetworksPage/>
+                        <Route path=path!("/storage") view=StoragePage/>
                     </FlatRoutes>
                 </Router>
             </main>
@@ -96,6 +99,10 @@ fn HomePage() -> impl IntoView {
             <a href="/networks" class="card" style="text-decoration: none; color: inherit;">
                 <h2>"Networks"</h2>
                 <p class="muted">"NAT, bridge, and overlay networks registered with the controller."</p>
+            </a>
+            <a href="/storage" class="card" style="text-decoration: none; color: inherit;">
+                <h2>"Storage"</h2>
+                <p class="muted">"Cluster-wide data-plane backends (filesystem, LVM, ZFS) and block inventory per node."</p>
             </a>
         </div>
     }
@@ -557,4 +564,169 @@ fn sdn_table(rows: Vec<NetworkRowDto>) -> impl IntoView {
         </div>
     }
     .into_any()
+}
+
+#[component]
+fn StoragePage() -> impl IntoView {
+    let res = Resource::new(|| (), |_| get_storage_overview_dto());
+    view! {
+        <section class="hero">
+            <h1>"Storage"</h1>
+            <p class="muted">
+                "Cluster-wide VM data-plane type (filesystem, LVM, ZFS) and LUKS posture from the controller; "
+                "block devices are queried on each node with "
+                <code class="inline">"lsblk"</code>" (top-level disks)."
+            </p>
+        </section>
+        <Suspense fallback=move || view! { <p class="muted">"Loading storage overview…"</p> }>
+            {move || Suspend::new(async move {
+                match res.await {
+                    Ok(data) => storage_overview_view(data).into_any(),
+                    Err(e) => view! { <p class="err">{e.to_string()}</p> }.into_any(),
+                }
+            })}
+        </Suspense>
+    }
+}
+
+fn storage_overview_view(data: StorageOverviewDto) -> impl IntoView {
+    let nodes = data.nodes.clone();
+    let has_nodes = !nodes.is_empty();
+    view! {
+        <h2 class="section-title">"Cluster"</h2>
+        <div class="card-grid cols-2">
+            <section class="card">
+                <h2>"VM / data storage type"</h2>
+                <p class="muted" style="font-size: 0.85rem; margin-bottom: 0.75rem;">
+                    "Per-node backend declared at registration (where VM disks live)."
+                </p>
+                <div class="stat-row">
+                    <div class="stat"><div class="label">"Filesystem"</div><div class="value">{data.backend_filesystem_nodes}</div></div>
+                    <div class="stat"><div class="label">"LVM"</div><div class="value">{data.backend_lvm_nodes}</div></div>
+                    <div class="stat"><div class="label">"ZFS"</div><div class="value">{data.backend_zfs_nodes}</div></div>
+                    <div class="stat"><div class="label">"Unspecified"</div><div class="value">{data.backend_unspecified_nodes}</div></div>
+                </div>
+            </section>
+            <section class="card">
+                <h2>"LUKS (cluster)"</h2>
+                <dl class="kv">
+                    <dt>"TPM2-sealed"</dt><dd>{data.nodes_luks_tpm2}</dd>
+                    <dt>"Key file"</dt><dd>{data.nodes_luks_keyfile}</dd>
+                    <dt>"Unknown / not reported"</dt><dd>{data.nodes_luks_unknown}</dd>
+                </dl>
+            </section>
+            <section class="card" style="grid-column: 1 / -1;">
+                <h2>"Disk inventory"</h2>
+                <div class="stat-row">
+                    <div class="stat"><div class="label">"Approved nodes"</div><div class="value">{data.approved_nodes}</div></div>
+                    <div class="stat"><div class="label">"Nodes with disk list"</div><div class="value">{data.nodes_disk_inventory_ok}</div></div>
+                    <div class="stat"><div class="label">"Block devices (total)"</div><div class="value">{data.total_block_devices}</div></div>
+                </div>
+            </section>
+        </div>
+
+        <h2 class="section-title" style="margin-top: 1.5rem;">"Nodes"</h2>
+        <Show when=move || has_nodes>
+            {nodes.clone().into_iter().map(storage_node_card).collect_view()}
+        </Show>
+        <Show when=move || !has_nodes>
+            <div class="empty-note">"No approved nodes."</div>
+        </Show>
+    }
+}
+
+fn storage_node_card(node: NodeStorageDto) -> impl IntoView {
+    let inv_badge = if node.disk_inventory_ok {
+        "badge badge-run"
+    } else {
+        "badge badge-warn"
+    };
+    let inv_label = if node.disk_inventory_ok {
+        "ok"
+    } else {
+        "unavailable"
+    };
+    let has_disks = !node.disks.is_empty();
+    let disks = node.disks.clone();
+    let luks_dd = if node.luks_method.is_empty() {
+        "—".to_string()
+    } else {
+        node.luks_method.clone()
+    };
+    view! {
+        <section class="card node-card">
+            <div class="node-card-header">
+                <span class="node-label">{node.hostname.clone()}</span>
+                <code class="inline">{node.node_id.clone()}</code>
+                <span class="muted">{node.address.clone()}</span>
+            </div>
+            <dl class="kv">
+                <dt>"VM storage type"</dt><dd>{node.storage_backend.clone()}</dd>
+                <dt>"LUKS"</dt><dd>{luks_dd}</dd>
+                <dt>"Disk inventory"</dt><dd><span class={inv_badge}>{inv_label}</span></dd>
+            </dl>
+            <Show when=move || has_disks>
+                <div class="table-wrap" style="margin-top: 0.75rem;">
+                    <table class="data">
+                        <thead>
+                            <tr>
+                                <th>"Device"</th>
+                                <th>"Path"</th>
+                                <th>"Size"</th>
+                                <th>"Model"</th>
+                                <th>"FS"</th>
+                                <th>"Mount"</th>
+                                <th>"Hint"</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {disks.into_iter().map(storage_disk_row).collect_view()}
+                        </tbody>
+                    </table>
+                </div>
+            </Show>
+            <Show when=move || !has_disks>
+                <p class="muted" style="margin-top: 0.5rem; font-size: 0.85rem;">
+                    {if node.disk_inventory_ok {
+                        "No top-level block devices reported."
+                    } else {
+                        "Could not list disks (node unreachable or RPC failed)."
+                    }}
+                </p>
+            </Show>
+        </section>
+    }
+}
+
+fn storage_disk_row(d: StorageDiskRowDto) -> impl IntoView {
+    let StorageDiskRowDto {
+        name,
+        path,
+        size,
+        model,
+        fstype,
+        mountpoint,
+        role_hint,
+    } = d;
+    let mp = if mountpoint.is_empty() {
+        "—".to_string()
+    } else {
+        mountpoint
+    };
+    let fs = if fstype.is_empty() {
+        "—".to_string()
+    } else {
+        fstype
+    };
+    view! {
+        <tr>
+            <td><code class="inline">{name}</code></td>
+            <td><code class="inline">{path}</code></td>
+            <td>{size}</td>
+            <td>{model}</td>
+            <td>{fs}</td>
+            <td>{mp}</td>
+            <td><span class="muted">{role_hint}</span></td>
+        </tr>
+    }
 }

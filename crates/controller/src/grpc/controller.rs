@@ -2125,6 +2125,117 @@ impl controller_proto::controller_server::Controller for ControllerService {
         ))
     }
 
+    async fn get_storage_overview(
+        &self,
+        request: Request<controller_proto::GetStorageOverviewRequest>,
+    ) -> Result<Response<controller_proto::GetStorageOverviewResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let _ = request.into_inner();
+
+        let node_rows = self
+            .db
+            .list_nodes()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let approved: Vec<_> = node_rows
+            .into_iter()
+            .filter(|n| n.approval_status == "approved")
+            .collect();
+
+        let (nodes_luks_tpm2, nodes_luks_keyfile, nodes_luks_unknown) = self
+            .db
+            .count_nodes_luks_method()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let mut backend_filesystem_nodes: i32 = 0;
+        let mut backend_lvm_nodes: i32 = 0;
+        let mut backend_zfs_nodes: i32 = 0;
+        let mut backend_unspecified_nodes: i32 = 0;
+        for n in &approved {
+            match n.storage_backend.as_str() {
+                "filesystem" => backend_filesystem_nodes += 1,
+                "lvm" => backend_lvm_nodes += 1,
+                "zfs" => backend_zfs_nodes += 1,
+                _ => backend_unspecified_nodes += 1,
+            }
+        }
+
+        let mut nodes_out = Vec::with_capacity(approved.len());
+        let mut nodes_disk_inventory_ok: i32 = 0;
+        let mut total_block_devices: i32 = 0;
+
+        for node in &approved {
+            let (disks, disk_inventory_ok) =
+                match self.ensure_admin_client_for_node(node).await {
+                    Ok(mut admin) => match admin
+                        .list_disks(node_proto::ListDisksRequest {})
+                        .await
+                    {
+                        Ok(resp) => {
+                            let disks: Vec<controller_proto::StorageDiskDetail> = resp
+                                .into_inner()
+                                .disks
+                                .into_iter()
+                                .map(|d| controller_proto::StorageDiskDetail {
+                                    name: d.name,
+                                    path: d.path,
+                                    size: d.size,
+                                    model: d.model,
+                                    fstype: d.fstype,
+                                    mountpoint: d.mountpoint,
+                                })
+                                .collect();
+                            (disks, true)
+                        }
+                        Err(e) => {
+                            warn!(
+                                node_id = %node.id,
+                                error = %e,
+                                "ListDisks failed for storage overview"
+                            );
+                            (vec![], false)
+                        }
+                    },
+                    Err(e) => {
+                        warn!(
+                            node_id = %node.id,
+                            error = %e,
+                            "cannot reach node for storage overview"
+                        );
+                        (vec![], false)
+                    }
+                };
+
+            if disk_inventory_ok {
+                nodes_disk_inventory_ok += 1;
+                total_block_devices += disks.len() as i32;
+            }
+
+            nodes_out.push(controller_proto::NodeStorageOverview {
+                node_id: node.id.clone(),
+                hostname: node.hostname.clone(),
+                address: node.address.clone(),
+                storage_backend: storage_backend_to_proto(&node.storage_backend),
+                luks_method: node.luks_method.clone(),
+                disk_inventory_ok,
+                disks,
+            });
+        }
+
+        Ok(Response::new(controller_proto::GetStorageOverviewResponse {
+            approved_nodes: approved.len() as i32,
+            nodes_disk_inventory_ok,
+            backend_filesystem_nodes,
+            backend_lvm_nodes,
+            backend_zfs_nodes,
+            backend_unspecified_nodes,
+            nodes_luks_tpm2,
+            nodes_luks_keyfile,
+            nodes_luks_unknown,
+            total_block_devices,
+            nodes: nodes_out,
+        }))
+    }
+
     // TODO(rbac): restrict to admin role when RBAC is implemented
     async fn get_compliance_report(
         &self,
@@ -2230,6 +2341,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
             acl("RotateSubCa", CN_KCTL),
             acl("ReloadTls", CN_KCTL),
             acl("GetComplianceReport", CN_KCTL),
+            acl("GetNetworkOverview", CN_KCTL),
+            acl("GetStorageOverview", CN_KCTL),
             acl("ApplyNixConfig", CN_KCTL),
         ];
 

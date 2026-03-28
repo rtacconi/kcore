@@ -112,6 +112,43 @@ pub struct NetworkOverviewDto {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StorageDiskRowDto {
+    pub name: String,
+    pub path: String,
+    pub size: String,
+    pub model: String,
+    pub fstype: String,
+    pub mountpoint: String,
+    pub role_hint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct NodeStorageDto {
+    pub node_id: String,
+    pub hostname: String,
+    pub address: String,
+    pub storage_backend: String,
+    pub luks_method: String,
+    pub disk_inventory_ok: bool,
+    pub disks: Vec<StorageDiskRowDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct StorageOverviewDto {
+    pub approved_nodes: i32,
+    pub nodes_disk_inventory_ok: i32,
+    pub backend_filesystem_nodes: i32,
+    pub backend_lvm_nodes: i32,
+    pub backend_zfs_nodes: i32,
+    pub backend_unspecified_nodes: i32,
+    pub nodes_luks_tpm2: i32,
+    pub nodes_luks_keyfile: i32,
+    pub nodes_luks_unknown: i32,
+    pub total_block_devices: i32,
+    pub nodes: Vec<NodeStorageDto>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ReplicationStatusDto {
     pub unresolved_conflicts: i64,
     pub pending_compensation_jobs: i64,

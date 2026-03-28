@@ -49,6 +49,10 @@ service Controller {
 
   // Network overview: host interfaces from each node + default network config
   rpc GetNetworkOverview(GetNetworkOverviewRequest) returns (GetNetworkOverviewResponse);
+
+  // Storage overview: cluster-wide VM data-plane backends (filesystem / LVM / ZFS), LUKS stats,
+  // and per-node block inventory from each node agent (lsblk).
+  rpc GetStorageOverview(GetStorageOverviewRequest) returns (GetStorageOverviewResponse);
 }
 
 message RegisterNodeRequest {
@@ -612,4 +616,41 @@ message GetNetworkOverviewResponse {
   string default_gateway_ip = 3;
   string default_internal_netmask = 4;
   repeated NodeNetworkInfo nodes = 5;
+}
+
+// Storage overview (cluster aggregate + per-node block inventory from node ListDisks)
+
+message GetStorageOverviewRequest {}
+
+message StorageDiskDetail {
+  string name = 1;
+  string path = 2;
+  string size = 3;
+  string model = 4;
+  string fstype = 5;
+  string mountpoint = 6;
+}
+
+message NodeStorageOverview {
+  string node_id = 1;
+  string hostname = 2;
+  string address = 3;
+  StorageBackendType storage_backend = 4;
+  string luks_method = 5;
+  bool disk_inventory_ok = 6;
+  repeated StorageDiskDetail disks = 7;
+}
+
+message GetStorageOverviewResponse {
+  int32 approved_nodes = 1;
+  int32 nodes_disk_inventory_ok = 2;
+  int32 backend_filesystem_nodes = 3;
+  int32 backend_lvm_nodes = 4;
+  int32 backend_zfs_nodes = 5;
+  int32 backend_unspecified_nodes = 6;
+  int32 nodes_luks_tpm2 = 7;
+  int32 nodes_luks_keyfile = 8;
+  int32 nodes_luks_unknown = 9;
+  int32 total_block_devices = 10;
+  repeated NodeStorageOverview nodes = 11;
 }

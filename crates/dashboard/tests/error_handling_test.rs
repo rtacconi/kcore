@@ -70,4 +70,13 @@ async fn pages_render_error_messages_when_controller_is_down() {
             || nets.contains("transport error"),
         "networks page must show connection error"
     );
+
+    let (st, storage) = fetch(&app, "/storage").await;
+    assert_eq!(st, StatusCode::OK, "storage page HTTP status");
+    assert!(
+        storage.contains("error running server function")
+            || storage.contains("ServerError")
+            || storage.contains("transport error"),
+        "storage page must show connection error"
+    );
 }
