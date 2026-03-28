@@ -28,6 +28,23 @@ Use these commands as the canonical storage workflow.
 
 ### 1) Install node with storage backend
 
+#### Single-disk install
+
+When a server has only one disk (or you want OS and VMs to share the same
+disk), omit `--data-disk`. The filesystem backend stores images and volumes
+under `/var/lib/kcore/` on the OS partition:
+
+```bash
+kcore-kctl --node 192.168.40.105:9091 node install \
+  --os-disk /dev/sda \
+  --join-controller 192.168.40.105:9090 \
+  --storage-backend filesystem
+```
+
+#### Multi-disk install
+
+When dedicated data disk(s) are available, pass them with `--data-disk`:
+
 Filesystem:
 
 ```bash

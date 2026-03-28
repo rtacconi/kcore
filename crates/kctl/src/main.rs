@@ -406,7 +406,7 @@ enum NodeAction {
         /// OS disk (e.g. /dev/sda)
         #[arg(long)]
         os_disk: String,
-        /// Data disks (e.g. /dev/nvme0n1)
+        /// Data disks (optional; omit for single-disk installs where OS and VMs share one disk)
         #[arg(long)]
         data_disk: Vec<String>,
         /// Controller to join after install
@@ -418,7 +418,7 @@ enum NodeAction {
         /// Storage mode for data disks: filesystem, lvm, or zfs
         #[arg(long, default_value = "filesystem")]
         data_disk_mode: String,
-        /// Typed storage backend for install flow (preferred over --data-disk-mode)
+        /// Storage backend (filesystem, lvm, zfs). Defaults to filesystem for single-disk installs
         #[arg(long = "storage-backend", value_enum)]
         storage_backend: Option<StorageBackend>,
         /// Optional LVM VG name (used when backend is lvm)
@@ -439,6 +439,12 @@ enum NodeAction {
         /// Datacenter identity for the installed node (default: DC1)
         #[arg(long = "dc-id", default_value = "DC1")]
         dc_id: String,
+        /// Hostname for the installed node (auto-generated from IP if not set)
+        #[arg(long)]
+        hostname: Option<String>,
+        /// Node identity for registration (defaults to hostname if not set)
+        #[arg(long = "node-id")]
+        node_id: Option<String>,
     },
     /// Approve a pending node to join the cluster
     Approve {
@@ -810,6 +816,8 @@ async fn main() {
                     zfs_dataset_prefix,
                     disable_vxlan,
                     dc_id,
+                    hostname,
+                    node_id,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
@@ -839,6 +847,8 @@ async fn main() {
                 &certs_dir,
                 *disable_vxlan,
                 dc_id,
+                hostname.as_deref(),
+                node_id.as_deref(),
             )
             .await
         }

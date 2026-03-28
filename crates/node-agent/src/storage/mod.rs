@@ -289,6 +289,7 @@ impl StorageAdapter for LvmAdapter {
         run_cmd(
             "lvcreate",
             &[
+                "-y",
                 "-L",
                 &format!("{}B", req.size_bytes),
                 "-n",
@@ -305,6 +306,26 @@ impl StorageAdapter for LvmAdapter {
             return Err(StorageError::new(
                 ErrorKind::InvalidArgument,
                 "backend_handle is required",
+            ));
+        }
+        let expected_prefix = format!("/dev/{}/", self.vg_name);
+        if !backend_handle.starts_with(&expected_prefix) {
+            return Err(StorageError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "backend_handle must be under {}, got {}",
+                    expected_prefix, backend_handle
+                ),
+            ));
+        }
+        let lv_name = &backend_handle[expected_prefix.len()..];
+        if !lv_name.starts_with(&self.lv_prefix) {
+            return Err(StorageError::new(
+                ErrorKind::InvalidArgument,
+                format!(
+                    "LV name must start with prefix '{}', got '{}'",
+                    self.lv_prefix, lv_name
+                ),
             ));
         }
         run_cmd("lvremove", &["-f", backend_handle], ErrorKind::Internal)?;

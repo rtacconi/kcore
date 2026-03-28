@@ -46,7 +46,7 @@
       Type = "simple";
       ExecStartPre = [
         "${pkgs.coreutils}/bin/rm -f ${socketPath} ${serialSocket}"
-        "${pkgs.bash}/bin/bash -euc 'test -f ${toString vmCfg.image} || { echo \"missing VM image: ${toString vmCfg.image}\"; exit 1; }'"
+        "${pkgs.bash}/bin/bash -euc 'test -e ${toString vmCfg.image} || { echo \"missing VM image: ${toString vmCfg.image}\"; exit 1; }'"
         "${pkgs.bash}/bin/bash -euc 'test -f ${seedIso} || { echo \"missing cloud-init seed: ${seedIso}\"; exit 1; }'"
         "${pkgs.bash}/bin/bash -euc 'test -f ${firmwarePath} || { echo \"missing firmware: ${firmwarePath}\"; exit 1; }'"
       ];

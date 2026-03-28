@@ -139,6 +139,8 @@ pub async fn install(
     certs_dir: &Path,
     disable_vxlan: bool,
     dc_id: &str,
+    hostname: Option<&str>,
+    node_id: Option<&str>,
 ) -> Result<()> {
     let join_controllers = validate_install_controller_mode(join_controllers, run_controller)?;
     let primary_controller = join_controllers
@@ -182,6 +184,8 @@ pub async fn install(
             zfs_dataset_prefix: zfs_dataset_prefix.unwrap_or("").trim().to_string(),
             disable_vxlan,
             dc_id: dc_id.trim().to_string(),
+            hostname: hostname.unwrap_or("").trim().to_string(),
+            node_id: node_id.unwrap_or("").trim().to_string(),
         })
         .await?
         .into_inner();

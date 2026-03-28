@@ -573,6 +573,14 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
         args.push("--dc-id".to_string());
         args.push(req.dc_id.trim().to_string());
     }
+    if !req.hostname.trim().is_empty() {
+        args.push("--hostname".to_string());
+        args.push(req.hostname.trim().to_string());
+    }
+    if !req.node_id.trim().is_empty() {
+        args.push("--node-id".to_string());
+        args.push(req.node_id.trim().to_string());
+    }
     Ok(args)
 }
 
@@ -1022,6 +1030,8 @@ mod tests {
             sub_ca_key_pem: String::new(),
             controllers: Vec::new(),
             dc_id: String::new(),
+            hostname: String::new(),
+            node_id: String::new(),
         };
 
         write_bootstrap_pki_at(&req, &cert_dir).expect("write certs");
@@ -1093,6 +1103,8 @@ mod tests {
             sub_ca_key_pem: String::new(),
             controllers: Vec::new(),
             dc_id: String::new(),
+            hostname: String::new(),
+            node_id: String::new(),
         };
         write_bootstrap_pki_at(&req, &cert_dir).expect("noop cert write");
         assert!(
@@ -1242,6 +1254,8 @@ mod tests {
                 sub_ca_key_pem: String::new(),
                 controllers: Vec::new(),
                 dc_id: String::new(),
+                hostname: String::new(),
+                node_id: String::new(),
             }),
         )
         .await
@@ -1280,6 +1294,8 @@ mod tests {
                 sub_ca_key_pem: String::new(),
                 controllers: Vec::new(),
                 dc_id: String::new(),
+                hostname: String::new(),
+                node_id: String::new(),
             }),
         )
         .await
@@ -1311,6 +1327,8 @@ mod tests {
                 sub_ca_key_pem: String::new(),
                 controllers: Vec::new(),
                 dc_id: String::new(),
+                hostname: String::new(),
+                node_id: String::new(),
             }),
         )
         .await
@@ -1346,6 +1364,8 @@ mod tests {
                 "192.168.40.11:9090".to_string(),
             ],
             dc_id: "DC1".to_string(),
+            hostname: String::new(),
+            node_id: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--controller".to_string()));
@@ -1387,6 +1407,8 @@ mod tests {
             sub_ca_key_pem: String::new(),
             controllers: Vec::new(),
             dc_id: String::new(),
+            hostname: String::new(),
+            node_id: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--run-controller".to_string()));
@@ -1425,9 +1447,47 @@ mod tests {
             sub_ca_key_pem: String::new(),
             controllers: Vec::new(),
             dc_id: String::new(),
+            hostname: String::new(),
+            node_id: String::new(),
         };
         let args = build_install_command_args(&req).expect("args");
         assert!(args.contains(&"--disable-vxlan".to_string()));
+    }
+
+    #[test]
+    fn build_install_command_args_single_disk_no_data_disks() {
+        let req = proto::InstallToDiskRequest {
+            os_disk: "/dev/sda".to_string(),
+            data_disks: Vec::new(),
+            controller: "192.168.1.10:9090".to_string(),
+            run_controller: false,
+            ca_cert_pem: String::new(),
+            node_cert_pem: String::new(),
+            node_key_pem: String::new(),
+            controller_cert_pem: String::new(),
+            controller_key_pem: String::new(),
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
+            data_disk_mode: String::new(),
+            storage_backend: proto::StorageBackendType::Filesystem as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
+            disable_vxlan: false,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
+            controllers: Vec::new(),
+            dc_id: String::new(),
+            hostname: String::new(),
+            node_id: String::new(),
+        };
+        let args = build_install_command_args(&req).expect("args");
+        assert!(!args.contains(&"--data-disk".to_string()));
+        assert!(args.contains(&"--data-disk-mode".to_string()));
+        assert!(args.contains(&"filesystem".to_string()));
+        assert!(args.contains(&"--disk".to_string()));
+        assert!(args.contains(&"/dev/sda".to_string()));
     }
 
     #[test]

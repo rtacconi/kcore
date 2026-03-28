@@ -193,6 +193,7 @@
                 systemd.tmpfiles.rules = [
                   "d /var/lib/kcore 0755 root root -"
                   "d /var/lib/kcore/images 0755 root root -"
+                  "d /var/lib/kcore/volumes 0755 root root -"
                   "d /opt/kcore 0755 root root -"
                   "d /opt/kcore/bin 0755 root root -"
                   "d /etc/kcore 0755 root root -"
@@ -200,6 +201,9 @@
                 ];
 
                 environment.systemPackages = [
+                  pkgs.nixos-install-tools
+                  pkgs.dosfstools
+                  pkgs.e2fsprogs
                   pkgs.cloud-hypervisor
                   pkgs.qemu-utils
                   pkgs.cloud-utils
@@ -225,6 +229,8 @@
                     DC_ID="DC1"
                     LUKS_METHOD=""
                     DATA_DISKS=()
+                    INSTALL_HOSTNAME=""
+                    INSTALL_NODE_ID=""
                     DATA_DISK_MODE="filesystem"
                     LVM_VG_NAME=""
                     LVM_LV_PREFIX="kcore-"
@@ -277,6 +283,14 @@
                           LUKS_METHOD="''${2:-}"
                           shift 2
                           ;;
+                        --hostname)
+                          INSTALL_HOSTNAME="''${2:-}"
+                          shift 2
+                          ;;
+                        --node-id)
+                          INSTALL_NODE_ID="''${2:-}"
+                          shift 2
+                          ;;
                         --data-disk-mode)
                           DATA_DISK_MODE="''${2:-}"
                           shift 2
@@ -299,7 +313,7 @@
                           ;;
                         *)
                           echo "Unknown argument: $1"
-                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--data-disk-mode filesystem|lvm|zfs] [--lvm-vg-name VG] [--lvm-lv-prefix PREFIX] [--zfs-pool-name POOL] [--zfs-dataset-prefix PREFIX] [--controller 192.168.40.135[:9090]]... [--dc-id DC1] [--run-controller] [--disable-vxlan] [--luks-method tpm2|key-file] [--yes --wipe --non-interactive --reboot]"
+                          echo "Usage: install-to-disk [--disk /dev/sda] [--data-disk /dev/nvme0n1] [--hostname HOSTNAME] [--node-id ID] [--data-disk-mode filesystem|lvm|zfs] [--lvm-vg-name VG] [--lvm-lv-prefix PREFIX] [--zfs-pool-name POOL] [--zfs-dataset-prefix PREFIX] [--controller 192.168.40.135[:9090]]... [--dc-id DC1] [--run-controller] [--disable-vxlan] [--luks-method tpm2|key-file] [--yes --wipe --non-interactive --reboot]"
                           exit 1
                           ;;
                       esac
@@ -402,8 +416,9 @@
                     echo "Setting up LUKS encryption (method: $LUKS_METHOD)..."
                     if [ "$LUKS_METHOD" = "tpm2" ]; then
                       echo "Formatting $ROOT_PART with LUKS2 (TPM2 will be enrolled after install)..."
-                      echo -n "kcore-temp-passphrase" | cryptsetup luksFormat --batch-mode --type luks2 "$ROOT_PART" -
-                      echo -n "kcore-temp-passphrase" | cryptsetup open "$ROOT_PART" cryptroot -
+                      TPM_TEMP_PASS=$(openssl rand -base64 32)
+                      echo -n "$TPM_TEMP_PASS" | cryptsetup luksFormat --batch-mode --type luks2 "$ROOT_PART" -
+                      echo -n "$TPM_TEMP_PASS" | cryptsetup open "$ROOT_PART" cryptroot -
                     else
                       echo "Generating LUKS key-file..."
                       mkdir -p /tmp/luks
@@ -485,6 +500,15 @@
                       EXTERNAL_IP="127.0.0.1"
                     fi
 
+                    # Auto-generate hostname and nodeId if not provided
+                    if [ -z "$INSTALL_HOSTNAME" ]; then
+                      IP_SUFFIX="''${EXTERNAL_IP//./-}"
+                      INSTALL_HOSTNAME="kvm-node-$IP_SUFFIX"
+                    fi
+                    if [ -z "$INSTALL_NODE_ID" ]; then
+                      INSTALL_NODE_ID="$INSTALL_HOSTNAME"
+                    fi
+
                     # Controller is opt-in only. By default, install as node-agent that joins an existing controller.
                     CONTROLLER_ADDR=""
                     if [ "$RUN_CONTROLLER" = "true" ]; then
@@ -503,8 +527,34 @@
   - \"$ctrl\""
                     done
 
+                    STORAGE_YAML="storage:
+  backend: $DATA_DISK_MODE
+  imageCacheDir: /var/lib/kcore/images"
+                    case "$DATA_DISK_MODE" in
+                      filesystem)
+                        STORAGE_YAML="$STORAGE_YAML
+  filesystemVolumeDir: /var/lib/kcore/volumes"
+                        ;;
+                      lvm)
+                        STORAGE_YAML="$STORAGE_YAML
+  lvm:
+    vgName: $LVM_VG_NAME
+    lvPrefix: $LVM_LV_PREFIX"
+                        ;;
+                      zfs)
+                        STORAGE_YAML="$STORAGE_YAML
+  zfs:
+    poolName: $ZFS_POOL_NAME
+    datasetPrefix: $ZFS_DATASET_PREFIX"
+                        ;;
+                      *)
+                        echo "Error: unknown --data-disk-mode: $DATA_DISK_MODE (expected filesystem, lvm, or zfs)"
+                        exit 1
+                        ;;
+                    esac
+
                     cat > /mnt/etc/kcore/node-agent.yaml << AGENTEOF
-nodeId: kvm-node-01
+nodeId: $INSTALL_NODE_ID
 listenAddr: "0.0.0.0:9091"
 controllerAddr: "$CONTROLLER_ADDR"
 controllers:$CONTROLLERS_YAML
@@ -515,9 +565,11 @@ tls:
   caFile: /etc/kcore/certs/ca.crt
   certFile: /etc/kcore/certs/node.crt
   keyFile: /etc/kcore/certs/node.key
+$STORAGE_YAML
 AGENTEOF
 
-                    cat > /mnt/etc/kcore/controller.yaml << CTRLEOF
+                    if [ "$RUN_CONTROLLER" = "true" ]; then
+                      cat > /mnt/etc/kcore/controller.yaml << CTRLEOF
 listenAddr: "0.0.0.0:9090"
 dbPath: /var/lib/kcore/controller.db
 defaultNetwork:
@@ -531,6 +583,7 @@ tls:
   subCaCertFile: /etc/kcore/certs/sub-ca.crt
   subCaKeyFile: /etc/kcore/certs/sub-ca.key
 CTRLEOF
+                    fi
 
                     cat > /mnt/etc/nixos/kcore-vms.nix << 'VMSEOF'
 { ... }:
@@ -604,10 +657,10 @@ LUKSEOF
 
 $LUKS_BOOT_CONFIG
 
-  networking.hostName = "kvm-node";
+  networking.hostName = "$INSTALL_HOSTNAME";
   networking.useDHCP = true;
   networking.firewall.enable = true;
-  networking.firewall.allowedTCPPorts = [ 22 9090 9091 ];
+  networking.firewall.allowedTCPPorts = [ 22 9091 $( [ "$RUN_CONTROLLER" = "true" ] && echo "9090" ) ];
 
   users.users.root = {
     initialPassword = "kcore";
@@ -647,6 +700,7 @@ $CONTROLLER_SERVICE
   systemd.tmpfiles.rules = [
     "d /var/lib/kcore 0755 root root -"
     "d /var/lib/kcore/images 0755 root root -"
+    "d /var/lib/kcore/volumes 0755 root root -"
     "d /opt/kcore 0755 root root -"
     "d /opt/kcore/bin 0755 root root -"
     "d /etc/kcore 0755 root root -"
@@ -680,14 +734,18 @@ NIXEOF
                     echo "Installing NixOS (this will take 10-20 minutes)..."
                     export NIX_CONFIG="experimental-features = nix-command flakes"
                     export NIX_PATH="nixos-config=/mnt/etc/nixos/configuration.nix:nixpkgs=${pkgs.path}"
-                    nixos-install
+                    nixos-install --no-root-passwd
 
-                    # Enroll TPM2 and remove temporary passphrase
+                    # Enroll TPM2 and add recovery key
                     if [ "$LUKS_METHOD" = "tpm2" ]; then
                       echo "Enrolling TPM2 for LUKS..."
-                      echo -n "kcore-temp-passphrase" | systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 "$ROOT_PART"
-                      echo -n "kcore-temp-passphrase" | systemd-cryptenroll --wipe-slot=password "$ROOT_PART"
-                      echo "TPM2 enrolled, temporary passphrase removed."
+                      echo -n "$TPM_TEMP_PASS" | systemd-cryptenroll --tpm2-device=auto --tpm2-pcrs=7 "$ROOT_PART"
+                      echo ""
+                      echo "Adding LUKS recovery key (save this somewhere safe!)..."
+                      echo -n "$TPM_TEMP_PASS" | systemd-cryptenroll --recovery-key "$ROOT_PART"
+                      echo -n "$TPM_TEMP_PASS" | systemd-cryptenroll --wipe-slot=password "$ROOT_PART"
+                      unset TPM_TEMP_PASS
+                      echo "TPM2 enrolled, temporary passphrase replaced with recovery key."
                     fi
 
                     echo ""
@@ -706,7 +764,7 @@ NIXEOF
                       echo "To add more nodes, use:"
                       echo "  kctl node install --node <new-node-ip>:9091 --os-disk /dev/sda --join-controller <this-ip>"
                     else
-                      echo "This node is configured as an agent joining controller at: $CONTROLLER_ENDPOINT"
+                      echo "This node is configured as an agent joining controller at: $CONTROLLER_ADDR"
                     fi
                     echo ""
                     if [ "$REBOOT_AFTER_INSTALL" = "true" ]; then
