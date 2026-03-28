@@ -27,8 +27,8 @@ For **production** environments, **kcore Standard** or **kcore Premium** is **re
 
 ## Pricing
 
-- **Standard** — £295 / year / CPU socket  
-- **Premium** — £695 / year / CPU socket  
+- **Standard** — £109 / year / CPU socket  
+- **Premium** — £299 / year / CPU socket  
 
 Full tier definitions, support limits, and billing rules: **[PRICING.md](PRICING.md)**.
 

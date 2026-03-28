@@ -13,7 +13,7 @@ For how licensing relates to subscriptions, see [docs/licensing.md](docs/licensi
 
 ## Standard
 
-- £295 / year / CPU socket
+- £109 / year / CPU socket
 - Official signed ISO images
 - Stable production update channel
 - Tested updates
@@ -23,7 +23,7 @@ For how licensing relates to subscriptions, see [docs/licensing.md](docs/licensi
 
 ## Premium
 
-- £695 / year / CPU socket
+- £299 / year / CPU socket
 - Official signed ISO images
 - Stable production update channel
 - Tested updates
