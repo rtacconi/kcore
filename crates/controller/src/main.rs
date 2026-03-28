@@ -2,6 +2,7 @@ mod auth;
 mod config;
 mod db;
 mod grpc;
+mod path_safety;
 mod nixgen;
 mod node_client;
 mod replication;

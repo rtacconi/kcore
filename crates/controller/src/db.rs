@@ -1,7 +1,27 @@
 use std::sync::{Arc, Mutex};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
+
+fn is_sqlite_memory_database_path(path: &str) -> bool {
+    let lower = path.to_ascii_lowercase();
+    if lower == ":memory:" {
+        return true;
+    }
+    if lower.starts_with("file::memory:") {
+        return true;
+    }
+    if let Some(q) = lower.find('?') {
+        if lower[q..].contains("mode=memory") {
+            return true;
+        }
+    }
+    false
+}
+
+fn validate_database_path(path: &str) -> Result<()> {
+    crate::path_safety::assert_safe_path(path, "database path")
+}
 
 #[derive(Clone)]
 pub struct Database {
@@ -140,8 +160,18 @@ pub struct ReplicationReservationRow {
 
 impl Database {
     pub fn open(path: &str) -> Result<Self> {
-        if let Some(parent) = std::path::Path::new(path).parent() {
-            std::fs::create_dir_all(parent).ok();
+        validate_database_path(path)?;
+        if !is_sqlite_memory_database_path(path) {
+            if let Some(parent) = std::path::Path::new(path).parent() {
+                if !parent.as_os_str().is_empty() {
+                    std::fs::create_dir_all(parent).with_context(|| {
+                        format!(
+                            "failed to create database parent directory {}",
+                            parent.display()
+                        )
+                    })?;
+                }
+            }
         }
         let conn = Connection::open(path)?;
         conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")?;
@@ -1845,6 +1875,7 @@ fn infer_image_format_from_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
 
     fn test_node() -> NodeRow {
         NodeRow {
@@ -1887,6 +1918,39 @@ mod tests {
             storage_size_bytes: 0,
             vm_ip: String::new(),
         }
+    }
+
+    #[test]
+    fn open_rejects_path_with_dot_dot_segments() {
+        for bad in [
+            "../evil.db",
+            "foo/../../etc/passwd",
+            "/tmp/myapp/../../../../var/tmp/malicious_dir/db.sqlite",
+            r"foo\..\..\secret.db",
+            "file:../../../tmp/x.db",
+        ] {
+            let err = Database::open(bad).expect_err("path traversal should be rejected");
+            let msg = format!("{err:#}");
+            assert!(
+                msg.contains("..") || msg.contains("parent directory"),
+                "unexpected error for {bad:?}: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn open_creates_parent_for_safe_path_under_temp() {
+        let unique = uuid::Uuid::new_v4();
+        let root = std::env::temp_dir().join(format!("kcore-db-open-test-{unique}"));
+        let path = root.join("nested/controller.sqlite");
+        let path_str = path.to_str().expect("utf-8 temp path");
+        let _ = std::fs::remove_dir_all(&root);
+
+        let db = Database::open(path_str).expect("open db with mkdir");
+        drop(db);
+
+        assert!(path.is_file(), "database file should exist at {path_str}");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]
