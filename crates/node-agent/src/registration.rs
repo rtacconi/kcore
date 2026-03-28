@@ -19,39 +19,34 @@ pub async fn register_with_controller(cfg: &Config) {
         info!("VXLAN disabled: marker file {} found", DISABLE_VXLAN_MARKER);
     }
 
-    let (hostname, cpu_cores, memory_bytes) =
-        tokio::task::spawn_blocking(|| {
-            let hostname = hostname::get()
-                .map(|h| h.to_string_lossy().into_owned())
-                .unwrap_or_else(|_| "unknown".into());
-            let cpu = std::fs::read_to_string("/proc/cpuinfo")
-                .map(|s| s.matches("processor\t:").count() as i32)
-                .unwrap_or(0);
-            let mem_total: i64 = std::fs::read_to_string("/proc/meminfo")
-                .ok()
-                .and_then(|s| {
-                    s.lines()
-                        .find(|l| l.starts_with("MemTotal:"))
-                        .and_then(|l| l.split_whitespace().nth(1))
-                        .and_then(|v| v.parse::<i64>().ok())
-                        .map(|kb| kb * 1024)
-                })
-                .unwrap_or(0);
-            (hostname, cpu, mem_total)
-        })
-        .await
-        .unwrap_or_else(|_| ("unknown".into(), 0, 0));
+    let (hostname, cpu_cores, memory_bytes) = tokio::task::spawn_blocking(|| {
+        let hostname = hostname::get()
+            .map(|h| h.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| "unknown".into());
+        let cpu = std::fs::read_to_string("/proc/cpuinfo")
+            .map(|s| s.matches("processor\t:").count() as i32)
+            .unwrap_or(0);
+        let mem_total: i64 = std::fs::read_to_string("/proc/meminfo")
+            .ok()
+            .and_then(|s| {
+                s.lines()
+                    .find(|l| l.starts_with("MemTotal:"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .and_then(|v| v.parse::<i64>().ok())
+                    .map(|kb| kb * 1024)
+            })
+            .unwrap_or(0);
+        (hostname, cpu, mem_total)
+    })
+    .await
+    .unwrap_or_else(|_| ("unknown".into(), 0, 0));
 
     let storage_backend = match cfg.storage.backend {
         crate::config::StorageBackendKind::Filesystem => {
             controller_proto::StorageBackendType::Filesystem as i32
         }
-        crate::config::StorageBackendKind::Lvm => {
-            controller_proto::StorageBackendType::Lvm as i32
-        }
-        crate::config::StorageBackendKind::Zfs => {
-            controller_proto::StorageBackendType::Zfs as i32
-        }
+        crate::config::StorageBackendKind::Lvm => controller_proto::StorageBackendType::Lvm as i32,
+        crate::config::StorageBackendKind::Zfs => controller_proto::StorageBackendType::Zfs as i32,
     };
 
     let endpoints = controller_endpoints(cfg);
@@ -147,8 +142,7 @@ async fn connect_and_register(
     let listen_addr = &cfg.listen_addr;
     let external_addr = derive_external_address(listen_addr);
 
-    let mut client =
-        controller_proto::controller_client::ControllerClient::new(channel);
+    let mut client = controller_proto::controller_client::ControllerClient::new(channel);
     let mut labels = Vec::new();
     labels.push(format!("dc={}", cfg.dc_id.trim()));
     client
@@ -180,15 +174,13 @@ fn derive_external_address(listen_addr: &str) -> String {
 }
 
 fn get_primary_ip() -> Result<String, std::io::Error> {
-    let output = std::process::Command::new("hostname")
-        .arg("-I")
-        .output()?;
+    let output = std::process::Command::new("hostname").arg("-I").output()?;
     let stdout = String::from_utf8_lossy(&output.stdout);
     stdout
         .split_whitespace()
         .next()
         .map(|s| s.to_string())
-        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "no IP found"))
+        .ok_or_else(|| std::io::Error::other("no IP found"))
 }
 
 /// Spawn a background task that checks cert expiry daily and renews via
@@ -215,9 +207,7 @@ pub fn start_heartbeat_loop(cfg: Config) {
     });
 }
 
-async fn send_heartbeat_once(
-    cfg: &Config,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn send_heartbeat_once(cfg: &Config) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let cert_expiry_days = cfg
         .tls
         .as_ref()
@@ -271,10 +261,7 @@ async fn check_and_renew_cert(
     let days_remaining = cert_days_remaining(&cert_pem)?;
 
     if days_remaining > RENEWAL_THRESHOLD_DAYS {
-        info!(
-            days_remaining,
-            "certificate valid, no renewal needed"
-        );
+        info!(days_remaining, "certificate valid, no renewal needed");
         return Ok(());
     }
 
@@ -456,7 +443,10 @@ mod tests {
 
     #[test]
     fn endpoint_host_plain_hostname() {
-        assert_eq!(endpoint_host("controller.local:9090"), Some("controller.local"));
+        assert_eq!(
+            endpoint_host("controller.local:9090"),
+            Some("controller.local")
+        );
         assert_eq!(endpoint_host("https://myhost"), Some("myhost"));
     }
 
@@ -474,7 +464,10 @@ mod tests {
             storage: crate::config::StorageConfig::default(),
         };
         let endpoints = super::controller_endpoints(&cfg);
-        assert_eq!(endpoints, vec!["http://10.0.0.2:9090", "http://10.0.0.3:9090"]);
+        assert_eq!(
+            endpoints,
+            vec!["http://10.0.0.2:9090", "http://10.0.0.3:9090"]
+        );
     }
 
     #[test]
@@ -494,7 +487,7 @@ mod tests {
         let pem = cert.pem();
 
         let days = cert_days_remaining(&pem).unwrap();
-        assert!(days >= 99 && days <= 100, "expected ~100 days, got {days}");
+        assert!((99..=100).contains(&days), "expected ~100 days, got {days}");
     }
 
     #[test]
@@ -514,6 +507,6 @@ mod tests {
         let pem = cert.pem();
 
         let days = cert_days_remaining(&pem).unwrap();
-        assert!(days >= 4 && days <= 5, "expected ~5 days, got {days}");
+        assert!((4..=5).contains(&days), "expected ~5 days, got {days}");
     }
 }

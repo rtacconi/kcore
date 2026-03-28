@@ -134,10 +134,7 @@ pub fn generate_node_config(
             }
         }
         if net.vlan_id > 0 {
-            out.push_str(&format!(
-                "      vlanId = {};\n",
-                net.vlan_id
-            ));
+            out.push_str(&format!("      vlanId = {};\n", net.vlan_id));
         }
         if net.network_type != "nat" {
             out.push_str(&format!(
@@ -150,8 +147,15 @@ pub fn generate_node_config(
         }
         if let Some(vxlan) = vxlan_peers.get(&net.name) {
             out.push_str(&format!("      vni = {};\n", vxlan.vni));
-            let peer_list: Vec<String> = vxlan.peers.iter().map(|p| format!("\"{}\"", nix_escape(p))).collect();
-            out.push_str(&format!("      vxlanPeers = [ {} ];\n", peer_list.join(" ")));
+            let peer_list: Vec<String> = vxlan
+                .peers
+                .iter()
+                .map(|p| format!("\"{}\"", nix_escape(p)))
+                .collect();
+            out.push_str(&format!(
+                "      vxlanPeers = [ {} ];\n",
+                peer_list.join(" ")
+            ));
             out.push_str(&format!(
                 "      vxlanLocalIp = \"{}\";\n",
                 nix_escape(&vxlan.local_ip)

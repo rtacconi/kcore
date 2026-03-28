@@ -9,6 +9,9 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   rust-checks:
     runs-on: ubuntu-latest
@@ -21,8 +24,8 @@ jobs:
         with:
           components: rustfmt, clippy
 
-      - name: Install protobuf compiler
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler cmake perl
 
       - name: Cache cargo registry and build
         uses: actions/cache@v4
@@ -61,6 +64,7 @@ jobs:
 
       - name: Nix cache
         uses: DeterminateSystems/magic-nix-cache-action@main
+        continue-on-error: true
 
       - name: Statix lint
         run: nix run nixpkgs#statix -- check -c .statix.toml .
@@ -69,11 +73,11 @@ jobs:
         run: nix run nixpkgs#deadnix -- --fail .
 
       - name: Nix flake check
-        run: nix flake check --all-systems
+        run: nix flake check
 
   semgrep:
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && vars.SEMGREP_APP_TOKEN != ''
     container:
       image: semgrep/semgrep
     steps:

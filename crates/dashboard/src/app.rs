@@ -1,6 +1,6 @@
 use crate::api::{
-    get_compliance_dto, get_network_overview_dto, get_replication_status_dto, get_storage_overview_dto,
-    list_networks_dto, list_vms_page,
+    get_compliance_dto, get_network_overview_dto, get_replication_status_dto,
+    get_storage_overview_dto, list_networks_dto, list_vms_page,
 };
 use crate::dto::{
     ComplianceDto, HostInterfaceDto, NetworkOverviewDto, NetworkRowDto, NodeNetworkDto,

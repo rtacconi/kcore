@@ -164,8 +164,7 @@ pub fn create_cluster_pki(
     let ca_cert_pem = ca_cert.pem();
     let ca_key_pem = ca_key.serialize_pem();
 
-    let (sub_ca_cert_pem, sub_ca_key_pem) =
-        generate_sub_ca(&ca_cert_pem, &ca_key_pem)?;
+    let (sub_ca_cert_pem, sub_ca_key_pem) = generate_sub_ca(&ca_cert_pem, &ca_key_pem)?;
 
     let (controller_cert_pem, controller_key_pem) = sign_cert(
         Some(controller_host),
@@ -212,8 +211,7 @@ fn generate_sub_ca(ca_cert_pem: &str, ca_key_pem: &str) -> Result<(String, Strin
     let issuer = Issuer::from_ca_cert_pem(ca_cert_pem, ca_key)
         .map_err(|e| format!("loading CA cert for sub-CA: {e}"))?;
 
-    let sub_ca_key =
-        KeyPair::generate().map_err(|e| format!("sub-CA key generation: {e}"))?;
+    let sub_ca_key = KeyPair::generate().map_err(|e| format!("sub-CA key generation: {e}"))?;
     let sub_ca_cert = sub_ca_params
         .signed_by(&sub_ca_key, &issuer)
         .map_err(|e| format!("sub-CA signing: {e}"))?;
@@ -480,8 +478,7 @@ mod tests {
         let new_cert =
             std::fs::read_to_string(certs.join("controller.crt")).expect("read new cert");
         let new_ca = std::fs::read_to_string(certs.join("ca.crt")).expect("read ca after");
-        let new_kctl =
-            std::fs::read_to_string(certs.join("kctl.crt")).expect("read kctl after");
+        let new_kctl = std::fs::read_to_string(certs.join("kctl.crt")).expect("read kctl after");
 
         assert_ne!(original_cert, new_cert, "controller cert should change");
         assert_eq!(original_ca, new_ca, "CA cert should be unchanged");
@@ -520,7 +517,10 @@ mod tests {
         let original = std::fs::read_to_string(certs.join("sub-ca.crt")).expect("read");
         let (new_cert, _new_key) = rotate_sub_ca(&certs).expect("rotate");
 
-        assert_ne!(original, new_cert, "sub-CA cert should change after rotation");
+        assert_ne!(
+            original, new_cert,
+            "sub-CA cert should change after rotation"
+        );
         let on_disk = std::fs::read_to_string(certs.join("sub-ca.crt")).expect("read");
         assert_eq!(on_disk, new_cert, "disk should match returned cert");
     }

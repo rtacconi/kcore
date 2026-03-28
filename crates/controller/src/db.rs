@@ -23,7 +23,7 @@ fn validate_database_path(path: &str) -> Result<()> {
     crate::path_safety::assert_safe_path(path, "database path")
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct Database {
     conn: Arc<Mutex<Connection>>,
 }
@@ -578,11 +578,9 @@ impl Database {
 
     pub fn replication_outbox_len(&self) -> Result<i64, rusqlite::Error> {
         let conn = self.lock_conn()?;
-        conn.query_row(
-            "SELECT COUNT(*) FROM replication_outbox",
-            [],
-            |row| row.get(0),
-        )
+        conn.query_row("SELECT COUNT(*) FROM replication_outbox", [], |row| {
+            row.get(0)
+        })
     }
 
     pub fn replication_outbox_head_id(&self) -> Result<i64, rusqlite::Error> {
@@ -1472,10 +1470,7 @@ impl Database {
             "UPDATE networks SET next_ip = next_ip + 1 WHERE name = ?1 AND node_id = ?2",
             params![network_name, node_id],
         )?;
-        let prefix = gateway_ip
-            .rsplitn(2, '.')
-            .nth(1)
-            .unwrap_or("10.0.0");
+        let prefix = gateway_ip.rsplit_once('.').map(|x| x.0).unwrap_or("10.0.0");
         Ok(format!("{}.{}", prefix, next_ip))
     }
 
@@ -1717,11 +1712,10 @@ impl Database {
     pub fn count_vms_by_auto_start(&self) -> Result<(i32, i32), rusqlite::Error> {
         let conn = self.lock_conn()?;
         let total: i32 = conn.query_row("SELECT COUNT(*) FROM vms", [], |row| row.get(0))?;
-        let running: i32 = conn.query_row(
-            "SELECT COUNT(*) FROM vms WHERE auto_start = 1",
-            [],
-            |row| row.get(0),
-        )?;
+        let running: i32 =
+            conn.query_row("SELECT COUNT(*) FROM vms WHERE auto_start = 1", [], |row| {
+                row.get(0)
+            })?;
         Ok((total, running))
     }
 
@@ -1875,7 +1869,6 @@ fn infer_image_format_from_path(path: &str) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
 
     fn test_node() -> NodeRow {
         NodeRow {
@@ -2120,11 +2113,10 @@ mod tests {
         node.status = "pending".to_string();
         db.upsert_node(&node).expect("insert");
 
-        let updated = db.update_heartbeat(&node.id, 1, 1000, -1, "").expect("heartbeat");
-        assert!(
-            !updated,
-            "heartbeat should not update a non-approved node"
-        );
+        let updated = db
+            .update_heartbeat(&node.id, 1, 1000, -1, "")
+            .expect("heartbeat");
+        assert!(!updated, "heartbeat should not update a non-approved node");
 
         let got = db.get_node(&node.id).expect("get").expect("exists");
         assert_eq!(got.status, "pending", "status should still be pending");
@@ -2269,7 +2261,9 @@ mod tests {
         assert_eq!(rows[0].resource_key, "vm/v1");
         assert_eq!(rows[0].payload, br#"{"seq":2}"#);
 
-        let all = db.list_replication_outbox_since(0, 1).expect("list limited");
+        let all = db
+            .list_replication_outbox_since(0, 1)
+            .expect("list limited");
         assert_eq!(all.len(), 1);
         assert_eq!(all[0].id, id1);
     }
@@ -2279,10 +2273,12 @@ mod tests {
         let db = Database::open(":memory:").expect("open db");
         assert_eq!(db.get_replication_ack("peer-a").expect("get"), None);
 
-        db.upsert_replication_ack("peer-a", 42).expect("upsert first");
+        db.upsert_replication_ack("peer-a", 42)
+            .expect("upsert first");
         assert_eq!(db.get_replication_ack("peer-a").expect("get"), Some(42));
 
-        db.upsert_replication_ack("peer-a", 105).expect("upsert second");
+        db.upsert_replication_ack("peer-a", 105)
+            .expect("upsert second");
         assert_eq!(db.get_replication_ack("peer-a").expect("get"), Some(105));
     }
 
@@ -2427,11 +2423,10 @@ mod tests {
     #[test]
     fn materialized_head_roundtrip() {
         let db = Database::open(":memory:").expect("open db");
-        assert!(
-            db.get_materialized_replication_head("vm/v1")
-                .expect("get")
-                .is_none()
-        );
+        assert!(db
+            .get_materialized_replication_head("vm/v1")
+            .expect("get")
+            .is_none());
         db.upsert_materialized_replication_head("vm/v1", "op-1", "vm.update")
             .expect("upsert");
         let row = db
@@ -2446,14 +2441,8 @@ mod tests {
     #[test]
     fn replication_reservation_roundtrip() {
         let db = Database::open(":memory:").expect("open db");
-        db.upsert_replication_reservation(
-            "node-capacity/node-1",
-            "vm/v1",
-            "op-1",
-            "reserved",
-            "",
-        )
-        .expect("upsert reservation");
+        db.upsert_replication_reservation("node-capacity/node-1", "vm/v1", "op-1", "reserved", "")
+            .expect("upsert reservation");
         let row = db
             .get_replication_reservation("node-capacity/node-1", "vm/v1")
             .expect("get reservation")
@@ -2551,15 +2540,8 @@ mod tests {
     #[test]
     fn replication_metrics_queries_work() {
         let db = Database::open(":memory:").expect("open db");
-        db.insert_replication_conflict(
-            "vm/v1",
-            "op-a",
-            "op-b",
-            "ctrl-a",
-            "ctrl-b",
-            "conflict",
-        )
-        .expect("insert conflict");
+        db.insert_replication_conflict("vm/v1", "op-a", "op-b", "ctrl-a", "ctrl-b", "conflict")
+            .expect("insert conflict");
         db.upsert_replication_reservation(
             "node-capacity/node-1",
             "vm/v1",
@@ -2567,7 +2549,7 @@ mod tests {
             "failed_non_retryable",
             "x",
         )
-            .expect("insert failed reservation");
+        .expect("insert failed reservation");
         db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
             resource_key: "vm/v1".to_string(),
             last_op_id: "op-1".to_string(),

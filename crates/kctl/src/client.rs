@@ -14,11 +14,6 @@ pub mod node_proto {
 /// Read PEM text from `file_path`. Always calls `crate::path_safety::assert_safe_path` before
 /// `std::fs::read_to_string` so `ConnectionInfo` fields `ca`, `cert`, and `key` cannot be used for
 /// directory traversal.
-fn read_tls_file_at_path(file_path: &str, label: &str) -> Result<String> {
-    crate::path_safety::assert_safe_path(file_path, label)?;
-    std::fs::read_to_string(file_path).with_context(|| format!("reading {label} at {file_path}"))
-}
-
 pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
     let addresses = if info.addresses.is_empty() {
         vec![info.address.clone()]
@@ -41,11 +36,15 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
             .key
             .as_deref()
             .context("missing client key path for mTLS connection")?;
-        let ca_pem = read_tls_file_at_path(ca_path, "TLS CA certificate path")?;
-        let client_cert_pem =
-            read_tls_file_at_path(client_cert_path, "TLS client certificate path")?;
-        let client_key_pem =
-            read_tls_file_at_path(client_key_path, "TLS client private key path")?;
+        crate::path_safety::assert_safe_path(ca_path, "TLS CA certificate path")?;
+        crate::path_safety::assert_safe_path(client_cert_path, "TLS client certificate path")?;
+        crate::path_safety::assert_safe_path(client_key_path, "TLS client private key path")?;
+        let ca_pem = std::fs::read_to_string(ca_path)
+            .with_context(|| format!("reading TLS CA certificate at {ca_path}"))?;
+        let client_cert_pem = std::fs::read_to_string(client_cert_path)
+            .with_context(|| format!("reading TLS client certificate at {client_cert_path}"))?;
+        let client_key_pem = std::fs::read_to_string(client_key_path)
+            .with_context(|| format!("reading TLS client private key at {client_key_path}"))?;
         Some((ca_pem, client_cert_pem, client_key_pem))
     };
 
@@ -74,7 +73,10 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
             Err(e) => errors.push(format!("{address}: {e}")),
         }
     }
-    anyhow::bail!("failed to connect to any controller endpoint: {}", errors.join(" | "))
+    anyhow::bail!(
+        "failed to connect to any controller endpoint: {}",
+        errors.join(" | ")
+    )
 }
 
 fn endpoint_host(address: &str) -> Option<&str> {

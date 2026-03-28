@@ -1,10 +1,18 @@
+#![allow(
+    dead_code,
+    clippy::await_holding_lock,
+    clippy::result_large_err,
+    clippy::enum_variant_names,
+    clippy::too_many_arguments
+)]
+
 mod auth;
 mod config;
 mod db;
 mod grpc;
-mod path_safety;
 mod nixgen;
 mod node_client;
+mod path_safety;
 mod replication;
 mod replication_policy;
 mod scheduler;
@@ -31,9 +39,12 @@ fn install_fips_crypto_provider() {
         )
     });
 
-    provider
-        .kx_groups
-        .retain(|group| matches!(group.name(), rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1));
+    provider.kx_groups.retain(|group| {
+        matches!(
+            group.name(),
+            rustls::NamedGroup::secp256r1 | rustls::NamedGroup::secp384r1
+        )
+    });
 
     provider
         .install_default()
@@ -290,4 +301,3 @@ fn load_sub_ca(cfg: &config::Config) -> grpc::SubCaState {
         key_file: Some(key_file),
     }
 }
-

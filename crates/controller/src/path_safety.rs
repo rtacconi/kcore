@@ -5,8 +5,7 @@ use anyhow::Result;
 /// Rejects `..` in both `/` and `\` splits so strings like `file:../../x` cannot bypass
 /// `std::path::Path` component parsing (which treats those as a single path segment).
 pub fn path_segments_include_dot_dot(path: &str) -> bool {
-    path.split(|c| c == '/' || c == '\\')
-        .any(|segment| segment == "..")
+    path.split(['/', '\\']).any(|segment| segment == "..")
 }
 
 pub fn assert_safe_path(path: &str, label: &str) -> Result<()> {
