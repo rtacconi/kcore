@@ -46,33 +46,33 @@ Expected local layout on the operator machine:
 
 ```mermaid
 flowchart TD
-  user[Operator] --> createCluster["kctl create cluster --name clusterName"]
-  createCluster --> clusterDir["Create ~/.kcore/clusterName with CA and certs"]
-  clusterDir --> selectCtx["Set current context in ~/.kcore/config"]
+  user[Operator] --> createCluster["kctl create cluster<br/>--name clusterName"]
+  createCluster --> clusterDir["Create ~/.kcore/clusterName<br/>with CA and certs"]
+  clusterDir --> selectCtx["Set current context<br/>in ~/.kcore/config"]
 
-  user --> bootIso["Boot target host from Kcore ISO"]
-  bootIso --> nodeAgentLive["Live node-agent on host:9091"]
+  user --> bootIso["Boot target host<br/>from Kcore ISO"]
+  bootIso --> nodeAgentLive["Live node-agent<br/>host:9091"]
 
-  user --> discover["kctl --node host:9091 node disks/nics"]
-  discover --> installCmd["kctl node install --os-disk --data-disk --join-controller (repeatable) --dc-id"]
+  user --> discover["kctl node disks/nics<br/>--node host:9091"]
+  discover --> installCmd["kctl node install<br/>os-disk, data-disk,<br/>join-controller, dc-id"]
 
-  installCmd --> loadCtx["Resolve current context and cluster cert dir"]
-  loadCtx --> loadClusterPki["Load ca/controller/kctl certs and keys"]
-  loadClusterPki --> genNodeCert["Generate node cert/key signed by cluster CA"]
-  genNodeCert --> buildReq["Build InstallToDiskRequest with PEM payload"]
-  buildReq --> sendRpc["Send NodeAdmin.InstallToDisk RPC with controllers and dc_id"]
+  installCmd --> loadCtx["Resolve context<br/>and cluster cert dir"]
+  loadCtx --> loadClusterPki["Load CA / controller<br/>/ kctl certs and keys"]
+  loadClusterPki --> genNodeCert["Generate node cert+key<br/>signed by cluster CA"]
+  genNodeCert --> buildReq["Build InstallToDiskRequest<br/>with PEM payload"]
+  buildReq --> sendRpc["NodeAdmin.InstallToDisk RPC<br/>controllers + dc_id"]
 
-  sendRpc --> writeBootstrap["Live node-agent writes /etc/kcore/certs/*"]
-  writeBootstrap --> runInstaller["Spawn install-to-disk with repeated --controller and --dc-id"]
-  runInstaller --> partitionDisk["Partition/format/mount target disk"]
-  partitionDisk --> copyKcore["Copy /etc/kcore and binaries to /mnt"]
-  copyKcore --> writeNixos["Write /mnt/etc/nixos/configuration.nix"]
-  writeNixos --> nixosInstall["Run nixos-install"]
-  nixosInstall --> rebootHost["Reboot from installed disk"]
+  sendRpc --> writeBootstrap["node-agent writes<br/>/etc/kcore/certs/*"]
+  writeBootstrap --> runInstaller["Spawn install-to-disk<br/>--controller … --dc-id"]
+  runInstaller --> partitionDisk["Partition / format<br/>mount target disk"]
+  partitionDisk --> copyKcore["Copy /etc/kcore<br/>and binaries to /mnt"]
+  copyKcore --> writeNixos["Write /mnt/etc/nixos<br/>configuration.nix"]
+  writeNixos --> nixosInstall["nixos-install"]
+  nixosInstall --> rebootHost["Reboot from<br/>installed disk"]
 
-  rebootHost --> startServices["systemd starts kcore-node-agent and optional kcore-controller"]
-  startServices --> tlsReady["Services load /etc/kcore/certs and bind 9091/9090"]
-  tlsReady --> healthy["Node is reachable and ready for reconciliation"]
+  rebootHost --> startServices["systemd: node-agent<br/>and optional controller"]
+  startServices --> tlsReady["Services load certs<br/>bind 9091 / 9090"]
+  tlsReady --> healthy["Node reachable<br/>ready for reconciliation"]
 ```
 
 ## Declarative disk layout (disko) — target architecture
@@ -85,15 +85,15 @@ Disk intent is captured once (e.g. a checked-in YAML template, or fields carried
 
 ```mermaid
 flowchart TD
-  intent["Disk intent YAML or install RPC fields"]
-  translate["Translate to disko devices Nix module"]
-  diskoFmt["disko format once on live ISO"]
-  mount["Mount target root and boot per layout"]
-  hwcfg["nixos-generate-config --root /mnt as needed"]
-  cfg["Write configuration.nix importing disko + kcore modules"]
+  intent["Disk intent<br/>YAML or install RPC fields"]
+  translate["Translate to<br/>disko devices Nix module"]
+  diskoFmt["disko format<br/>once on live ISO"]
+  mount["Mount root + boot<br/>per layout"]
+  hwcfg["nixos-generate-config<br/>--root /mnt"]
+  cfg["configuration.nix<br/>disko + kcore imports"]
   install["nixos-install"]
-  reboot["Reboot from installed disk"]
-  match["node-agent.yaml storage names match VG or pool in layout"]
+  reboot["Reboot from<br/>installed disk"]
+  match["node-agent.yaml storage<br/>matches VG / pool in layout"]
 
   intent --> translate
   translate --> diskoFmt
@@ -111,14 +111,14 @@ A running node can **keep** disko in its flake or `imports` and change the **Nix
 
 ```mermaid
 flowchart TD
-  run["Installed node running kcore"]
-  publish["Operator or controller publishes updated disko Nix"]
+  run["Installed node<br/>running kcore"]
+  publish["Operator or controller<br/>publishes updated disko Nix"]
   scope{"What changes?"}
-  data["Add or reshape data disks only"]
-  oneshot["Run disko format once for those devices only"]
-  apply["nixos-rebuild switch or ApplyNixConfig"]
-  os["Reshape OS root disk or repartition system disk"]
-  maint["Maintenance: rescue ISO or new install path"]
+  data["Add / reshape<br/>data disks only"]
+  oneshot["disko format once<br/>those devices only"]
+  apply["nixos-rebuild switch<br/>or ApplyNixConfig"]
+  os["Reshape OS root<br/>repartition system disk"]
+  maint["Maintenance:<br/>rescue ISO or reinstall"]
   run --> publish
   publish --> scope
   scope --> data
