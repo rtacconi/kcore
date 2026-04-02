@@ -169,4 +169,3 @@ Run this sequence on every new ISO candidate:
    - `ls /var/lib/kcore/images/` contains controller-derived cached image path
 6. Verify console attach path:
    - `socat -,raw,echo=0,icanon=0 UNIX-CONNECT:/run/kcore/smoke.serial.sock`
-
