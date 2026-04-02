@@ -276,6 +276,7 @@
                     pkgs.lvm2
                     pkgs.cryptsetup
                     pkgs.tpm2-tools
+                    pkgs.openssl
                     nodeAgent
                     controller
                     (pkgs.writeShellScriptBin "install-to-disk" ''
@@ -479,7 +480,7 @@
                                           echo "Setting up LUKS encryption (method: $LUKS_METHOD)..."
                                           if [ "$LUKS_METHOD" = "tpm2" ]; then
                                             echo "Formatting $ROOT_PART with LUKS2 (TPM2 will be enrolled after install)..."
-                                            TPM_TEMP_PASS=$(openssl rand -base64 32)
+                                            TPM_TEMP_PASS=$(${pkgs.openssl}/bin/openssl rand -base64 32)
                                             echo -n "$TPM_TEMP_PASS" | cryptsetup luksFormat --batch-mode --type luks2 "$ROOT_PART" -
                                             echo -n "$TPM_TEMP_PASS" | cryptsetup open "$ROOT_PART" cryptroot -
                                           else
@@ -506,6 +507,12 @@
                                           if [ "$LUKS_METHOD" = "key-file" ]; then
                                             cp /tmp/luks/root.key /mnt/boot/crypto_keyfile.bin
                                             chmod 0400 /mnt/boot/crypto_keyfile.bin
+                                          fi
+
+                                          if [ "''${#DATA_DISKS[@]}" -gt 0 ]; then
+                                            echo ""
+                                            echo "Data disk paths recorded under /etc/kcore/data-disks (not modified here)."
+                                            echo "VG/pool/LV/zvol creation is deferred until after install: use declarative Nix (disko, fileSystems, ZFS options) or controller-pushed configuration."
                                           fi
 
                                           echo "Generating NixOS hardware configuration..."

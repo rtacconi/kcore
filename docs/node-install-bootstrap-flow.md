@@ -75,6 +75,68 @@ flowchart TD
   tlsReady --> healthy["Node is reachable and ready for reconciliation"]
 ```
 
+## Declarative disk layout (disko) — target architecture
+
+Today the live ISO’s `install-to-disk` script uses **imperative** partitioning and LUKS (`parted`, `cryptsetup`, …). The direction below is a **sketch** of how **declarative layout** with [disko](https://github.com/nix-community/disko) can align install intent (YAML or RPC fields), **one-shot formatting** on the installer, and **ongoing** Nix evolution on the node. See also [storage](storage.md) for how data disks and VM backends relate.
+
+### Install-time: YAML or RPC → disko → NixOS
+
+Disk intent is captured once (e.g. a checked-in YAML template, or fields carried by `InstallToDiskRequest` and rendered to Nix). The **same** disko device graph is used for **format** on the ISO and for **imports** in the installed `configuration.nix`, so the running system can `nixos-rebuild` without drifting from what was laid down at install.
+
+```mermaid
+flowchart TD
+  intent["Disk intent YAML or install RPC fields"]
+  translate["Translate to disko devices Nix module"]
+  diskoFmt["disko format once on live ISO"]
+  mount["Mount target root and boot per layout"]
+  hwcfg["nixos-generate-config --root /mnt as needed"]
+  cfg["Write configuration.nix importing disko + kcore modules"]
+  install["nixos-install"]
+  reboot["Reboot from installed disk"]
+  match["node-agent.yaml storage names match VG or pool in layout"]
+
+  intent --> translate
+  translate --> diskoFmt
+  diskoFmt --> mount
+  mount --> hwcfg
+  hwcfg --> cfg
+  cfg --> install
+  install --> reboot
+  reboot --> match
+```
+
+### Day-2: evolving layout on a running node
+
+A running node can **keep** disko in its flake or `imports` and change the **Nix** description over time. **Formatting** is never implicit on every boot: scope changes to **new** data devices when possible; anything that repartitions the **OS disk** is a **reinstall-class** event (rescue ISO, replace node, or full maintenance window).
+
+```mermaid
+flowchart TD
+  run["Installed node running kcore"]
+  publish["Operator or controller publishes updated disko Nix"]
+  scope{"What changes?"}
+  data["Add or reshape data disks only"]
+  oneshot["Run disko format once for those devices only"]
+  apply["nixos-rebuild switch or ApplyNixConfig"]
+  os["Reshape OS root disk or repartition system disk"]
+  maint["Maintenance: rescue ISO or new install path"]
+  run --> publish
+  publish --> scope
+  scope --> data
+  data --> oneshot
+  oneshot --> apply
+  apply --> run
+  scope --> os
+  os --> maint
+  maint --> run
+```
+
+### Where translation might live
+
+- **Installer / ISO**: render disk intent → disko Nix, run `disko` before `nixos-install` (no controller required).
+- **Controller (optional)**: store or generate disko fragments for **approved** nodes; push via existing Nix apply paths for day-2 **additive** storage only.
+
+This document does not yet mandate a single file layout; it records the **intended** vertical flow from intent → format → install → reconcile, and a **safe** split for later layout changes.
+
 ## Verification checklist
 
 - On live ISO (before install):

@@ -84,6 +84,21 @@ Notes:
 - `--storage-backend` is the typed mode and preferred over legacy `--data-disk-mode`.
 - Exactly one of `--join-controller` or `--run-controller` is required.
 
+#### Data disks during `install-to-disk`
+
+The installer **only** records dedicated block devices in `/etc/kcore/data-disks` and writes the intended **storage backend** and parameters (LVM VG name, ZFS pool name, etc.) into `/etc/kcore/node-agent.yaml`. It does **not** create volume groups, pools, or logical volumes/zvols: there is often **no controller** yet, and destroying or reshaping data disks belongs in a **post-install**, **declarative** or **controller-driven** step (see below).
+
+### Declarative LVM and ZFS on NixOS (after install)
+
+NixOS does **not** ship a single high-level option like `services.lvm.volumeGroups.<name> = { ... }` for creating arbitrary VGs/LVs from scratch. Typical patterns:
+
+- **[disko](https://github.com/nix-community/disko)** — declarative partition / LUKS / LVM / ZFS / btrfs layout; applies layout from Nix (often run once at install or via a dedicated activation).
+- **`fileSystems` + `swapDevices`** — mount ext4/xfs partitions or ZFS datasets **after** the underlying block device or pool already exists (`fsType = "zfs"` expects an **importable** pool).
+- **ZFS** — enable `boot.supportedFilesystems = [ "zfs" ];` (and usually `boot.initrd.supportedFilesystems = [ "zfs" ];` when pools must be available in initrd). Pool and dataset **creation** is usually done by **disko**, **manual** `zpool create` / `zfs create`, or a **one-shot** `systemd` service guarded by a state file.
+- **LVM** — VG/LV creation is usually **disko**, **imperative** `pvcreate`/`vgcreate`/`lvcreate` once, or a **one-shot** unit; then use `fileSystems` for mount points if needed.
+
+For kcore, VM **volumes** are created at runtime by the node agent (`lvcreate`, `zfs create -V`, etc.) **once** the backing VG or pool exists and matches `node-agent.yaml`.
+
 ### 2) Create VM with required storage metadata
 
 Create a VM using a node-local image with filesystem backend request:
