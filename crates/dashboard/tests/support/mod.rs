@@ -42,6 +42,13 @@ impl Controller for MockController {
         Err(unimp("sync_vm_state"))
     }
 
+    async fn sync_workload_state(
+        &self,
+        _: Request<SyncWorkloadStateRequest>,
+    ) -> Result<Response<SyncWorkloadStateResponse>, Status> {
+        Err(unimp("sync_workload_state"))
+    }
+
     async fn create_vm(
         &self,
         _: Request<CreateVmRequest>,
@@ -91,6 +98,41 @@ impl Controller for MockController {
         }))
     }
 
+    async fn create_workload(
+        &self,
+        _: Request<CreateWorkloadRequest>,
+    ) -> Result<Response<CreateWorkloadResponse>, Status> {
+        Err(unimp("create_workload"))
+    }
+
+    async fn delete_workload(
+        &self,
+        _: Request<DeleteWorkloadRequest>,
+    ) -> Result<Response<DeleteWorkloadResponse>, Status> {
+        Err(unimp("delete_workload"))
+    }
+
+    async fn set_workload_desired_state(
+        &self,
+        _: Request<SetWorkloadDesiredStateRequest>,
+    ) -> Result<Response<SetWorkloadDesiredStateResponse>, Status> {
+        Err(unimp("set_workload_desired_state"))
+    }
+
+    async fn get_workload(
+        &self,
+        _: Request<GetWorkloadRequest>,
+    ) -> Result<Response<GetWorkloadResponse>, Status> {
+        Err(unimp("get_workload"))
+    }
+
+    async fn list_workloads(
+        &self,
+        _: Request<ListWorkloadsRequest>,
+    ) -> Result<Response<ListWorkloadsResponse>, Status> {
+        Err(unimp("list_workloads"))
+    }
+
     async fn create_network(
         &self,
         _: Request<CreateNetworkRequest>,
@@ -123,6 +165,48 @@ impl Controller for MockController {
                 enable_outbound_nat: true,
             }],
         }))
+    }
+
+    async fn create_security_group(
+        &self,
+        _: Request<CreateSecurityGroupRequest>,
+    ) -> Result<Response<CreateSecurityGroupResponse>, Status> {
+        Err(unimp("create_security_group"))
+    }
+
+    async fn get_security_group(
+        &self,
+        _: Request<GetSecurityGroupRequest>,
+    ) -> Result<Response<GetSecurityGroupResponse>, Status> {
+        Err(unimp("get_security_group"))
+    }
+
+    async fn list_security_groups(
+        &self,
+        _: Request<ListSecurityGroupsRequest>,
+    ) -> Result<Response<ListSecurityGroupsResponse>, Status> {
+        Err(unimp("list_security_groups"))
+    }
+
+    async fn delete_security_group(
+        &self,
+        _: Request<DeleteSecurityGroupRequest>,
+    ) -> Result<Response<DeleteSecurityGroupResponse>, Status> {
+        Err(unimp("delete_security_group"))
+    }
+
+    async fn attach_security_group(
+        &self,
+        _: Request<AttachSecurityGroupRequest>,
+    ) -> Result<Response<AttachSecurityGroupResponse>, Status> {
+        Err(unimp("attach_security_group"))
+    }
+
+    async fn detach_security_group(
+        &self,
+        _: Request<DetachSecurityGroupRequest>,
+    ) -> Result<Response<DetachSecurityGroupResponse>, Status> {
+        Err(unimp("detach_security_group"))
     }
 
     async fn list_nodes(
@@ -298,6 +382,10 @@ impl Controller for MockController {
                         mountpoint: "/var/lib/kcore".into(),
                     },
                 ],
+                lvm_inventory_ok: false,
+                lvm_volume_groups: vec![],
+                lvm_logical_volumes: vec![],
+                lvm_physical_volumes: vec![],
             }],
         }))
     }

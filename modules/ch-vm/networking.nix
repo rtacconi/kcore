@@ -230,6 +230,22 @@ in
                                   nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" udp dport ${toString port} accept'')
                   netCfg.allowedUDPPorts
                 }
+                ${lib.concatMapStringsSep "\n              "
+                  (rule: ''
+                    ${
+                      if rule.enableDnat && rule.targetIp != "" then
+                        ''
+                          nft add rule ip kcore-${netName} prerouting ip daddr ${netCfg.externalIP} ${rule.protocol} dport ${toString rule.hostPort} ip saddr ${rule.sourceCidr} dnat to ${rule.targetIp}:${toString rule.targetPort}
+                          nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" ip daddr ${rule.targetIp} ${rule.protocol} dport ${toString rule.targetPort} ip saddr ${rule.sourceCidr} accept
+                        ''
+                      else
+                        ''
+                          nft add rule ip kcore-${netName} forward iifname "${upstreamIface netName netCfg}" ${rule.protocol} dport ${toString rule.hostPort} ip saddr ${rule.sourceCidr} accept
+                        ''
+                    }
+                  '')
+                  netCfg.securityGroupRules
+                }
               ''}
 
               ${lib.optionalString isVxlan ''

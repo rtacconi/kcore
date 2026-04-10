@@ -103,6 +103,38 @@ pub struct NetworkRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct SecurityGroupRow {
+    pub name: String,
+    pub description: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SecurityGroupRuleRow {
+    pub id: String,
+    pub security_group: String,
+    pub protocol: String,
+    pub host_port: i32,
+    pub target_port: i32,
+    pub source_cidr: String,
+    pub target_vm: String,
+    pub enable_dnat: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct SecurityGroupVmAttachmentRow {
+    pub security_group: String,
+    pub vm_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct SecurityGroupNetworkAttachmentRow {
+    pub security_group: String,
+    pub network_name: String,
+    pub node_id: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct ReplicationOutboxRow {
     pub id: i64,
     #[allow(dead_code)]
@@ -293,6 +325,32 @@ impl Database {
                 storage_backend TEXT NOT NULL DEFAULT 'filesystem',
                 storage_size_bytes INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS security_groups (
+                name TEXT PRIMARY KEY,
+                description TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE TABLE IF NOT EXISTS security_group_rules (
+                id TEXT PRIMARY KEY,
+                security_group TEXT NOT NULL REFERENCES security_groups(name) ON DELETE CASCADE,
+                protocol TEXT NOT NULL,
+                host_port INTEGER NOT NULL,
+                target_port INTEGER NOT NULL,
+                source_cidr TEXT NOT NULL DEFAULT '',
+                target_vm TEXT NOT NULL DEFAULT '',
+                enable_dnat INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS security_group_vm_attachments (
+                security_group TEXT NOT NULL REFERENCES security_groups(name) ON DELETE CASCADE,
+                vm_id TEXT NOT NULL REFERENCES vms(id) ON DELETE CASCADE,
+                PRIMARY KEY (security_group, vm_id)
+            );
+            CREATE TABLE IF NOT EXISTS security_group_network_attachments (
+                security_group TEXT NOT NULL REFERENCES security_groups(name) ON DELETE CASCADE,
+                network_name TEXT NOT NULL,
+                node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                PRIMARY KEY (security_group, network_name, node_id)
             );",
         )?;
 
@@ -596,8 +654,38 @@ impl Database {
                 CREATE INDEX IF NOT EXISTS idx_workloads_runtime_state ON workloads(runtime_state);",
             );
         }
+        if version < 23 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS security_groups (
+                    name TEXT PRIMARY KEY,
+                    description TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS security_group_rules (
+                    id TEXT PRIMARY KEY,
+                    security_group TEXT NOT NULL REFERENCES security_groups(name) ON DELETE CASCADE,
+                    protocol TEXT NOT NULL,
+                    host_port INTEGER NOT NULL,
+                    target_port INTEGER NOT NULL,
+                    source_cidr TEXT NOT NULL DEFAULT '',
+                    target_vm TEXT NOT NULL DEFAULT '',
+                    enable_dnat INTEGER NOT NULL DEFAULT 0
+                );
+                CREATE TABLE IF NOT EXISTS security_group_vm_attachments (
+                    security_group TEXT NOT NULL REFERENCES security_groups(name) ON DELETE CASCADE,
+                    vm_id TEXT NOT NULL REFERENCES vms(id) ON DELETE CASCADE,
+                    PRIMARY KEY (security_group, vm_id)
+                );
+                CREATE TABLE IF NOT EXISTS security_group_network_attachments (
+                    security_group TEXT NOT NULL REFERENCES security_groups(name) ON DELETE CASCADE,
+                    network_name TEXT NOT NULL,
+                    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                    PRIMARY KEY (security_group, network_name, node_id)
+                );",
+            );
+        }
 
-        const CURRENT_VERSION: i32 = 22;
+        const CURRENT_VERSION: i32 = 23;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -1671,6 +1759,231 @@ impl Database {
             params![node_id, name],
         )?;
         Ok(rows > 0)
+    }
+
+    pub fn upsert_security_group(&self, sg: &SecurityGroupRow) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO security_groups (name, description)
+             VALUES (?1, ?2)
+             ON CONFLICT(name) DO UPDATE SET description=excluded.description",
+            params![sg.name, sg.description],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_security_group(&self, name: &str) -> Result<Option<SecurityGroupRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, description, created_at FROM security_groups WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![name], |row| {
+            Ok(SecurityGroupRow {
+                name: row.get(0)?,
+                description: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn list_security_groups(&self) -> Result<Vec<SecurityGroupRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn
+            .prepare("SELECT name, description, created_at FROM security_groups ORDER BY name ASC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SecurityGroupRow {
+                name: row.get(0)?,
+                description: row.get(1)?,
+                created_at: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn delete_security_group(&self, name: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute("DELETE FROM security_groups WHERE name = ?1", params![name])?;
+        Ok(rows > 0)
+    }
+
+    pub fn replace_security_group_rules(
+        &self,
+        security_group: &str,
+        rules: &[SecurityGroupRuleRow],
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM security_group_rules WHERE security_group = ?1",
+            params![security_group],
+        )?;
+        for rule in rules {
+            tx.execute(
+                "INSERT INTO security_group_rules (id, security_group, protocol, host_port, target_port, source_cidr, target_vm, enable_dnat)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![
+                    rule.id,
+                    security_group,
+                    rule.protocol,
+                    rule.host_port,
+                    rule.target_port,
+                    rule.source_cidr,
+                    rule.target_vm,
+                    rule.enable_dnat as i32
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn list_security_group_rules(
+        &self,
+        security_group: &str,
+    ) -> Result<Vec<SecurityGroupRuleRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT id, security_group, protocol, host_port, target_port, source_cidr, target_vm, enable_dnat
+             FROM security_group_rules
+             WHERE security_group = ?1
+             ORDER BY id ASC",
+        )?;
+        let rows = stmt.query_map(params![security_group], |row| {
+            Ok(SecurityGroupRuleRow {
+                id: row.get(0)?,
+                security_group: row.get(1)?,
+                protocol: row.get(2)?,
+                host_port: row.get(3)?,
+                target_port: row.get(4)?,
+                source_cidr: row.get(5)?,
+                target_vm: row.get(6)?,
+                enable_dnat: row.get::<_, i32>(7)? != 0,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn attach_security_group_to_vm(
+        &self,
+        security_group: &str,
+        vm_id: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO security_group_vm_attachments (security_group, vm_id)
+             VALUES (?1, ?2)",
+            params![security_group, vm_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn detach_security_group_from_vm(
+        &self,
+        security_group: &str,
+        vm_id: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM security_group_vm_attachments WHERE security_group = ?1 AND vm_id = ?2",
+            params![security_group, vm_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    pub fn list_security_group_vm_attachments(
+        &self,
+        security_group: &str,
+    ) -> Result<Vec<SecurityGroupVmAttachmentRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT security_group, vm_id
+             FROM security_group_vm_attachments
+             WHERE security_group = ?1
+             ORDER BY vm_id ASC",
+        )?;
+        let rows = stmt.query_map(params![security_group], |row| {
+            Ok(SecurityGroupVmAttachmentRow {
+                security_group: row.get(0)?,
+                vm_id: row.get(1)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_security_groups_for_vm(&self, vm_id: &str) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT security_group FROM security_group_vm_attachments WHERE vm_id = ?1 ORDER BY security_group ASC",
+        )?;
+        let rows = stmt.query_map(params![vm_id], |row| row.get(0))?;
+        rows.collect()
+    }
+
+    pub fn attach_security_group_to_network(
+        &self,
+        security_group: &str,
+        network_name: &str,
+        node_id: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT OR IGNORE INTO security_group_network_attachments (security_group, network_name, node_id)
+             VALUES (?1, ?2, ?3)",
+            params![security_group, network_name, node_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn detach_security_group_from_network(
+        &self,
+        security_group: &str,
+        network_name: &str,
+        node_id: &str,
+    ) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute(
+            "DELETE FROM security_group_network_attachments
+             WHERE security_group = ?1 AND network_name = ?2 AND node_id = ?3",
+            params![security_group, network_name, node_id],
+        )?;
+        Ok(rows > 0)
+    }
+
+    pub fn list_security_group_network_attachments(
+        &self,
+        security_group: &str,
+    ) -> Result<Vec<SecurityGroupNetworkAttachmentRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT security_group, network_name, node_id
+             FROM security_group_network_attachments
+             WHERE security_group = ?1
+             ORDER BY node_id ASC, network_name ASC",
+        )?;
+        let rows = stmt.query_map(params![security_group], |row| {
+            Ok(SecurityGroupNetworkAttachmentRow {
+                security_group: row.get(0)?,
+                network_name: row.get(1)?,
+                node_id: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_security_groups_for_network(
+        &self,
+        network_name: &str,
+        node_id: &str,
+    ) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT security_group FROM security_group_network_attachments
+             WHERE network_name = ?1 AND node_id = ?2
+             ORDER BY security_group ASC",
+        )?;
+        let rows = stmt.query_map(params![network_name, node_id], |row| row.get(0))?;
+        rows.collect()
     }
 
     pub fn find_node_for_vm(&self, vm_id: &str) -> Result<Option<String>, rusqlite::Error> {
@@ -2856,5 +3169,114 @@ mod tests {
                 .expect("oldest unresolved age")
                 >= 0
         );
+    }
+
+    #[test]
+    fn security_group_roundtrip_with_rules() {
+        let db = Database::open(":memory:").expect("db");
+        db.upsert_security_group(&SecurityGroupRow {
+            name: "web".to_string(),
+            description: "web ingress".to_string(),
+            created_at: String::new(),
+        })
+        .expect("insert sg");
+        db.replace_security_group_rules(
+            "web",
+            &[SecurityGroupRuleRow {
+                id: "r1".to_string(),
+                security_group: "web".to_string(),
+                protocol: "tcp".to_string(),
+                host_port: 443,
+                target_port: 8443,
+                source_cidr: "0.0.0.0/0".to_string(),
+                target_vm: "vm-1".to_string(),
+                enable_dnat: true,
+            }],
+        )
+        .expect("insert rule");
+
+        let got = db.get_security_group("web").expect("read").expect("exists");
+        assert_eq!(got.name, "web");
+        assert_eq!(got.description, "web ingress");
+        let rules = db.list_security_group_rules("web").expect("rules");
+        assert_eq!(rules.len(), 1);
+        assert_eq!(rules[0].protocol, "tcp");
+        assert_eq!(rules[0].host_port, 443);
+        assert!(rules[0].enable_dnat);
+    }
+
+    #[test]
+    fn security_group_attachments_roundtrip() {
+        let db = Database::open(":memory:").expect("db");
+        let node = NodeRow {
+            id: "node-1".to_string(),
+            hostname: "node-1".to_string(),
+            address: "10.0.0.1:9091".to_string(),
+            cpu_cores: 4,
+            memory_bytes: 8 * 1024 * 1024 * 1024,
+            status: "ready".to_string(),
+            last_heartbeat: String::new(),
+            gateway_interface: "eno1".to_string(),
+            cpu_used: 0,
+            memory_used: 0,
+            storage_backend: "filesystem".to_string(),
+            disable_vxlan: false,
+            approval_status: "approved".to_string(),
+            cert_expiry_days: -1,
+            luks_method: String::new(),
+        };
+        db.upsert_node(&node).expect("node");
+        db.insert_vm(&VmRow {
+            id: "vm-1".to_string(),
+            name: "vm-1".to_string(),
+            cpu: 2,
+            memory_bytes: 1024,
+            image_path: "/tmp/img.raw".to_string(),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            image_format: "raw".to_string(),
+            image_size: 1024,
+            network: "private".to_string(),
+            auto_start: true,
+            node_id: "node-1".to_string(),
+            created_at: String::new(),
+            runtime_state: "running".to_string(),
+            cloud_init_user_data: String::new(),
+            storage_backend: "filesystem".to_string(),
+            storage_size_bytes: 1024 * 1024,
+            vm_ip: "10.240.0.22".to_string(),
+        })
+        .expect("vm");
+        db.insert_network(&NetworkRow {
+            name: "private".to_string(),
+            external_ip: "203.0.113.10".to_string(),
+            gateway_ip: "10.240.0.1".to_string(),
+            internal_netmask: "255.255.255.0".to_string(),
+            node_id: "node-1".to_string(),
+            allowed_tcp_ports: String::new(),
+            allowed_udp_ports: String::new(),
+            vlan_id: 0,
+            network_type: "nat".to_string(),
+            enable_outbound_nat: true,
+            vni: 0,
+            next_ip: 2,
+        })
+        .expect("network");
+        db.upsert_security_group(&SecurityGroupRow {
+            name: "web".to_string(),
+            description: String::new(),
+            created_at: String::new(),
+        })
+        .expect("sg");
+        db.attach_security_group_to_vm("web", "vm-1").expect("attach vm");
+        db.attach_security_group_to_network("web", "private", "node-1")
+            .expect("attach network");
+
+        let vm_groups = db.list_security_groups_for_vm("vm-1").expect("vm groups");
+        let net_groups = db
+            .list_security_groups_for_network("private", "node-1")
+            .expect("net groups");
+        assert_eq!(vm_groups, vec!["web".to_string()]);
+        assert_eq!(net_groups, vec!["web".to_string()]);
     }
 }

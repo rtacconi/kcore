@@ -29,6 +29,12 @@ service Controller {
   rpc CreateNetwork(CreateNetworkRequest) returns (CreateNetworkResponse);
   rpc DeleteNetwork(DeleteNetworkRequest) returns (DeleteNetworkResponse);
   rpc ListNetworks(ListNetworksRequest) returns (ListNetworksResponse);
+  rpc CreateSecurityGroup(CreateSecurityGroupRequest) returns (CreateSecurityGroupResponse);
+  rpc GetSecurityGroup(GetSecurityGroupRequest) returns (GetSecurityGroupResponse);
+  rpc ListSecurityGroups(ListSecurityGroupsRequest) returns (ListSecurityGroupsResponse);
+  rpc DeleteSecurityGroup(DeleteSecurityGroupRequest) returns (DeleteSecurityGroupResponse);
+  rpc AttachSecurityGroup(AttachSecurityGroupRequest) returns (AttachSecurityGroupResponse);
+  rpc DetachSecurityGroup(DetachSecurityGroupRequest) returns (DetachSecurityGroupResponse);
   
   // Node operations
   rpc ListNodes(ListNodesRequest) returns (ListNodesResponse);
@@ -372,6 +378,90 @@ message NetworkInfo {
   int32 vlan_id = 8;
   string network_type = 9;  // "nat", "bridge", or "vxlan"
   bool enable_outbound_nat = 10;
+}
+
+enum SecurityGroupTargetKind {
+  SECURITY_GROUP_TARGET_KIND_UNSPECIFIED = 0;
+  SECURITY_GROUP_TARGET_KIND_VM = 1;
+  SECURITY_GROUP_TARGET_KIND_NETWORK = 2;
+}
+
+message SecurityGroupRule {
+  string id = 1;
+  string protocol = 2; // tcp|udp
+  int32 host_port = 3;
+  int32 target_port = 4; // defaults to host_port when unset
+  string source_cidr = 5; // optional, defaults to 0.0.0.0/0
+  string target_vm = 6; // optional VM id/name for DNAT target
+  bool enable_dnat = 7; // when true, map host_port to target_vm:target_port
+}
+
+message SecurityGroup {
+  string name = 1;
+  string description = 2;
+  repeated SecurityGroupRule rules = 3;
+  google.protobuf.Timestamp created_at = 4;
+}
+
+message SecurityGroupAttachment {
+  string security_group = 1;
+  SecurityGroupTargetKind target_kind = 2;
+  string target_id = 3;   // vm id/name or network name
+  string target_node = 4; // optional node scope for network attachments
+}
+
+message CreateSecurityGroupRequest {
+  SecurityGroup security_group = 1;
+}
+
+message CreateSecurityGroupResponse {
+  bool success = 1;
+  SecurityGroup security_group = 2;
+}
+
+message GetSecurityGroupRequest {
+  string name = 1;
+}
+
+message GetSecurityGroupResponse {
+  SecurityGroup security_group = 1;
+  repeated SecurityGroupAttachment attachments = 2;
+}
+
+message ListSecurityGroupsRequest {}
+
+message ListSecurityGroupsResponse {
+  repeated SecurityGroup security_groups = 1;
+}
+
+message DeleteSecurityGroupRequest {
+  string name = 1;
+}
+
+message DeleteSecurityGroupResponse {
+  bool success = 1;
+}
+
+message AttachSecurityGroupRequest {
+  string security_group = 1;
+  SecurityGroupTargetKind target_kind = 2;
+  string target_id = 3;
+  string target_node = 4;
+}
+
+message AttachSecurityGroupResponse {
+  bool success = 1;
+}
+
+message DetachSecurityGroupRequest {
+  string security_group = 1;
+  SecurityGroupTargetKind target_kind = 2;
+  string target_id = 3;
+  string target_node = 4;
+}
+
+message DetachSecurityGroupResponse {
+  bool success = 1;
 }
 
 message VmInfo {

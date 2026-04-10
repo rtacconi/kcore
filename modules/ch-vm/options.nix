@@ -69,6 +69,42 @@ let
         default = true;
         description = "Whether to add masquerade rules for outbound internet access. Set to false for fully isolated overlays.";
       };
+
+      securityGroupRules = lib.mkOption {
+        type = lib.types.listOf (lib.types.submodule {
+          options = {
+            protocol = lib.mkOption {
+              type = lib.types.enum [ "tcp" "udp" ];
+              description = "L4 protocol for ingress exposure.";
+            };
+            hostPort = lib.mkOption {
+              type = lib.types.port;
+              description = "Host-side ingress port.";
+            };
+            targetPort = lib.mkOption {
+              type = lib.types.port;
+              description = "Target VM port.";
+            };
+            sourceCidr = lib.mkOption {
+              type = lib.types.str;
+              default = "0.0.0.0/0";
+              description = "Source CIDR allowed for this rule.";
+            };
+            targetIp = lib.mkOption {
+              type = lib.types.str;
+              default = "";
+              description = "Optional VM private IP for DNAT target.";
+            };
+            enableDnat = lib.mkOption {
+              type = lib.types.bool;
+              default = false;
+              description = "When true, DNAT hostPort to targetIp:targetPort.";
+            };
+          };
+        });
+        default = [ ];
+        description = "Security-group-derived ingress exposure rules.";
+      };
     };
   };
 

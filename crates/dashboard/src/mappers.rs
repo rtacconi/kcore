@@ -473,6 +473,10 @@ mod tests {
                     fstype: String::new(),
                     mountpoint: "/".into(),
                 }],
+                lvm_inventory_ok: false,
+                lvm_volume_groups: vec![],
+                lvm_logical_volumes: vec![],
+                lvm_physical_volumes: vec![],
             }],
         };
         let dto = storage_overview_from_proto(r);

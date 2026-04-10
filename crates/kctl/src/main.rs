@@ -152,6 +152,12 @@ enum Command {
         #[command(subcommand)]
         action: WorkloadAction,
     },
+    /// Manage security groups
+    #[command(name = "security-group", alias = "sg")]
+    SecurityGroup {
+        #[command(subcommand)]
+        action: SecurityGroupAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -731,6 +737,64 @@ enum WorkloadAction {
         /// Workload id or name
         id: String,
         /// Target node filter
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SecurityGroupAction {
+    /// Create security group from YAML manifest
+    Create {
+        /// SecurityGroup manifest file
+        #[arg(short = 'f', long = "filename")]
+        file: String,
+    },
+    /// Apply security group manifest (reconciles attachments)
+    Apply {
+        /// SecurityGroup manifest file
+        #[arg(short = 'f', long = "filename")]
+        file: String,
+    },
+    /// List security groups
+    List,
+    /// Get security group details
+    Get {
+        /// Security group name
+        name: String,
+    },
+    /// Delete security group
+    Delete {
+        /// Security group name
+        name: String,
+    },
+    /// Attach security group to VM or network
+    Attach {
+        /// Security group name
+        #[arg(long)]
+        name: String,
+        /// Target kind: vm|network
+        #[arg(long)]
+        kind: String,
+        /// Target id (vm id/name or network name)
+        #[arg(long)]
+        target: String,
+        /// Target node (required for network attach)
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+    /// Detach security group from VM or network
+    Detach {
+        /// Security group name
+        #[arg(long)]
+        name: String,
+        /// Target kind: vm|network
+        #[arg(long)]
+        kind: String,
+        /// Target id (vm id/name or network name)
+        #[arg(long)]
+        target: String,
+        /// Target node (required for network detach)
         #[arg(long = "target-node")]
         target_node: Option<String>,
     },
@@ -1367,6 +1431,52 @@ async fn main() {
                     id,
                     target_node,
                 } => commands::workload::set_state(&info, kind, id, false, target_node.as_deref()).await,
+            }
+        }
+        Command::SecurityGroup { action } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            match action {
+                SecurityGroupAction::Create { file } => {
+                    commands::security_group::create_from_file(&info, file).await
+                }
+                SecurityGroupAction::Apply { file } => {
+                    commands::security_group::apply_from_file(&info, file).await
+                }
+                SecurityGroupAction::List => commands::security_group::list(&info).await,
+                SecurityGroupAction::Get { name } => commands::security_group::get(&info, name).await,
+                SecurityGroupAction::Delete { name } => {
+                    commands::security_group::delete(&info, name).await
+                }
+                SecurityGroupAction::Attach {
+                    name,
+                    kind,
+                    target,
+                    target_node,
+                } => {
+                    commands::security_group::attach(
+                        &info,
+                        name,
+                        kind,
+                        target,
+                        target_node.as_deref(),
+                    )
+                    .await
+                }
+                SecurityGroupAction::Detach {
+                    name,
+                    kind,
+                    target,
+                    target_node,
+                } => {
+                    commands::security_group::detach(
+                        &info,
+                        name,
+                        kind,
+                        target,
+                        target_node.as_deref(),
+                    )
+                    .await
+                }
             }
         }
     };

@@ -8,9 +8,12 @@ use uuid::Uuid;
 use crate::auth::{self, CN_KCTL, CN_NODE_PREFIX};
 use crate::config::{NetworkConfig, ReplicationConfig};
 use crate::controller_proto;
-use crate::db::{Database, NetworkRow, NodeRow, VmRow, WorkloadRow};
+use crate::db::{
+    Database, NetworkRow, NodeRow, SecurityGroupRow, SecurityGroupRuleRow, VmRow, WorkloadRow,
+};
 use crate::node_proto;
 use crate::{nixgen, node_client::NodeClients, scheduler};
+use std::collections::HashMap;
 
 use super::helpers::compute_vni;
 use super::helpers::{
@@ -36,9 +39,47 @@ const EVT_VM_DELETE: &str = "vm.delete";
 const EVT_VM_DESIRED_STATE_SET: &str = "vm.desired_state.set";
 const EVT_NETWORK_CREATE: &str = "network.create";
 const EVT_NETWORK_DELETE: &str = "network.delete";
+const EVT_SECURITY_GROUP_CREATE: &str = "security_group.create";
+const EVT_SECURITY_GROUP_DELETE: &str = "security_group.delete";
+const EVT_SECURITY_GROUP_ATTACH: &str = "security_group.attach";
+const EVT_SECURITY_GROUP_DETACH: &str = "security_group.detach";
 const EVT_NODE_DRAIN: &str = "node.drain";
 const EVT_SSH_KEY_CREATE: &str = "ssh_key.create";
 const EVT_SSH_KEY_DELETE: &str = "ssh_key.delete";
+
+fn normalize_sg_protocol(protocol: &str) -> Result<String, Status> {
+    let p = protocol.trim().to_ascii_lowercase();
+    match p.as_str() {
+        "tcp" | "udp" => Ok(p),
+        _ => Err(Status::invalid_argument(
+            "security group rule protocol must be tcp or udp",
+        )),
+    }
+}
+
+fn validate_port(port: i32, field: &str) -> Result<i32, Status> {
+    if (1..=65535).contains(&port) {
+        Ok(port)
+    } else {
+        Err(Status::invalid_argument(format!(
+            "{field} must be in range 1-65535"
+        )))
+    }
+}
+
+fn parse_sg_target_kind(
+    kind: i32,
+) -> Result<controller_proto::SecurityGroupTargetKind, Status> {
+    let parsed = controller_proto::SecurityGroupTargetKind::try_from(kind)
+        .unwrap_or(controller_proto::SecurityGroupTargetKind::Unspecified);
+    match parsed {
+        controller_proto::SecurityGroupTargetKind::Vm
+        | controller_proto::SecurityGroupTargetKind::Network => Ok(parsed),
+        controller_proto::SecurityGroupTargetKind::Unspecified => Err(Status::invalid_argument(
+            "target_kind must be vm or network",
+        )),
+    }
+}
 
 #[derive(Clone, Default)]
 pub struct SubCaState {
@@ -256,13 +297,79 @@ impl ControllerService {
             }
         }
 
-        let nix_config = nixgen::generate_node_config(
+        let mut security_group_rules: HashMap<String, Vec<nixgen::SecurityGroupResolvedRule>> =
+            HashMap::new();
+        for net in &networks {
+            let mut effective_groups = self
+                .db
+                .list_security_groups_for_network(&net.name, &node.id)
+                .map_err(|e| Status::internal(format!("listing network security groups: {e}")))?;
+            for vm in vms.iter().filter(|v| v.network == net.name) {
+                let vm_groups = self
+                    .db
+                    .list_security_groups_for_vm(&vm.id)
+                    .map_err(|e| Status::internal(format!("listing vm security groups: {e}")))?;
+                effective_groups.extend(vm_groups);
+            }
+            effective_groups.sort();
+            effective_groups.dedup();
+            let mut rules_for_net = Vec::new();
+            for sg_name in effective_groups {
+                let sg_rules = self
+                    .db
+                    .list_security_group_rules(&sg_name)
+                    .map_err(|e| Status::internal(format!("listing security group rules: {e}")))?;
+                for rule in sg_rules {
+                    let target_ip = if !rule.target_vm.trim().is_empty() {
+                        if let Some(target_vm) = self
+                            .db
+                            .get_vm(rule.target_vm.trim())
+                            .map_err(|e| Status::internal(e.to_string()))?
+                            .or_else(|| {
+                                self.db
+                                    .list_vms_for_node(&node.id)
+                                    .ok()
+                                    .and_then(|vv| vv.into_iter().find(|v| v.name == rule.target_vm))
+                            })
+                        {
+                            target_vm.vm_ip
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    };
+                    rules_for_net.push(nixgen::SecurityGroupResolvedRule {
+                        protocol: rule.protocol,
+                        host_port: rule.host_port,
+                        target_port: if rule.target_port <= 0 {
+                            rule.host_port
+                        } else {
+                            rule.target_port
+                        },
+                        source_cidr: if rule.source_cidr.trim().is_empty() {
+                            "0.0.0.0/0".to_string()
+                        } else {
+                            rule.source_cidr
+                        },
+                        target_ip,
+                        enable_dnat: rule.enable_dnat,
+                    });
+                }
+            }
+            if !rules_for_net.is_empty() {
+                security_group_rules.insert(net.name.clone(), rules_for_net);
+            }
+        }
+
+        let nix_config = nixgen::generate_node_config_with_security_groups(
             &vms,
             iface,
             &self.default_network,
             &networks,
             &vm_ssh_keys,
             &vxlan_peers,
+            &security_group_rules,
         );
 
         let mut admin = self.ensure_admin_client_for_node(node).await?;
@@ -2190,6 +2297,366 @@ impl controller_proto::controller_server::Controller for ControllerService {
         }))
     }
 
+    async fn create_security_group(
+        &self,
+        request: Request<controller_proto::CreateSecurityGroupRequest>,
+    ) -> Result<Response<controller_proto::CreateSecurityGroupResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let sg = req
+            .security_group
+            .ok_or_else(|| Status::invalid_argument("security_group is required"))?;
+        let name = validate_network_name(&sg.name)?;
+        let row = SecurityGroupRow {
+            name: name.clone(),
+            description: sg.description.trim().to_string(),
+            created_at: String::new(),
+        };
+        self.db
+            .upsert_security_group(&row)
+            .map_err(|e| Status::internal(format!("upserting security group: {e}")))?;
+
+        let mut rules = Vec::new();
+        for r in sg.rules {
+            let id = if r.id.trim().is_empty() {
+                Uuid::new_v4().to_string()
+            } else {
+                r.id.trim().to_string()
+            };
+            let protocol = normalize_sg_protocol(&r.protocol)?;
+            let host_port = validate_port(r.host_port, "host_port")?;
+            let target_port = if r.target_port <= 0 {
+                host_port
+            } else {
+                validate_port(r.target_port, "target_port")?
+            };
+            rules.push(SecurityGroupRuleRow {
+                id,
+                security_group: name.clone(),
+                protocol,
+                host_port,
+                target_port,
+                source_cidr: r.source_cidr.trim().to_string(),
+                target_vm: r.target_vm.trim().to_string(),
+                enable_dnat: r.enable_dnat,
+            });
+        }
+        self.db
+            .replace_security_group_rules(&name, &rules)
+            .map_err(|e| Status::internal(format!("storing security group rules: {e}")))?;
+
+        self.log_replication_event(
+            EVT_SECURITY_GROUP_CREATE,
+            &format!("security-group/{name}"),
+            serde_json::json!({ "name": name }),
+        );
+
+        let created = self
+            .db
+            .get_security_group(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::internal("security group disappeared after create"))?;
+        let stored_rules = self
+            .db
+            .list_security_group_rules(&name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        Ok(Response::new(controller_proto::CreateSecurityGroupResponse {
+            success: true,
+            security_group: Some(controller_proto::SecurityGroup {
+                name: created.name,
+                description: created.description,
+                rules: stored_rules
+                    .into_iter()
+                    .map(|r| controller_proto::SecurityGroupRule {
+                        id: r.id,
+                        protocol: r.protocol,
+                        host_port: r.host_port,
+                        target_port: r.target_port,
+                        source_cidr: r.source_cidr,
+                        target_vm: r.target_vm,
+                        enable_dnat: r.enable_dnat,
+                    })
+                    .collect(),
+                created_at: parse_datetime_to_timestamp(&created.created_at),
+            }),
+        }))
+    }
+
+    async fn get_security_group(
+        &self,
+        request: Request<controller_proto::GetSecurityGroupRequest>,
+    ) -> Result<Response<controller_proto::GetSecurityGroupResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let sg = self
+            .db
+            .get_security_group(name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("security group '{name}' not found")))?;
+        let rules = self
+            .db
+            .list_security_group_rules(name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let vm_atts = self
+            .db
+            .list_security_group_vm_attachments(name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let net_atts = self
+            .db
+            .list_security_group_network_attachments(name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let mut attachments = Vec::new();
+        attachments.extend(vm_atts.into_iter().map(|a| controller_proto::SecurityGroupAttachment {
+            security_group: a.security_group,
+            target_kind: controller_proto::SecurityGroupTargetKind::Vm as i32,
+            target_id: a.vm_id,
+            target_node: String::new(),
+        }));
+        attachments.extend(net_atts.into_iter().map(|a| controller_proto::SecurityGroupAttachment {
+            security_group: a.security_group,
+            target_kind: controller_proto::SecurityGroupTargetKind::Network as i32,
+            target_id: a.network_name,
+            target_node: a.node_id,
+        }));
+
+        Ok(Response::new(controller_proto::GetSecurityGroupResponse {
+            security_group: Some(controller_proto::SecurityGroup {
+                name: sg.name,
+                description: sg.description,
+                rules: rules
+                    .into_iter()
+                    .map(|r| controller_proto::SecurityGroupRule {
+                        id: r.id,
+                        protocol: r.protocol,
+                        host_port: r.host_port,
+                        target_port: r.target_port,
+                        source_cidr: r.source_cidr,
+                        target_vm: r.target_vm,
+                        enable_dnat: r.enable_dnat,
+                    })
+                    .collect(),
+                created_at: parse_datetime_to_timestamp(&sg.created_at),
+            }),
+            attachments,
+        }))
+    }
+
+    async fn list_security_groups(
+        &self,
+        request: Request<controller_proto::ListSecurityGroupsRequest>,
+    ) -> Result<Response<controller_proto::ListSecurityGroupsResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let groups = self
+            .db
+            .list_security_groups()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let mut out = Vec::new();
+        for sg in groups {
+            let rules = self
+                .db
+                .list_security_group_rules(&sg.name)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            out.push(controller_proto::SecurityGroup {
+                name: sg.name,
+                description: sg.description,
+                rules: rules
+                    .into_iter()
+                    .map(|r| controller_proto::SecurityGroupRule {
+                        id: r.id,
+                        protocol: r.protocol,
+                        host_port: r.host_port,
+                        target_port: r.target_port,
+                        source_cidr: r.source_cidr,
+                        target_vm: r.target_vm,
+                        enable_dnat: r.enable_dnat,
+                    })
+                    .collect(),
+                created_at: parse_datetime_to_timestamp(&sg.created_at),
+            });
+        }
+        Ok(Response::new(controller_proto::ListSecurityGroupsResponse {
+            security_groups: out,
+        }))
+    }
+
+    async fn delete_security_group(
+        &self,
+        request: Request<controller_proto::DeleteSecurityGroupRequest>,
+    ) -> Result<Response<controller_proto::DeleteSecurityGroupResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let deleted = self
+            .db
+            .delete_security_group(name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        if !deleted {
+            return Err(Status::not_found(format!("security group '{name}' not found")));
+        }
+        self.log_replication_event(
+            EVT_SECURITY_GROUP_DELETE,
+            &format!("security-group/{name}"),
+            serde_json::json!({ "name": name }),
+        );
+        Ok(Response::new(controller_proto::DeleteSecurityGroupResponse {
+            success: true,
+        }))
+    }
+
+    async fn attach_security_group(
+        &self,
+        request: Request<controller_proto::AttachSecurityGroupRequest>,
+    ) -> Result<Response<controller_proto::AttachSecurityGroupResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let sg = req.security_group.trim();
+        if sg.is_empty() {
+            return Err(Status::invalid_argument("security_group is required"));
+        }
+        if self
+            .db
+            .get_security_group(sg)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(Status::not_found(format!("security group '{sg}' not found")));
+        }
+        let kind = parse_sg_target_kind(req.target_kind)?;
+        match kind {
+            controller_proto::SecurityGroupTargetKind::Vm => {
+                let vm = self
+                    .db
+                    .get_vm(&req.target_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .or_else(|| {
+                        self.db
+                            .list_vms()
+                            .ok()
+                            .and_then(|vms| vms.into_iter().find(|v| v.name == req.target_id))
+                    })
+                    .ok_or_else(|| Status::not_found(format!("vm '{}' not found", req.target_id)))?;
+                self.db
+                    .attach_security_group_to_vm(sg, &vm.id)
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                if let Some(node) = self.db.get_node(&vm.node_id).map_err(|e| Status::internal(e.to_string()))? {
+                    self.push_config_to_node(&node).await?;
+                }
+            }
+            controller_proto::SecurityGroupTargetKind::Network => {
+                let node = if !req.target_node.trim().is_empty() {
+                    self.db
+                        .get_node_by_address(req.target_node.trim())
+                        .map_err(|e| Status::internal(e.to_string()))?
+                        .or_else(|| self.db.get_node(req.target_node.trim()).ok().flatten())
+                        .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.target_node)))?
+                } else {
+                    return Err(Status::invalid_argument(
+                        "target_node is required for network attachments",
+                    ));
+                };
+                if self
+                    .db
+                    .get_network_for_node(&node.id, req.target_id.trim())
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .is_none()
+                {
+                    return Err(Status::not_found(format!(
+                        "network '{}' not found on node '{}'",
+                        req.target_id.trim(),
+                        node.id
+                    )));
+                }
+                self.db
+                    .attach_security_group_to_network(sg, req.target_id.trim(), &node.id)
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                self.push_config_to_node(&node).await?;
+            }
+            controller_proto::SecurityGroupTargetKind::Unspecified => unreachable!(),
+        }
+        self.log_replication_event(
+            EVT_SECURITY_GROUP_ATTACH,
+            &format!("security-group/{sg}"),
+            serde_json::json!({
+                "securityGroup": sg,
+                "targetKind": req.target_kind,
+                "targetId": req.target_id,
+                "targetNode": req.target_node
+            }),
+        );
+        Ok(Response::new(controller_proto::AttachSecurityGroupResponse { success: true }))
+    }
+
+    async fn detach_security_group(
+        &self,
+        request: Request<controller_proto::DetachSecurityGroupRequest>,
+    ) -> Result<Response<controller_proto::DetachSecurityGroupResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let sg = req.security_group.trim();
+        if sg.is_empty() {
+            return Err(Status::invalid_argument("security_group is required"));
+        }
+        let kind = parse_sg_target_kind(req.target_kind)?;
+        match kind {
+            controller_proto::SecurityGroupTargetKind::Vm => {
+                let vm = self
+                    .db
+                    .get_vm(&req.target_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .or_else(|| {
+                        self.db
+                            .list_vms()
+                            .ok()
+                            .and_then(|vms| vms.into_iter().find(|v| v.name == req.target_id))
+                    })
+                    .ok_or_else(|| Status::not_found(format!("vm '{}' not found", req.target_id)))?;
+                self.db
+                    .detach_security_group_from_vm(sg, &vm.id)
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                if let Some(node) = self.db.get_node(&vm.node_id).map_err(|e| Status::internal(e.to_string()))? {
+                    self.push_config_to_node(&node).await?;
+                }
+            }
+            controller_proto::SecurityGroupTargetKind::Network => {
+                let node = if !req.target_node.trim().is_empty() {
+                    self.db
+                        .get_node_by_address(req.target_node.trim())
+                        .map_err(|e| Status::internal(e.to_string()))?
+                        .or_else(|| self.db.get_node(req.target_node.trim()).ok().flatten())
+                        .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.target_node)))?
+                } else {
+                    return Err(Status::invalid_argument(
+                        "target_node is required for network attachments",
+                    ));
+                };
+                self.db
+                    .detach_security_group_from_network(sg, req.target_id.trim(), &node.id)
+                    .map_err(|e| Status::internal(e.to_string()))?;
+                self.push_config_to_node(&node).await?;
+            }
+            controller_proto::SecurityGroupTargetKind::Unspecified => unreachable!(),
+        }
+        self.log_replication_event(
+            EVT_SECURITY_GROUP_DETACH,
+            &format!("security-group/{sg}"),
+            serde_json::json!({
+                "securityGroup": sg,
+                "targetKind": req.target_kind,
+                "targetId": req.target_id,
+                "targetNode": req.target_node
+            }),
+        );
+        Ok(Response::new(controller_proto::DetachSecurityGroupResponse { success: true }))
+    }
+
     async fn list_nodes(
         &self,
         request: Request<controller_proto::ListNodesRequest>,
@@ -3133,6 +3600,12 @@ impl controller_proto::controller_server::Controller for ControllerService {
             acl("CreateNetwork", CN_KCTL),
             acl("DeleteNetwork", CN_KCTL),
             acl("ListNetworks", CN_KCTL),
+            acl("CreateSecurityGroup", CN_KCTL),
+            acl("GetSecurityGroup", CN_KCTL),
+            acl("ListSecurityGroups", CN_KCTL),
+            acl("DeleteSecurityGroup", CN_KCTL),
+            acl("AttachSecurityGroup", CN_KCTL),
+            acl("DetachSecurityGroup", CN_KCTL),
             acl("ListNodes", CN_KCTL),
             acl("GetNode", CN_KCTL),
             acl("CreateSshKey", CN_KCTL),

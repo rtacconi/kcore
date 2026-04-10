@@ -195,6 +195,8 @@
                 let
                   nodeAgent = inputs.self.packages.x86_64-linux.kcore-node-agent;
                   controller = inputs.self.packages.x86_64-linux.kcore-controller;
+                  kctl = inputs.self.packages.x86_64-linux.kcore-kctl;
+                  dashboard = inputs.self.packages.x86_64-linux.kcore-dashboard;
                   diskoPackage = inputs.disko.packages.x86_64-linux.default;
                   kcoreDiskoModule = ./modules/kcore-disko.nix;
                 in
@@ -225,6 +227,7 @@
                     22
                     9090
                     9091
+                    8080
                   ];
 
                   users.users.root.initialPassword = "kcore";
@@ -287,6 +290,8 @@
                     pkgs.openssl
                     nodeAgent
                     controller
+                    kctl
+                    dashboard
                     diskoPackage
                     (pkgs.writeShellScriptBin "install-to-disk" ''
                                           set -euo pipefail
@@ -644,8 +649,12 @@ DISKOEOF
                                           mkdir -p /mnt/opt/kcore/bin
                                           cp "${nodeAgent}/bin/kcore-node-agent" /mnt/opt/kcore/bin/kcore-node-agent
                                           cp "${controller}/bin/kcore-controller" /mnt/opt/kcore/bin/kcore-controller
+                                          cp "${kctl}/bin/kcore-kctl" /mnt/opt/kcore/bin/kcore-kctl
+                                          cp "${dashboard}/bin/kcore-dashboard" /mnt/opt/kcore/bin/kcore-dashboard
                                           chmod +x /mnt/opt/kcore/bin/kcore-node-agent
                                           chmod +x /mnt/opt/kcore/bin/kcore-controller
+                                          chmod +x /mnt/opt/kcore/bin/kcore-kctl
+                                          chmod +x /mnt/opt/kcore/bin/kcore-dashboard
 
                                           echo "Copying ch-vm module..."
                                           mkdir -p /mnt/etc/nixos/modules/ch-vm
@@ -784,6 +793,19 @@ tls:
 CTRLEOF
                                           fi
 
+                                          if [ "$RUN_CONTROLLER" = "true" ]; then
+                                            cat > /mnt/etc/kcore/dashboard.env <<DASHENV
+KCORE_CONTROLLER=127.0.0.1:9090
+KCORE_TLS_DOMAIN=$INSTALL_HOSTNAME
+KCORE_CA_FILE=/etc/kcore/certs/ca.crt
+KCORE_CERT_FILE=/etc/kcore/certs/kctl.crt
+KCORE_KEY_FILE=/etc/kcore/certs/kctl.key
+LEPTOS_SITE_ADDR=0.0.0.0:8080
+LEPTOS_ENV=PROD
+DASHENV
+                                            chmod 0644 /mnt/etc/kcore/dashboard.env
+                                          fi
+
                                           cat > /mnt/etc/nixos/kcore-vms.nix <<'VMSEOF'
 { ... }:
 {
@@ -809,6 +831,28 @@ VMSEOF
                           };
                         };
 CTRLSVC
+                                            )
+                                          fi
+
+                                          DASHBOARD_SERVICE=""
+                                          if [ "$RUN_CONTROLLER" = "true" ]; then
+                                            DASHBOARD_SERVICE=$(cat <<'DASHSVC'
+                        systemd.services.kcore-dashboard = {
+                          description = "kcore Dashboard";
+                          wantedBy = [ "multi-user.target" ];
+                          after = [ "network-online.target" "kcore-controller.service" ];
+                          wants = [ "network-online.target" ];
+                          serviceConfig = {
+                            Type = "simple";
+                            EnvironmentFile = "/etc/kcore/dashboard.env";
+                            ExecStart = "/opt/kcore/bin/kcore-dashboard";
+                            Restart = "always";
+                            RestartSec = "10s";
+                            User = "root";
+                            LimitNOFILE = 65536;
+                          };
+                        };
+DASHSVC
                                             )
                                           fi
 
@@ -864,7 +908,7 @@ $LUKS_BOOT_CONFIG
   networking.hostName = "$INSTALL_HOSTNAME";
   networking.useDHCP = true;
   networking.firewall.enable = true;
-  networking.firewall.allowedTCPPorts = [ 22 9091 $( [ "$RUN_CONTROLLER" = "true" ] && echo "9090" ) ];
+  networking.firewall.allowedTCPPorts = [ 22 9091 $( [ "$RUN_CONTROLLER" = "true" ] && echo "9090 8080" ) ];
 
   users.users.root = {
     initialPassword = "kcore";
@@ -901,6 +945,8 @@ $SSH_KEYS
 
 $CONTROLLER_SERVICE
 
+$DASHBOARD_SERVICE
+
   systemd.tmpfiles.rules = [
     "d /var/lib/kcore 0755 root root -"
     "d /var/lib/kcore/images 0755 root root -"
@@ -927,6 +973,8 @@ $CONTROLLER_SERVICE
     tpm2-tools
     disko
   ];
+
+  system.activationScripts.kcore-kctl-path.text = "mkdir -p /usr/local/bin\nln -sfn /opt/kcore/bin/kcore-kctl /usr/local/bin/kctl\nln -sfn /opt/kcore/bin/kcore-kctl /usr/local/bin/kcore-kctl\n";
 
   system.stateVersion = "25.05";
 }

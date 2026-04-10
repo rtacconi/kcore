@@ -373,6 +373,14 @@ configured on the node.
 
 ## kctl commands
 
+### Security groups (v1)
+
+Security groups can define ingress rules and optional DNAT mappings for NAT
+networks. They are managed via YAML manifests and attached to VMs and/or
+networks.
+
+See: [security-groups.md](security-groups.md)
+
 ### Create a network
 
 ```bash

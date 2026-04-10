@@ -8,6 +8,16 @@ pub struct VxlanMeta {
     pub local_ip: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct SecurityGroupResolvedRule {
+    pub protocol: String,
+    pub host_port: i32,
+    pub target_port: i32,
+    pub source_cidr: String,
+    pub target_ip: String,
+    pub enable_dnat: bool,
+}
+
 fn netmask_to_cidr(mask: &str) -> u8 {
     mask.split('.')
         .filter_map(|o| o.parse::<u8>().ok())
@@ -56,6 +66,26 @@ pub fn generate_node_config(
     networks: &[NetworkRow],
     vm_ssh_keys: &std::collections::HashMap<String, Vec<String>>,
     vxlan_peers: &std::collections::HashMap<String, VxlanMeta>,
+) -> String {
+    generate_node_config_with_security_groups(
+        vms,
+        gateway_interface,
+        network,
+        networks,
+        vm_ssh_keys,
+        vxlan_peers,
+        &std::collections::HashMap::new(),
+    )
+}
+
+pub fn generate_node_config_with_security_groups(
+    vms: &[VmRow],
+    gateway_interface: &str,
+    network: &NetworkConfig,
+    networks: &[NetworkRow],
+    vm_ssh_keys: &std::collections::HashMap<String, Vec<String>>,
+    vxlan_peers: &std::collections::HashMap<String, VxlanMeta>,
+    security_group_rules: &std::collections::HashMap<String, Vec<SecurityGroupResolvedRule>>,
 ) -> String {
     let mut out = String::from("{ pkgs, ... }: {\n");
     out.push_str("  ch-vm.vms = {\n");
@@ -160,6 +190,34 @@ pub fn generate_node_config(
                 "      vxlanLocalIp = \"{}\";\n",
                 nix_escape(&vxlan.local_ip)
             ));
+        }
+        if let Some(rules) = security_group_rules.get(&net.name) {
+            if !rules.is_empty() {
+                out.push_str("      securityGroupRules = [\n");
+                for rule in rules {
+                    out.push_str("        {\n");
+                    out.push_str(&format!(
+                        "          protocol = \"{}\";\n",
+                        nix_escape(&rule.protocol)
+                    ));
+                    out.push_str(&format!("          hostPort = {};\n", rule.host_port));
+                    out.push_str(&format!("          targetPort = {};\n", rule.target_port));
+                    out.push_str(&format!(
+                        "          sourceCidr = \"{}\";\n",
+                        nix_escape(&rule.source_cidr)
+                    ));
+                    out.push_str(&format!(
+                        "          targetIp = \"{}\";\n",
+                        nix_escape(&rule.target_ip)
+                    ));
+                    out.push_str(&format!(
+                        "          enableDnat = {};\n",
+                        if rule.enable_dnat { "true" } else { "false" }
+                    ));
+                    out.push_str("        }\n");
+                }
+                out.push_str("      ];\n");
+            }
         }
         out.push_str("    };\n");
     }
@@ -655,5 +713,48 @@ mod tests {
         assert_eq!(netmask_to_cidr("255.255.255.0"), 24);
         assert_eq!(netmask_to_cidr("255.255.0.0"), 16);
         assert_eq!(netmask_to_cidr("255.255.255.128"), 25);
+    }
+
+    #[test]
+    fn renders_security_group_rules_for_network() {
+        let networks = vec![NetworkRow {
+            name: "private".into(),
+            external_ip: "198.51.100.5".into(),
+            gateway_ip: "10.240.10.1".into(),
+            internal_netmask: "255.255.255.0".into(),
+            node_id: "node-1".into(),
+            allowed_tcp_ports: String::new(),
+            allowed_udp_ports: String::new(),
+            vlan_id: 0,
+            network_type: "nat".into(),
+            enable_outbound_nat: true,
+            vni: 0,
+            next_ip: 2,
+        }];
+        let mut sg_rules = std::collections::HashMap::new();
+        sg_rules.insert(
+            "private".to_string(),
+            vec![SecurityGroupResolvedRule {
+                protocol: "tcp".to_string(),
+                host_port: 8443,
+                target_port: 443,
+                source_cidr: "0.0.0.0/0".to_string(),
+                target_ip: "10.240.10.22".to_string(),
+                enable_dnat: true,
+            }],
+        );
+        let config = generate_node_config_with_security_groups(
+            &[],
+            "eno1",
+            &default_net(),
+            &networks,
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+            &sg_rules,
+        );
+        assert!(config.contains("securityGroupRules = ["));
+        assert!(config.contains("hostPort = 8443;"));
+        assert!(config.contains("targetIp = \"10.240.10.22\";"));
+        assert!(config.contains("enableDnat = true;"));
     }
 }

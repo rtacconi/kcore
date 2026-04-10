@@ -44,6 +44,12 @@ impl Controller for ManyVmsController {
     ) -> Result<Response<SyncVmStateResponse>, Status> {
         Err(Status::unimplemented(""))
     }
+    async fn sync_workload_state(
+        &self,
+        _: TRequest<SyncWorkloadStateRequest>,
+    ) -> Result<Response<SyncWorkloadStateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
     async fn create_vm(
         &self,
         _: TRequest<CreateVmRequest>,
@@ -94,6 +100,37 @@ impl Controller for ManyVmsController {
         Ok(Response::new(ListVmsResponse { vms }))
     }
 
+    async fn create_workload(
+        &self,
+        _: TRequest<CreateWorkloadRequest>,
+    ) -> Result<Response<CreateWorkloadResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn delete_workload(
+        &self,
+        _: TRequest<DeleteWorkloadRequest>,
+    ) -> Result<Response<DeleteWorkloadResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn set_workload_desired_state(
+        &self,
+        _: TRequest<SetWorkloadDesiredStateRequest>,
+    ) -> Result<Response<SetWorkloadDesiredStateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn get_workload(
+        &self,
+        _: TRequest<GetWorkloadRequest>,
+    ) -> Result<Response<GetWorkloadResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn list_workloads(
+        &self,
+        _: TRequest<ListWorkloadsRequest>,
+    ) -> Result<Response<ListWorkloadsResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+
     async fn create_network(
         &self,
         _: TRequest<CreateNetworkRequest>,
@@ -137,6 +174,43 @@ impl Controller for ManyVmsController {
                 },
             ],
         }))
+    }
+
+    async fn create_security_group(
+        &self,
+        _: TRequest<CreateSecurityGroupRequest>,
+    ) -> Result<Response<CreateSecurityGroupResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn get_security_group(
+        &self,
+        _: TRequest<GetSecurityGroupRequest>,
+    ) -> Result<Response<GetSecurityGroupResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn list_security_groups(
+        &self,
+        _: TRequest<ListSecurityGroupsRequest>,
+    ) -> Result<Response<ListSecurityGroupsResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn delete_security_group(
+        &self,
+        _: TRequest<DeleteSecurityGroupRequest>,
+    ) -> Result<Response<DeleteSecurityGroupResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn attach_security_group(
+        &self,
+        _: TRequest<AttachSecurityGroupRequest>,
+    ) -> Result<Response<AttachSecurityGroupResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn detach_security_group(
+        &self,
+        _: TRequest<DetachSecurityGroupRequest>,
+    ) -> Result<Response<DetachSecurityGroupResponse>, Status> {
+        Err(Status::unimplemented(""))
     }
 
     async fn get_network_overview(
