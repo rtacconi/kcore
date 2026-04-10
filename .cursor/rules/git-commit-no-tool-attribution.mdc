@@ -1,0 +1,9 @@
+---
+description: Keep git commits free of editor/AI tool branding footers
+alwaysApply: true
+---
+
+# Git commits — no tool attribution
+
+- Do **not** append lines such as `Made-with: Cursor`, `Co-authored-by: Cursor`, or similar tool branding to commit messages.
+- Use a factual subject line and body only; attribution belongs in PR description or release notes if needed.
