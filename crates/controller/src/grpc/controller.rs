@@ -8,7 +8,7 @@ use uuid::Uuid;
 use crate::auth::{self, CN_KCTL, CN_NODE_PREFIX};
 use crate::config::{NetworkConfig, ReplicationConfig};
 use crate::controller_proto;
-use crate::db::{Database, NetworkRow, NodeRow, VmRow};
+use crate::db::{Database, NetworkRow, NodeRow, VmRow, WorkloadRow};
 use crate::node_proto;
 use crate::{nixgen, node_client::NodeClients, scheduler};
 
@@ -454,19 +454,32 @@ impl ControllerService {
         } else {
             node_proto::VmDesiredState::Stopped as i32
         };
-        let mut compute = self.ensure_compute_client_for_address(&node.address).await?;
-        compute
-            .set_vm_desired_state(node_proto::SetVmDesiredStateRequest {
-                vm_id: vm_name,
-                desired_state,
-            })
-            .await
-            .map_err(|e| {
-                Status::internal(format!(
-                    "applying desired runtime state on node {} for VM {}: {e}",
-                    node.id, vm_id
-                ))
-            })?;
+        match self.ensure_compute_client_for_address(&node.address).await {
+            Ok(mut compute) => {
+                if let Err(e) = compute
+                    .set_vm_desired_state(node_proto::SetVmDesiredStateRequest {
+                        vm_id: vm_name,
+                        desired_state,
+                    })
+                    .await
+                {
+                    warn!(
+                        node_id = %node.id,
+                        vm_id = %vm_id,
+                        error = %e,
+                        "failed to apply runtime desired state; declarative config already updated"
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(
+                    node_id = %node.id,
+                    vm_id = %vm_id,
+                    error = %e,
+                    "missing compute client for runtime desired state apply; declarative config already updated"
+                );
+            }
+        }
         Ok(if auto_start {
             controller_proto::VmState::Running as i32
         } else {
@@ -504,6 +517,23 @@ impl ControllerService {
             .map_err(|e| Status::unavailable(format!("no connection to node {address}: {e}")))?;
         self.clients
             .get_compute(address)
+            .ok_or_else(|| Status::unavailable(format!("no connection to node {address}")))
+    }
+
+    async fn ensure_container_client_for_address(
+        &self,
+        address: &str,
+    ) -> Result<node_proto::node_container_client::NodeContainerClient<tonic::transport::Channel>, Status>
+    {
+        if let Some(client) = self.clients.get_container(address) {
+            return Ok(client);
+        }
+        self.clients
+            .connect(address)
+            .await
+            .map_err(|e| Status::unavailable(format!("no connection to node {address}: {e}")))?;
+        self.clients
+            .get_container(address)
             .ok_or_else(|| Status::unavailable(format!("no connection to node {address}")))
     }
 
@@ -720,6 +750,47 @@ impl controller_proto::controller_server::Controller for ControllerService {
         }
 
         Ok(Response::new(controller_proto::SyncVmStateResponse {
+            success: true,
+        }))
+    }
+
+    async fn sync_workload_state(
+        &self,
+        request: Request<controller_proto::SyncWorkloadStateRequest>,
+    ) -> Result<Response<controller_proto::SyncWorkloadStateResponse>, Status> {
+        auth::require_peer(&request, &[CN_NODE_PREFIX])?;
+        let req = request.into_inner();
+        for workload in &req.workloads {
+            let state = match controller_proto::WorkloadKind::try_from(workload.kind)
+                .unwrap_or(controller_proto::WorkloadKind::Unspecified)
+            {
+                controller_proto::WorkloadKind::Vm => {
+                    match controller_proto::VmState::try_from(workload.vm_state)
+                        .unwrap_or(controller_proto::VmState::Unknown)
+                    {
+                        controller_proto::VmState::Running => "running",
+                        controller_proto::VmState::Stopped => "stopped",
+                        controller_proto::VmState::Paused => "paused",
+                        controller_proto::VmState::Error => "error",
+                        controller_proto::VmState::Unknown => "unknown",
+                    }
+                }
+                controller_proto::WorkloadKind::Container => {
+                    match controller_proto::ContainerState::try_from(workload.container_state)
+                        .unwrap_or(controller_proto::ContainerState::Unknown)
+                    {
+                        controller_proto::ContainerState::Created => "created",
+                        controller_proto::ContainerState::Running => "running",
+                        controller_proto::ContainerState::Stopped => "stopped",
+                        controller_proto::ContainerState::Error => "error",
+                        controller_proto::ContainerState::Unknown => "unknown",
+                    }
+                }
+                controller_proto::WorkloadKind::Unspecified => "unknown",
+            };
+            let _ = self.db.update_workload_runtime_state(&workload.id, state);
+        }
+        Ok(Response::new(controller_proto::SyncWorkloadStateResponse {
             success: true,
         }))
     }
@@ -1409,6 +1480,476 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         Ok(Response::new(controller_proto::ListVmsResponse {
             vms: infos,
+        }))
+    }
+
+    async fn create_workload(
+        &self,
+        request: Request<controller_proto::CreateWorkloadRequest>,
+    ) -> Result<Response<controller_proto::CreateWorkloadResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let kind = controller_proto::WorkloadKind::try_from(req.kind)
+            .unwrap_or(controller_proto::WorkloadKind::Unspecified);
+        match kind {
+            controller_proto::WorkloadKind::Vm => {
+                let vm_spec = req
+                    .vm_spec
+                    .ok_or_else(|| Status::invalid_argument("vm_spec is required for VM workload"))?;
+                let vm_resp = self
+                    .create_vm(Request::new(controller_proto::CreateVmRequest {
+                        target_node: req.target_node.clone(),
+                        spec: Some(vm_spec),
+                        image_url: req.image_url.clone(),
+                        image_sha256: req.image_sha256.clone(),
+                        cloud_init_user_data: req.cloud_init_user_data.clone(),
+                        image_path: req.image_path.clone(),
+                        image_format: req.image_format.clone(),
+                        ssh_key_names: req.ssh_key_names.clone(),
+                        storage_backend: req.storage_backend,
+                        storage_size_bytes: req.storage_size_bytes,
+                    }))
+                    .await?
+                    .into_inner();
+
+                if let Some(vm_row) = self.db.get_vm(&vm_resp.vm_id).map_err(|e| {
+                    Status::internal(format!("fetching vm after create workload: {e}"))
+                })? {
+                    let _ = self.db.upsert_workload(&WorkloadRow {
+                        id: vm_row.id.clone(),
+                        name: vm_row.name.clone(),
+                        kind: "vm".to_string(),
+                        node_id: vm_row.node_id.clone(),
+                        runtime_state: vm_row.runtime_state.clone(),
+                        desired_state: if vm_row.auto_start {
+                            "running".to_string()
+                        } else {
+                            "stopped".to_string()
+                        },
+                        vm_id: vm_row.id.clone(),
+                        container_image: String::new(),
+                        network: vm_row.network.clone(),
+                        storage_backend: vm_row.storage_backend.clone(),
+                        storage_size_bytes: vm_row.storage_size_bytes,
+                        created_at: String::new(),
+                    });
+                }
+
+                Ok(Response::new(controller_proto::CreateWorkloadResponse {
+                    kind: controller_proto::WorkloadKind::Vm as i32,
+                    workload_id: vm_resp.vm_id,
+                    node_id: vm_resp.node_id,
+                    vm_state: vm_resp.state,
+                    container_state: controller_proto::ContainerState::Unknown as i32,
+                }))
+            }
+            controller_proto::WorkloadKind::Container => {
+                let spec = req.container_spec.ok_or_else(|| {
+                    Status::invalid_argument("container_spec is required for container workload")
+                })?;
+                if spec.name.trim().is_empty() || spec.image.trim().is_empty() {
+                    return Err(Status::invalid_argument(
+                        "container_spec.name and container_spec.image are required",
+                    ));
+                }
+                let node = if !req.target_node.is_empty() {
+                    self.db
+                        .get_node_by_address(&req.target_node)
+                        .map_err(|e| Status::internal(e.to_string()))?
+                        .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
+                        .ok_or_else(|| {
+                            Status::not_found(format!("node {} not found", req.target_node))
+                        })?
+                } else {
+                    let nodes = self
+                        .db
+                        .list_nodes()
+                        .map_err(|e| Status::internal(e.to_string()))?;
+                    scheduler::select_node(&nodes)
+                        .cloned()
+                        .ok_or_else(|| Status::unavailable("no ready nodes"))?
+                };
+
+                let mut container = self
+                    .ensure_container_client_for_address(&node.address)
+                    .await?;
+                let created = container
+                    .create_container(node_proto::CreateContainerRequest {
+                        spec: Some(node_proto::ContainerSpec {
+                            name: spec.name.clone(),
+                            image: spec.image.clone(),
+                            network: spec.network.clone(),
+                            command: spec.command.clone(),
+                            env: spec.env.clone(),
+                            ports: spec.ports.clone(),
+                            storage_backend: spec.storage_backend.clone(),
+                            storage_size_bytes: spec.storage_size_bytes,
+                            mount_target: spec.mount_target.clone(),
+                        }),
+                    })
+                    .await
+                    .map_err(|e| Status::internal(format!("creating container on node: {e}")))?
+                    .into_inner()
+                    .container
+                    .ok_or_else(|| Status::internal("missing container response from node"))?;
+
+                let workload_id = if created.id.is_empty() {
+                    format!("ctr-{}", Uuid::new_v4())
+                } else {
+                    created.id.clone()
+                };
+                self.db
+                    .upsert_workload(&WorkloadRow {
+                        id: workload_id.clone(),
+                        name: created.name.clone(),
+                        kind: "container".to_string(),
+                        node_id: node.id.clone(),
+                        runtime_state: "running".to_string(),
+                        desired_state: "running".to_string(),
+                        vm_id: String::new(),
+                        container_image: created.image.clone(),
+                        network: spec.network.clone(),
+                        storage_backend: normalize_storage_backend(req.storage_backend, false)?,
+                        storage_size_bytes: req.storage_size_bytes.max(0),
+                        created_at: String::new(),
+                    })
+                    .map_err(|e| Status::internal(format!("storing workload row: {e}")))?;
+
+                Ok(Response::new(controller_proto::CreateWorkloadResponse {
+                    kind: controller_proto::WorkloadKind::Container as i32,
+                    workload_id,
+                    node_id: node.id,
+                    vm_state: controller_proto::VmState::Unknown as i32,
+                    container_state: created.state,
+                }))
+            }
+            controller_proto::WorkloadKind::Unspecified => {
+                Err(Status::invalid_argument("kind is required"))
+            }
+        }
+    }
+
+    async fn delete_workload(
+        &self,
+        request: Request<controller_proto::DeleteWorkloadRequest>,
+    ) -> Result<Response<controller_proto::DeleteWorkloadResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let kind = controller_proto::WorkloadKind::try_from(req.kind)
+            .unwrap_or(controller_proto::WorkloadKind::Unspecified);
+        match kind {
+            controller_proto::WorkloadKind::Vm => {
+                let _ = self
+                    .delete_vm(Request::new(controller_proto::DeleteVmRequest {
+                        vm_id: req.workload_id.clone(),
+                        target_node: req.target_node.clone(),
+                    }))
+                    .await?;
+                let _ = self.db.delete_workload_by_id_or_name(&req.workload_id);
+                Ok(Response::new(controller_proto::DeleteWorkloadResponse {
+                    success: true,
+                }))
+            }
+            controller_proto::WorkloadKind::Container => {
+                let wl = self
+                    .db
+                    .get_workload(&req.workload_id)
+                    .map_err(|e| Status::internal(format!("fetching workload: {e}")))?;
+                let node = if let Some(wl) = &wl {
+                    self.db
+                        .get_node(&wl.node_id)
+                        .map_err(|e| Status::internal(e.to_string()))?
+                        .ok_or_else(|| Status::not_found(format!("node {} not found", wl.node_id)))?
+                } else if !req.target_node.is_empty() {
+                    self.db
+                        .get_node_by_address(&req.target_node)
+                        .map_err(|e| Status::internal(e.to_string()))?
+                        .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
+                        .ok_or_else(|| {
+                            Status::not_found(format!("node {} not found", req.target_node))
+                        })?
+                } else {
+                    return Err(Status::not_found(format!(
+                        "workload {} not found",
+                        req.workload_id
+                    )));
+                };
+                let name = wl
+                    .as_ref()
+                    .map(|w| w.name.clone())
+                    .unwrap_or_else(|| req.workload_id.clone());
+                let mut container = self
+                    .ensure_container_client_for_address(&node.address)
+                    .await?;
+                let _ = container
+                    .delete_container(node_proto::DeleteContainerRequest {
+                        name,
+                        force: true,
+                    })
+                    .await
+                    .map_err(|e| Status::internal(format!("deleting container on node: {e}")))?;
+                let _ = self.db.delete_workload_by_id_or_name(&req.workload_id);
+                Ok(Response::new(controller_proto::DeleteWorkloadResponse {
+                    success: true,
+                }))
+            }
+            controller_proto::WorkloadKind::Unspecified => {
+                Err(Status::invalid_argument("kind is required"))
+            }
+        }
+    }
+
+    async fn set_workload_desired_state(
+        &self,
+        request: Request<controller_proto::SetWorkloadDesiredStateRequest>,
+    ) -> Result<Response<controller_proto::SetWorkloadDesiredStateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let desired = controller_proto::WorkloadDesiredState::try_from(req.desired_state)
+            .unwrap_or(controller_proto::WorkloadDesiredState::Unspecified);
+        let kind = controller_proto::WorkloadKind::try_from(req.kind)
+            .unwrap_or(controller_proto::WorkloadKind::Unspecified);
+        match kind {
+            controller_proto::WorkloadKind::Vm => {
+                let vm_desired = match desired {
+                    controller_proto::WorkloadDesiredState::Running => {
+                        controller_proto::VmDesiredState::Running as i32
+                    }
+                    controller_proto::WorkloadDesiredState::Stopped => {
+                        controller_proto::VmDesiredState::Stopped as i32
+                    }
+                    controller_proto::WorkloadDesiredState::Unspecified => {
+                        return Err(Status::invalid_argument("desired_state is required"));
+                    }
+                };
+                let resp = self
+                    .set_vm_desired_state(Request::new(controller_proto::SetVmDesiredStateRequest {
+                        vm_id: req.workload_id.clone(),
+                        desired_state: vm_desired,
+                        target_node: req.target_node.clone(),
+                    }))
+                    .await?
+                    .into_inner();
+                let _ = self.db.update_workload_desired_state(
+                    &req.workload_id,
+                    if desired == controller_proto::WorkloadDesiredState::Running {
+                        "running"
+                    } else {
+                        "stopped"
+                    },
+                );
+                Ok(Response::new(controller_proto::SetWorkloadDesiredStateResponse {
+                    kind: controller_proto::WorkloadKind::Vm as i32,
+                    vm_state: resp.state,
+                    container_state: controller_proto::ContainerState::Unknown as i32,
+                }))
+            }
+            controller_proto::WorkloadKind::Container => {
+                let wl = self
+                    .db
+                    .get_workload(&req.workload_id)
+                    .map_err(|e| Status::internal(format!("fetching workload: {e}")))?
+                    .ok_or_else(|| Status::not_found(format!("workload {} not found", req.workload_id)))?;
+                let node = self
+                    .db
+                    .get_node(&wl.node_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .ok_or_else(|| Status::not_found(format!("node {} not found", wl.node_id)))?;
+                let mut container = self
+                    .ensure_container_client_for_address(&node.address)
+                    .await?;
+                let state = match desired {
+                    controller_proto::WorkloadDesiredState::Running => {
+                        let resp = container
+                            .start_container(node_proto::StartContainerRequest {
+                                name: wl.name.clone(),
+                            })
+                            .await
+                            .map_err(|e| Status::internal(format!("starting container: {e}")))?
+                            .into_inner();
+                        let _ = self.db.update_workload_runtime_state(&wl.id, "running");
+                        let _ = self.db.update_workload_desired_state(&wl.id, "running");
+                        resp.container
+                            .map(|c| c.state)
+                            .unwrap_or(controller_proto::ContainerState::Running as i32)
+                    }
+                    controller_proto::WorkloadDesiredState::Stopped => {
+                        let resp = container
+                            .stop_container(node_proto::StopContainerRequest {
+                                name: wl.name.clone(),
+                            })
+                            .await
+                            .map_err(|e| Status::internal(format!("stopping container: {e}")))?
+                            .into_inner();
+                        let _ = self.db.update_workload_runtime_state(&wl.id, "stopped");
+                        let _ = self.db.update_workload_desired_state(&wl.id, "stopped");
+                        resp.container
+                            .map(|c| c.state)
+                            .unwrap_or(controller_proto::ContainerState::Stopped as i32)
+                    }
+                    controller_proto::WorkloadDesiredState::Unspecified => {
+                        return Err(Status::invalid_argument("desired_state is required"));
+                    }
+                };
+                Ok(Response::new(controller_proto::SetWorkloadDesiredStateResponse {
+                    kind: controller_proto::WorkloadKind::Container as i32,
+                    vm_state: controller_proto::VmState::Unknown as i32,
+                    container_state: state,
+                }))
+            }
+            controller_proto::WorkloadKind::Unspecified => {
+                Err(Status::invalid_argument("kind is required"))
+            }
+        }
+    }
+
+    async fn get_workload(
+        &self,
+        request: Request<controller_proto::GetWorkloadRequest>,
+    ) -> Result<Response<controller_proto::GetWorkloadResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let kind = controller_proto::WorkloadKind::try_from(req.kind)
+            .unwrap_or(controller_proto::WorkloadKind::Unspecified);
+        match kind {
+            controller_proto::WorkloadKind::Vm => {
+                let vm = self
+                    .get_vm(Request::new(controller_proto::GetVmRequest {
+                        vm_id: req.workload_id,
+                        target_node: req.target_node,
+                    }))
+                    .await?
+                    .into_inner();
+                Ok(Response::new(controller_proto::GetWorkloadResponse {
+                    kind: controller_proto::WorkloadKind::Vm as i32,
+                    vm_spec: vm.spec,
+                    container_spec: None,
+                    vm_status: vm.status,
+                    container_info: None,
+                    node_id: vm.node_id,
+                    assigned_ip: vm.assigned_ip,
+                }))
+            }
+            controller_proto::WorkloadKind::Container => {
+                let wl = self
+                    .db
+                    .get_workload(&req.workload_id)
+                    .map_err(|e| Status::internal(format!("fetching workload: {e}")))?
+                    .ok_or_else(|| Status::not_found(format!("workload {} not found", req.workload_id)))?;
+                let node = self
+                    .db
+                    .get_node(&wl.node_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .ok_or_else(|| Status::not_found(format!("node {} not found", wl.node_id)))?;
+                let mut container = self
+                    .ensure_container_client_for_address(&node.address)
+                    .await?;
+                let info = container
+                    .get_container(node_proto::GetContainerRequest {
+                        name: wl.name.clone(),
+                    })
+                    .await
+                    .map_err(|e| Status::internal(format!("getting container: {e}")))?
+                    .into_inner()
+                    .container;
+                let c = info.ok_or_else(|| Status::not_found("container not found on node"))?;
+                Ok(Response::new(controller_proto::GetWorkloadResponse {
+                    kind: controller_proto::WorkloadKind::Container as i32,
+                    vm_spec: None,
+                    container_spec: Some(controller_proto::ContainerSpec {
+                        name: c.name.clone(),
+                        image: c.image.clone(),
+                        network: wl.network,
+                        command: Vec::new(),
+                        env: std::collections::HashMap::new(),
+                        ports: Vec::new(),
+                        storage_backend: wl.storage_backend.clone(),
+                        storage_size_bytes: wl.storage_size_bytes,
+                        mount_target: "/data".to_string(),
+                    }),
+                    vm_status: None,
+                    container_info: Some(controller_proto::ContainerInfo {
+                        id: c.id,
+                        name: c.name,
+                        image: c.image,
+                        state: c.state,
+                        status: c.status,
+                        node_id: node.id.clone(),
+                        created_at: None,
+                    }),
+                    node_id: node.id.clone(),
+                    assigned_ip: String::new(),
+                }))
+            }
+            controller_proto::WorkloadKind::Unspecified => {
+                Err(Status::invalid_argument("kind is required"))
+            }
+        }
+    }
+
+    async fn list_workloads(
+        &self,
+        request: Request<controller_proto::ListWorkloadsRequest>,
+    ) -> Result<Response<controller_proto::ListWorkloadsResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+        let kind = controller_proto::WorkloadKind::try_from(req.kind)
+            .unwrap_or(controller_proto::WorkloadKind::Unspecified);
+
+        let mut vms = Vec::new();
+        let mut containers = Vec::new();
+
+        if kind == controller_proto::WorkloadKind::Unspecified
+            || kind == controller_proto::WorkloadKind::Vm
+        {
+            vms = self
+                .list_vms(Request::new(controller_proto::ListVmsRequest {
+                    target_node: req.target_node.clone(),
+                }))
+                .await?
+                .into_inner()
+                .vms;
+        }
+
+        if kind == controller_proto::WorkloadKind::Unspecified
+            || kind == controller_proto::WorkloadKind::Container
+        {
+            let node_filter = if req.target_node.trim().is_empty() {
+                None
+            } else {
+                self.db
+                    .get_node_by_address(&req.target_node)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                    .or_else(|| self.db.get_node(&req.target_node).ok().flatten())
+                    .map(|n| n.id)
+            };
+            let rows = self
+                .db
+                .list_workloads(Some("container"), node_filter.as_deref())
+                .map_err(|e| Status::internal(format!("listing container workloads: {e}")))?;
+            containers = rows
+                .into_iter()
+                .map(|w| controller_proto::ContainerInfo {
+                    id: w.id,
+                    name: w.name,
+                    image: w.container_image,
+                    state: match w.runtime_state.as_str() {
+                        "running" => controller_proto::ContainerState::Running as i32,
+                        "stopped" => controller_proto::ContainerState::Stopped as i32,
+                        "created" => controller_proto::ContainerState::Created as i32,
+                        "error" => controller_proto::ContainerState::Error as i32,
+                        _ => controller_proto::ContainerState::Unknown as i32,
+                    },
+                    status: w.runtime_state,
+                    node_id: w.node_id,
+                    created_at: parse_datetime_to_timestamp(&w.created_at),
+                })
+                .collect();
+        }
+
+        Ok(Response::new(controller_proto::ListWorkloadsResponse {
+            vms,
+            containers,
         }))
     }
 

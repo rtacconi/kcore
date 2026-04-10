@@ -117,7 +117,6 @@ enum Command {
         resource: PullResource,
     },
     /// Manage SSH keys
-    #[command(alias = "ssh-key")]
     SshKey {
         #[command(subcommand)]
         action: SshKeyAction,
@@ -148,6 +147,11 @@ enum Command {
     },
     /// Show version
     Version,
+    /// Unified workload operations via controller API
+    Workload {
+        #[command(subcommand)]
+        action: WorkloadAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -243,6 +247,26 @@ enum CreateResource {
         #[arg(long = "storage-size-bytes")]
         storage_size_bytes: i64,
     },
+    /// Create a container on a node
+    Container {
+        /// Container name
+        name: String,
+        /// OCI image reference (e.g. nginx:alpine)
+        #[arg(long)]
+        image: String,
+        /// Runtime network name (optional)
+        #[arg(long)]
+        network: Option<String>,
+        /// Port mapping (repeatable), e.g. 8080:80
+        #[arg(long = "port")]
+        ports: Vec<String>,
+        /// Env var (repeatable), e.g. KEY=VALUE
+        #[arg(long = "env")]
+        env: Vec<String>,
+        /// Command arguments appended after image
+        #[arg(long = "cmd")]
+        cmd: Vec<String>,
+    },
     /// Create a network on a node (declarative)
     Network {
         /// Network name
@@ -312,6 +336,14 @@ enum DeleteResource {
         #[arg(long)]
         force: bool,
     },
+    /// Delete a container from a node
+    Container {
+        /// Container name
+        name: String,
+        /// Force deletion
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -324,6 +356,11 @@ enum StartResource {
         #[arg(long = "target-node")]
         target_node: Option<String>,
     },
+    /// Start a container on a node
+    Container {
+        /// Container name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -335,6 +372,11 @@ enum StopResource {
         /// Target node (optional)
         #[arg(long = "target-node")]
         target_node: Option<String>,
+    },
+    /// Stop a container on a node
+    Container {
+        /// Container name
+        name: String,
     },
 }
 
@@ -387,6 +429,12 @@ enum GetResource {
         /// Filter by node
         #[arg(long = "target-node")]
         target_node: Option<String>,
+    },
+    /// Get or list containers on a node
+    #[command(alias = "container")]
+    Containers {
+        /// Container name (omit to list all)
+        name: Option<String>,
     },
     /// Get or list nodes
     #[command(alias = "node")]
@@ -602,6 +650,92 @@ enum DrainResource {
     },
 }
 
+#[derive(Subcommand)]
+enum WorkloadAction {
+    /// Create a workload (vm or container)
+    Create {
+        /// Workload kind
+        #[arg(long, default_value = "container")]
+        kind: String,
+        /// Workload name
+        name: String,
+        /// Image (required for container, optional for vm URL mode)
+        #[arg(long)]
+        image: Option<String>,
+        /// CPU cores
+        #[arg(long, default_value_t = 2)]
+        cpu: i32,
+        /// Memory size (e.g. 2G)
+        #[arg(long, default_value = "2G")]
+        memory: String,
+        /// Network name
+        #[arg(long)]
+        network: Option<String>,
+        /// Target node id/address
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+        /// Storage backend
+        #[arg(long = "storage-backend", value_enum, default_value_t = StorageBackend::Filesystem)]
+        storage_backend: StorageBackend,
+        /// Storage size bytes
+        #[arg(long = "storage-size-bytes", default_value_t = 0)]
+        storage_size_bytes: i64,
+    },
+    /// List workloads
+    List {
+        /// Kind filter: vm, container, all
+        #[arg(long, default_value = "all")]
+        kind: String,
+        /// Target node filter
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+    /// Get a workload by id/name
+    Get {
+        /// Kind: vm or container
+        #[arg(long)]
+        kind: String,
+        /// Workload id or name
+        id: String,
+        /// Target node filter
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+    /// Delete workload
+    Delete {
+        /// Kind: vm or container
+        #[arg(long)]
+        kind: String,
+        /// Workload id or name
+        id: String,
+        /// Target node filter
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+    /// Start workload
+    Start {
+        /// Kind: vm or container
+        #[arg(long)]
+        kind: String,
+        /// Workload id or name
+        id: String,
+        /// Target node filter
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+    /// Stop workload
+    Stop {
+        /// Kind: vm or container
+        #[arg(long)]
+        kind: String,
+        /// Workload id or name
+        id: String,
+        /// Target node filter
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
+}
+
 #[derive(Clone, ValueEnum)]
 enum NodeImageFormat {
     Raw,
@@ -702,6 +836,29 @@ async fn main() {
         }
         Command::Create {
             resource:
+                CreateResource::Container {
+                    name,
+                    image,
+                    network,
+                    ports,
+                    env,
+                    cmd,
+                },
+        } => {
+            let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::container::create(
+                &info,
+                name,
+                image,
+                network.as_deref(),
+                ports.clone(),
+                env.clone(),
+                cmd.clone(),
+            )
+            .await
+        }
+        Command::Create {
+            resource:
                 CreateResource::Network {
                     name,
                     external_ip,
@@ -767,6 +924,12 @@ async fn main() {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
             commands::image::delete(&info, name, *force).await
         }
+        Command::Delete {
+            resource: DeleteResource::Container { name, force },
+        } => {
+            let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::container::delete(&info, name, *force).await
+        }
 
         Command::Start {
             resource: StartResource::Vm { vm_id, target_node },
@@ -774,12 +937,24 @@ async fn main() {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::vm::start(&info, vm_id, target_node.clone()).await
         }
+        Command::Start {
+            resource: StartResource::Container { name },
+        } => {
+            let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::container::start(&info, name).await
+        }
 
         Command::Stop {
             resource: StopResource::Vm { vm_id, target_node },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::vm::stop(&info, vm_id, target_node.clone()).await
+        }
+        Command::Stop {
+            resource: StopResource::Container { name },
+        } => {
+            let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::container::stop(&info, name).await
         }
 
         Command::Set {
@@ -823,6 +998,16 @@ async fn main() {
                 commands::vm::get(&info, n, target_node.clone()).await
             } else {
                 commands::vm::list(&info, target_node.clone()).await
+            }
+        }
+        Command::Get {
+            resource: GetResource::Containers { name },
+        } => {
+            let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
+            if let Some(name) = name {
+                commands::container::get(&info, name).await
+            } else {
+                commands::container::list(&info).await
             }
         }
 
@@ -1115,6 +1300,74 @@ async fn main() {
         Command::Version => {
             println!("kctl {VERSION}");
             Ok(())
+        }
+        Command::Workload { action } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            match action {
+                WorkloadAction::Create {
+                    kind,
+                    name,
+                    image,
+                    cpu,
+                    memory,
+                    network,
+                    target_node,
+                    storage_backend,
+                    storage_size_bytes,
+                } => {
+                    let memory_bytes = match client::parse_size_bytes(memory) {
+                        Ok(v) => v,
+                        Err(e) => fatal(&format!("invalid --memory value: {e}")),
+                    };
+                    let storage_backend = match storage_backend {
+                        StorageBackend::Filesystem => {
+                            client::controller_proto::StorageBackendType::Filesystem as i32
+                        }
+                        StorageBackend::Lvm => {
+                            client::controller_proto::StorageBackendType::Lvm as i32
+                        }
+                        StorageBackend::Zfs => {
+                            client::controller_proto::StorageBackendType::Zfs as i32
+                        }
+                    };
+                    commands::workload::create(
+                        &info,
+                        kind,
+                        name,
+                        image.as_deref(),
+                        *cpu,
+                        memory_bytes,
+                        network.as_deref(),
+                        target_node.as_deref(),
+                        storage_backend,
+                        *storage_size_bytes,
+                    )
+                    .await
+                }
+                WorkloadAction::List { kind, target_node } => {
+                    commands::workload::list(&info, kind, target_node.as_deref()).await
+                }
+                WorkloadAction::Get {
+                    kind,
+                    id,
+                    target_node,
+                } => commands::workload::get(&info, kind, id, target_node.as_deref()).await,
+                WorkloadAction::Delete {
+                    kind,
+                    id,
+                    target_node,
+                } => commands::workload::delete(&info, kind, id, target_node.as_deref()).await,
+                WorkloadAction::Start {
+                    kind,
+                    id,
+                    target_node,
+                } => commands::workload::set_state(&info, kind, id, true, target_node.as_deref()).await,
+                WorkloadAction::Stop {
+                    kind,
+                    id,
+                    target_node,
+                } => commands::workload::set_state(&info, kind, id, false, target_node.as_deref()).await,
+            }
         }
     };
 

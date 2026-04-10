@@ -125,6 +125,15 @@ pub async fn node_admin_client(
         .max_decoding_message_size(1024 * 1024 * 1024))
 }
 
+pub async fn node_container_client(
+    info: &ConnectionInfo,
+) -> Result<node_proto::node_container_client::NodeContainerClient<Channel>> {
+    let channel = connect(info).await?;
+    Ok(node_proto::node_container_client::NodeContainerClient::new(
+        channel,
+    ))
+}
+
 /// Parse a human-readable size string (e.g. "4G", "8192M", "1T") into bytes.
 pub fn parse_size_bytes(s: &str) -> Result<i64, String> {
     let s = s.trim();
