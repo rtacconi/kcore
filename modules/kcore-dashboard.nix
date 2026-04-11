@@ -39,8 +39,7 @@ in
       default = null;
       description = ''
         Optional systemd EnvironmentFile (e.g. /etc/kcore/dashboard.env) with:
-        - KCORE_CONTROLLER or CONTROLLER_ADDR (host:9090)
-        - KCORE_TLS_DOMAIN (optional): TLS verify/SNI name when the controller cert is for a hostname but you dial by IP (prefer KCORE_CONTROLLER=<host-ip>:9090 for same-host installs so SANs match)
+        - KCORE_CONTROLLER or CONTROLLER_ADDR (host-ip:9090 — must match a SAN in the controller cert)
         - KCORE_CA_FILE, KCORE_CERT_FILE, KCORE_KEY_FILE (client cert CN must be kcore-kctl)
         - or KCORE_INSECURE=1 for plaintext (dev only)
       '';

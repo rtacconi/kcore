@@ -798,7 +798,6 @@ CTRLEOF
                                           if [ "$RUN_CONTROLLER" = "true" ]; then
                                             cat > /mnt/etc/kcore/dashboard.env <<DASHENV
 KCORE_CONTROLLER=$EXTERNAL_IP:9090
-KCORE_TLS_DOMAIN=$INSTALL_HOSTNAME
 KCORE_CA_FILE=/etc/kcore/certs/ca.crt
 KCORE_CERT_FILE=/etc/kcore/certs/kctl.crt
 KCORE_KEY_FILE=/etc/kcore/certs/kctl.key
