@@ -105,6 +105,7 @@ Next ==
 
 Spec ==
   Init /\ [][Next]_Vars
+       /\ WF_Vars(Emit)
        /\ WF_Vars(Deliver)
        /\ WF_Vars(AntiEntropy)
        /\ WF_Vars(ApplyEvent)
@@ -140,7 +141,15 @@ CompensatedConflictsHaveLoser ==
 Converged ==
   \A a \in Controllers, b \in Controllers : Applied[a] = Applied[b]
 
-Liveness_EventualConvergence ==
-  <>Converged
+AnyApplied ==
+  Cardinality(UNION {Applied[c] : c \in Controllers}) > 0
+
+HeadsAgreeWhenConverged ==
+  Converged =>
+    \A a \in Controllers, b \in Controllers, r \in Resources :
+      ResourceHead[a][r] = ResourceHead[b][r]
+
+Liveness_EventualConvergenceAfterWork ==
+  <> (AnyApplied /\ Converged)
 
 ===========================================================================================

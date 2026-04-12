@@ -182,9 +182,11 @@ async fn poll_once(
     db.upsert_replication_ack(local_frontier_key, last_applied_event_id)
         .map_err(|e| format!("store local frontier: {e}"))?;
 
+    let ack_peer_id = local_peer_identity(local_controller_id, tls)
+        .unwrap_or_else(|| local_controller_id.to_string());
     client
         .ack_replication_events(controller_proto::AckReplicationEventsRequest {
-            peer_id: local_controller_id.to_string(),
+            peer_id: ack_peer_id,
             last_event_id: last_applied_event_id,
         })
         .await
@@ -198,6 +200,22 @@ async fn poll_once(
         "replication poll advanced frontier"
     );
     Ok(true)
+}
+
+fn local_peer_identity(local_controller_id: &str, tls: Option<&TlsConfig>) -> Option<String> {
+    let tls = tls?;
+    let cert_pem = std::fs::read_to_string(&tls.cert_file).ok()?;
+    use x509_parser::prelude::FromDer;
+    let cert = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes()).ok()?.1;
+    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(cert.contents.as_slice())
+        .ok()?;
+    let cn = cert
+        .subject()
+        .iter_common_name()
+        .next()
+        .and_then(|cn| cn.as_str().ok())
+        .map(ToString::to_string);
+    cn.or_else(|| Some(local_controller_id.to_string()))
 }
 
 fn apply_replication_event(
@@ -294,22 +312,26 @@ fn apply_replication_event(
         let reservation =
             evaluate_reservation(db, &event.event_type, payload_resource_key, op_id, &body)?;
         if !reservation.accepted {
-            replace_head = false;
-            reservation_rejected = true;
-            let (incumbent_op_id, incumbent_controller_id) = existing_head
-                .as_ref()
-                .map(|h| (h.last_op_id.as_str(), h.last_controller_id.as_str()))
-                .unwrap_or((op_id, origin_controller_id));
-            let reason = format!("auto-rejected: reservation failed ({})", reservation.reason);
-            let _ = db.insert_replication_conflict_with_resolved(
-                payload_resource_key,
-                incumbent_op_id,
-                op_id,
-                incumbent_controller_id,
-                origin_controller_id,
-                &reason,
-                true,
-            );
+            // Keep vm.create in the replicated head even when reservation cannot be
+            // satisfied yet; materialization retries after node state converges.
+            if payload_event_type != "vm.create" {
+                replace_head = false;
+                reservation_rejected = true;
+                let (incumbent_op_id, incumbent_controller_id) = existing_head
+                    .as_ref()
+                    .map(|h| (h.last_op_id.as_str(), h.last_controller_id.as_str()))
+                    .unwrap_or((op_id, origin_controller_id));
+                let reason = format!("auto-rejected: reservation failed ({})", reservation.reason);
+                let _ = db.insert_replication_conflict_with_resolved(
+                    payload_resource_key,
+                    incumbent_op_id,
+                    op_id,
+                    incumbent_controller_id,
+                    origin_controller_id,
+                    &reason,
+                    true,
+                );
+            }
         }
     }
 
@@ -346,8 +368,9 @@ fn apply_replication_event(
         let (loser_event_type, loser_body_json) = if challenger_is_loser {
             (
                 payload_event_type.to_string(),
-                serde_json::to_string(&body)
-                    .map_err(|e| format!("serialize loser body for event {}: {e}", event.event_id))?,
+                serde_json::to_string(&body).map_err(|e| {
+                    format!("serialize loser body for event {}: {e}", event.event_id)
+                })?,
             )
         } else {
             (
@@ -406,6 +429,7 @@ fn apply_replication_event(
 
     match event.event_type.as_str() {
         "node.register"
+        | "node.heartbeat"
         | "node.approve"
         | "node.reject"
         | "node.drain"
@@ -669,7 +693,10 @@ fn process_compensation_once(db: &Database) -> Result<bool, String> {
     Ok(true)
 }
 
-fn apply_domain_compensation(db: &Database, job: &crate::db::ReplicationCompensationJobRow) -> Result<(), String> {
+fn apply_domain_compensation(
+    db: &Database,
+    job: &crate::db::ReplicationCompensationJobRow,
+) -> Result<(), String> {
     let loser_body: Value = serde_json::from_str(&job.loser_body_json).map_err(|e| {
         format!(
             "parse loser body for compensation job {} (op {}): {e}",
@@ -690,9 +717,9 @@ fn apply_domain_compensation(db: &Database, job: &crate::db::ReplicationCompensa
                 loser_body.get("nodeId").and_then(Value::as_str),
                 loser_body.get("name").and_then(Value::as_str),
             ) {
-                let _ = db
-                    .delete_network(node_id, name)
-                    .map_err(|e| format!("compensate network.create delete {name} on {node_id}: {e}"))?;
+                let _ = db.delete_network(node_id, name).map_err(|e| {
+                    format!("compensate network.create delete {name} on {node_id}: {e}")
+                })?;
             }
         }
         "security_group.create" => {
@@ -758,39 +785,69 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
     match head.last_event_type.as_str() {
         "node.register" => {
             let node_id = required_str(&body, "nodeId", &head.resource_key)?;
-            let approval_status =
-                body.get("approvalStatus").and_then(Value::as_str).unwrap_or("pending");
-            let status = body
-                .get("status")
+            let existing = db
+                .get_node(node_id)
+                .map_err(|e| format!("get node {node_id}: {e}"))?;
+            let approval_status = body
+                .get("approvalStatus")
                 .and_then(Value::as_str)
-                .unwrap_or(if approval_status == "approved" {
+                .unwrap_or("pending");
+            let status = body.get("status").and_then(Value::as_str).unwrap_or(
+                if approval_status == "approved" {
                     "ready"
                 } else {
                     "pending"
-                });
+                },
+            );
             let node = NodeRow {
                 id: node_id.to_string(),
                 hostname: body
                     .get("hostname")
                     .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.hostname.as_str()))
                     .unwrap_or("unknown")
                     .to_string(),
                 address: body
                     .get("address")
                     .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.address.as_str()))
                     .unwrap_or_default()
                     .to_string(),
-                cpu_cores: body.get("cpuCores").and_then(Value::as_i64).unwrap_or(0) as i32,
-                memory_bytes: body.get("memoryBytes").and_then(Value::as_i64).unwrap_or(0),
+                cpu_cores: body
+                    .get("cpuCores")
+                    .and_then(Value::as_i64)
+                    .map(|v| v as i32)
+                    .or_else(|| existing.as_ref().map(|n| n.cpu_cores))
+                    .unwrap_or(0),
+                memory_bytes: body
+                    .get("memoryBytes")
+                    .and_then(Value::as_i64)
+                    .or_else(|| existing.as_ref().map(|n| n.memory_bytes))
+                    .unwrap_or(0),
                 status: status.to_string(),
-                last_heartbeat: String::new(),
+                last_heartbeat: body
+                    .get("lastHeartbeat")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.last_heartbeat.as_str()))
+                    .unwrap_or_default()
+                    .to_string(),
                 gateway_interface: body
                     .get("gatewayInterface")
                     .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.gateway_interface.as_str()))
                     .unwrap_or("eth0")
                     .to_string(),
-                cpu_used: 0,
-                memory_used: 0,
+                cpu_used: body
+                    .get("cpuUsed")
+                    .and_then(Value::as_i64)
+                    .map(|v| v as i32)
+                    .or_else(|| existing.as_ref().map(|n| n.cpu_used))
+                    .unwrap_or(0),
+                memory_used: body
+                    .get("memoryUsed")
+                    .and_then(Value::as_i64)
+                    .or_else(|| existing.as_ref().map(|n| n.memory_used))
+                    .unwrap_or(0),
                 storage_backend: storage_backend_from_i32(
                     body.get("storageBackend")
                         .and_then(Value::as_i64)
@@ -805,10 +862,13 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                 cert_expiry_days: body
                     .get("certExpiryDays")
                     .and_then(Value::as_i64)
-                    .unwrap_or(-1) as i32,
+                    .map(|v| v as i32)
+                    .or_else(|| existing.as_ref().map(|n| n.cert_expiry_days))
+                    .unwrap_or(-1),
                 luks_method: body
                     .get("luksMethod")
                     .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.luks_method.as_str()))
                     .unwrap_or_default()
                     .to_string(),
             };
@@ -829,8 +889,122 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
             }
             Ok(())
         }
+        "node.heartbeat" => {
+            let node_id = required_str(&body, "nodeId", &head.resource_key)?;
+            let existing = db
+                .get_node(node_id)
+                .map_err(|e| format!("get node {node_id}: {e}"))?;
+            let node = NodeRow {
+                id: node_id.to_string(),
+                hostname: body
+                    .get("hostname")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.hostname.as_str()))
+                    .unwrap_or(node_id)
+                    .to_string(),
+                address: body
+                    .get("address")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.address.as_str()))
+                    .unwrap_or_default()
+                    .to_string(),
+                cpu_cores: body
+                    .get("cpuCores")
+                    .and_then(Value::as_i64)
+                    .map(|v| v as i32)
+                    .or_else(|| existing.as_ref().map(|n| n.cpu_cores))
+                    .unwrap_or(0),
+                memory_bytes: body
+                    .get("memoryBytes")
+                    .and_then(Value::as_i64)
+                    .or_else(|| existing.as_ref().map(|n| n.memory_bytes))
+                    .unwrap_or(0),
+                status: body
+                    .get("status")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.status.as_str()))
+                    .unwrap_or("pending")
+                    .to_string(),
+                last_heartbeat: body
+                    .get("lastHeartbeat")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.last_heartbeat.as_str()))
+                    .unwrap_or_default()
+                    .to_string(),
+                gateway_interface: body
+                    .get("gatewayInterface")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.gateway_interface.as_str()))
+                    .unwrap_or("eth0")
+                    .to_string(),
+                cpu_used: body
+                    .get("cpuUsed")
+                    .and_then(Value::as_i64)
+                    .map(|v| v as i32)
+                    .or_else(|| existing.as_ref().map(|n| n.cpu_used))
+                    .unwrap_or(0),
+                memory_used: body
+                    .get("memoryUsed")
+                    .and_then(Value::as_i64)
+                    .or_else(|| existing.as_ref().map(|n| n.memory_used))
+                    .unwrap_or(0),
+                storage_backend: storage_backend_from_i32(
+                    body.get("storageBackend")
+                        .and_then(Value::as_i64)
+                        .unwrap_or_default() as i32,
+                )
+                .to_string(),
+                disable_vxlan: body
+                    .get("disableVxlan")
+                    .and_then(Value::as_bool)
+                    .or_else(|| existing.as_ref().map(|n| n.disable_vxlan))
+                    .unwrap_or(false),
+                approval_status: body
+                    .get("approvalStatus")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.approval_status.as_str()))
+                    .unwrap_or("pending")
+                    .to_string(),
+                cert_expiry_days: body
+                    .get("certExpiryDays")
+                    .and_then(Value::as_i64)
+                    .map(|v| v as i32)
+                    .or_else(|| existing.as_ref().map(|n| n.cert_expiry_days))
+                    .unwrap_or(-1),
+                luks_method: body
+                    .get("luksMethod")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.luks_method.as_str()))
+                    .unwrap_or_default()
+                    .to_string(),
+            };
+            db.upsert_node(&node)
+                .map_err(|e| format!("upsert heartbeat node {node_id}: {e}"))?;
+            let labels = body
+                .get("labels")
+                .and_then(Value::as_array)
+                .map(|vals| {
+                    vals.iter()
+                        .filter_map(|v| v.as_str().map(ToString::to_string))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+            if !labels.is_empty() {
+                db.upsert_node_labels(node_id, &labels)
+                    .map_err(|e| format!("upsert node labels {node_id}: {e}"))?;
+            }
+            Ok(())
+        }
         "vm.create" => {
             let vm_id = required_str(&body, "vmId", &head.resource_key)?;
+            let node_id = body
+                .get("nodeId")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
+            if !node_id.is_empty() {
+                ensure_replicated_node_exists(db, &node_id)?;
+            }
             let vm = VmRow {
                 id: vm_id.to_string(),
                 name: body
@@ -869,12 +1043,11 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                     .and_then(Value::as_str)
                     .unwrap_or("default")
                     .to_string(),
-                auto_start: body.get("autoStart").and_then(Value::as_bool).unwrap_or(true),
-                node_id: body
-                    .get("nodeId")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_string(),
+                auto_start: body
+                    .get("autoStart")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(true),
+                node_id,
                 created_at: String::new(),
                 runtime_state: body
                     .get("runtimeState")
@@ -975,6 +1148,7 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
         "network.create" => {
             let node_id = required_str(&body, "nodeId", &head.resource_key)?;
             let name = required_str(&body, "name", &head.resource_key)?;
+            ensure_replicated_node_exists(db, node_id)?;
             let network = NetworkRow {
                 name: name.to_string(),
                 external_ip: body
@@ -1057,10 +1231,8 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                             .unwrap_or("tcp")
                             .to_string(),
                         host_port: rule.get("hostPort").and_then(Value::as_i64).unwrap_or(0) as i32,
-                        target_port: rule
-                            .get("targetPort")
-                            .and_then(Value::as_i64)
-                            .unwrap_or(0) as i32,
+                        target_port: rule.get("targetPort").and_then(Value::as_i64).unwrap_or(0)
+                            as i32,
                         source_cidr: rule
                             .get("sourceCidr")
                             .and_then(Value::as_str)
@@ -1092,7 +1264,10 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
         "security_group.attach" => {
             let sg = required_str(&body, "securityGroup", &head.resource_key)?;
             let target_id = required_str(&body, "targetId", &head.resource_key)?;
-            let target_kind = body.get("targetKind").and_then(Value::as_i64).unwrap_or_default();
+            let target_kind = body
+                .get("targetKind")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
             match target_kind {
                 1 => db
                     .attach_security_group_to_vm(sg, target_id)
@@ -1118,7 +1293,10 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
         "security_group.detach" => {
             let sg = required_str(&body, "securityGroup", &head.resource_key)?;
             let target_id = required_str(&body, "targetId", &head.resource_key)?;
-            let target_kind = body.get("targetKind").and_then(Value::as_i64).unwrap_or_default();
+            let target_kind = body
+                .get("targetKind")
+                .and_then(Value::as_i64)
+                .unwrap_or_default();
             match target_kind {
                 1 => {
                     let _ = db
@@ -1178,7 +1356,41 @@ fn required_str<'a>(body: &'a Value, key: &str, resource_key: &str) -> Result<&'
         .ok_or_else(|| format!("missing {key} for {resource_key}"))
 }
 
-fn vm_id_from_body_or_resource<'a>(body: &'a Value, resource_key: &'a str) -> Result<&'a str, String> {
+fn ensure_replicated_node_exists(db: &Database, node_id: &str) -> Result<(), String> {
+    if db
+        .get_node(node_id)
+        .map_err(|e| format!("read node {node_id}: {e}"))?
+        .is_some()
+    {
+        return Ok(());
+    }
+
+    let placeholder = NodeRow {
+        id: node_id.to_string(),
+        hostname: node_id.to_string(),
+        // Use a stable placeholder address; real registration will upsert full data later.
+        address: format!("{node_id}.replicated:9091"),
+        cpu_cores: 0,
+        memory_bytes: 0,
+        status: "pending".to_string(),
+        last_heartbeat: String::new(),
+        gateway_interface: String::new(),
+        cpu_used: 0,
+        memory_used: 0,
+        storage_backend: "filesystem".to_string(),
+        disable_vxlan: false,
+        approval_status: "pending".to_string(),
+        cert_expiry_days: 0,
+        luks_method: "unknown".to_string(),
+    };
+    db.upsert_node(&placeholder)
+        .map_err(|e| format!("create placeholder node {node_id}: {e}"))
+}
+
+fn vm_id_from_body_or_resource<'a>(
+    body: &'a Value,
+    resource_key: &'a str,
+) -> Result<&'a str, String> {
     if let Some(vm_id) = body.get("vmId").and_then(Value::as_str) {
         return Ok(vm_id);
     }
@@ -1536,6 +1748,35 @@ mod tests {
     }
 
     #[test]
+    fn materializer_applies_node_heartbeat_snapshot() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
+            resource_key: "node/node-hb".to_string(),
+            last_op_id: "op-node-hb".to_string(),
+            last_logical_ts_unix_ms: 100,
+            last_policy_priority: 0,
+            last_intent_epoch: 0,
+            last_validity: "valid".to_string(),
+            last_safety_class: "safe".to_string(),
+            last_controller_id: "ctrl-a".to_string(),
+            last_event_id: 12,
+            last_event_type: "node.heartbeat".to_string(),
+            last_body_json: r#"{"nodeId":"node-hb","hostname":"node-hb","address":"10.0.0.9:9091","cpuCores":8,"memoryBytes":17179869184,"status":"ready","gatewayInterface":"eno1","storageBackend":1,"disableVxlan":false,"approvalStatus":"approved","certExpiryDays":300,"luksMethod":"tpm2","cpuUsed":2,"memoryUsed":4096,"lastHeartbeat":"2026-04-12 00:00:00","labels":["dc=DC1","role=edge"]}"#.to_string(),
+        })
+        .expect("upsert head");
+
+        assert!(process_materialization_once(&db).expect("materialize"));
+        let node = db.get_node("node-hb").expect("db").expect("node");
+        assert_eq!(node.status, "ready");
+        assert_eq!(node.approval_status, "approved");
+        assert_eq!(node.cpu_used, 2);
+        assert_eq!(node.memory_used, 4096);
+        assert!(!node.last_heartbeat.is_empty());
+        let labels = db.get_node_labels("node-hb").expect("labels");
+        assert_eq!(labels.len(), 2);
+    }
+
+    #[test]
     fn materializer_applies_network_create_and_delete() {
         let db = Database::open(":memory:").expect("open db");
         db.upsert_node(&test_node("node-net")).expect("insert node");
@@ -1576,11 +1817,65 @@ mod tests {
         })
         .expect("upsert network delete head");
         assert!(process_materialization_once(&db).expect("materialize delete"));
-        assert!(
-            db.get_network_for_node("node-net", "vxlan-test")
-                .expect("network lookup")
-                .is_none()
-        );
+        assert!(db
+            .get_network_for_node("node-net", "vxlan-test")
+            .expect("network lookup")
+            .is_none());
+    }
+
+    #[test]
+    fn materializer_network_create_creates_placeholder_node_when_missing() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
+            resource_key: "network/node-missing/repl-net".to_string(),
+            last_op_id: "op-net-create-missing-node".to_string(),
+            last_logical_ts_unix_ms: 100,
+            last_policy_priority: 0,
+            last_intent_epoch: 0,
+            last_validity: "valid".to_string(),
+            last_safety_class: "safe".to_string(),
+            last_controller_id: "ctrl-a".to_string(),
+            last_event_id: 20,
+            last_event_type: "network.create".to_string(),
+            last_body_json: r#"{"name":"repl-net","nodeId":"node-missing","externalIp":"192.168.40.105","gatewayIp":"10.240.0.1","internalNetmask":"255.255.255.0","allowedTcpPorts":[],"allowedUdpPorts":[],"networkType":"vxlan","vlanId":0,"enableOutboundNat":true,"vni":4201,"nextIp":2}"#.to_string(),
+        })
+        .expect("upsert network head");
+
+        assert!(process_materialization_once(&db).expect("materialize create"));
+        assert!(db
+            .get_node("node-missing")
+            .expect("node lookup")
+            .is_some());
+        assert!(db
+            .get_network_for_node("node-missing", "repl-net")
+            .expect("network lookup")
+            .is_some());
+    }
+
+    #[test]
+    fn materializer_vm_create_creates_placeholder_node_when_missing() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
+            resource_key: "vm/v-missing-node".to_string(),
+            last_op_id: "op-vm-missing-node".to_string(),
+            last_logical_ts_unix_ms: 100,
+            last_policy_priority: 0,
+            last_intent_epoch: 0,
+            last_validity: "valid".to_string(),
+            last_safety_class: "safe".to_string(),
+            last_controller_id: "ctrl-a".to_string(),
+            last_event_id: 30,
+            last_event_type: "vm.create".to_string(),
+            last_body_json: r#"{"vmId":"v-missing-node","name":"v-missing-node","nodeId":"node-missing-vm","cpu":2,"memoryBytes":2147483648,"imagePath":"","imageUrl":"","imageSha256":"","imageFormat":"qcow2","imageSize":0,"network":"default","autoStart":true,"runtimeState":"unknown","cloudInitUserData":"","storageBackend":"filesystem","storageSizeBytes":0,"vmIp":""}"#.to_string(),
+        })
+        .expect("upsert vm head");
+
+        assert!(process_materialization_once(&db).expect("materialize create"));
+        assert!(db
+            .get_node("node-missing-vm")
+            .expect("node lookup")
+            .is_some());
+        assert!(db.get_vm("v-missing-node").expect("vm lookup").is_some());
     }
 
     #[test]
@@ -1588,7 +1883,8 @@ mod tests {
         let db = Database::open(":memory:").expect("open db");
         let node = test_node("node-sg");
         db.upsert_node(&node).expect("insert node");
-        db.insert_vm(&test_vm("vm-sg", &node.id)).expect("insert vm");
+        db.insert_vm(&test_vm("vm-sg", &node.id))
+            .expect("insert vm");
         db.insert_network(&NetworkRow {
             name: "vxlan-sg".to_string(),
             external_ip: "192.168.40.105".to_string(),
@@ -1621,10 +1917,7 @@ mod tests {
         .expect("upsert sg create");
         assert!(process_materialization_once(&db).expect("sg create"));
         assert!(db.get_security_group("web").expect("db").is_some());
-        assert_eq!(
-            db.list_security_group_rules("web").expect("rules").len(),
-            1
-        );
+        assert_eq!(db.list_security_group_rules("web").expect("rules").len(), 1);
 
         db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
             resource_key: "security-group/web".to_string(),
@@ -1637,7 +1930,9 @@ mod tests {
             last_controller_id: "ctrl-a".to_string(),
             last_event_id: 15,
             last_event_type: "security_group.attach".to_string(),
-            last_body_json: r#"{"securityGroup":"web","targetKind":1,"targetId":"vm-sg","targetNode":""}"#.to_string(),
+            last_body_json:
+                r#"{"securityGroup":"web","targetKind":1,"targetId":"vm-sg","targetNode":""}"#
+                    .to_string(),
         })
         .expect("upsert sg attach vm");
         assert!(process_materialization_once(&db).expect("sg attach vm"));
@@ -1681,15 +1976,16 @@ mod tests {
             last_controller_id: "ctrl-a".to_string(),
             last_event_id: 17,
             last_event_type: "security_group.detach".to_string(),
-            last_body_json: r#"{"securityGroup":"web","targetKind":1,"targetId":"vm-sg","targetNode":""}"#.to_string(),
+            last_body_json:
+                r#"{"securityGroup":"web","targetKind":1,"targetId":"vm-sg","targetNode":""}"#
+                    .to_string(),
         })
         .expect("upsert sg detach");
         assert!(process_materialization_once(&db).expect("sg detach"));
-        assert!(
-            db.list_security_groups_for_vm("vm-sg")
-                .expect("vm attachments")
-                .is_empty()
-        );
+        assert!(db
+            .list_security_groups_for_vm("vm-sg")
+            .expect("vm attachments")
+            .is_empty());
 
         db.upsert_replication_resource_head(&ReplicationResourceHeadRow {
             resource_key: "security-group/web".to_string(),
@@ -1710,7 +2006,7 @@ mod tests {
     }
 
     #[test]
-    fn vm_create_reservation_failure_rejects_head() {
+    fn vm_create_reservation_failure_keeps_head_for_eventual_materialization() {
         let db = Database::open(":memory:").expect("open db");
         let ev = controller_proto::ReplicationEvent {
             event_id: 10,
@@ -1723,12 +2019,40 @@ mod tests {
         assert!(db
             .get_replication_resource_head("vm/v9")
             .expect("get head")
-            .is_none());
+            .is_some());
         let reservation = db
             .get_replication_reservation("node-capacity/missing-node", "vm/v9")
             .expect("reservation read")
             .expect("reservation row");
         assert_eq!(reservation.status, "failed_non_retryable");
+    }
+
+    #[test]
+    fn apply_replication_event_ignores_out_of_order_event_ids() {
+        let db = Database::open(":memory:").expect("open db");
+        let newer = controller_proto::ReplicationEvent {
+            event_id: 20,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v-order".to_string(),
+            payload: br#"{"opId":"op-new","controllerId":"ctrl-a","logicalTsUnixMs":2000,"eventType":"vm.update","resourceKey":"vm/v-order","body":{"vmId":"v-order","cpu":4}}"#.to_vec(),
+        };
+        let older = controller_proto::ReplicationEvent {
+            event_id: 5,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+            event_type: "vm.update".to_string(),
+            resource_key: "vm/v-order".to_string(),
+            payload: br#"{"opId":"op-old","controllerId":"ctrl-a","logicalTsUnixMs":1000,"eventType":"vm.update","resourceKey":"vm/v-order","body":{"vmId":"v-order","cpu":2}}"#.to_vec(),
+        };
+
+        apply_replication_event(&db, &newer).expect("apply newer first");
+        apply_replication_event(&db, &older).expect("apply older second");
+        let head = db
+            .get_replication_resource_head("vm/v-order")
+            .expect("read head")
+            .expect("head row");
+        assert_eq!(head.last_op_id, "op-new");
+        assert_eq!(head.last_event_id, 20);
     }
 
     #[test]
@@ -1824,11 +2148,14 @@ mod tests {
             last_controller_id: "ctrl-a".to_string(),
             last_event_id: 1,
             last_event_type: "ssh_key.create".to_string(),
-            last_body_json: r#"{"name":"operator-key","publicKey":"ssh-ed25519 AAAA test@example"}"#
-                .to_string(),
+            last_body_json:
+                r#"{"name":"operator-key","publicKey":"ssh-ed25519 AAAA test@example"}"#.to_string(),
         };
         apply_head_to_domain(&db, &head).expect("apply");
-        let row = db.get_ssh_key("operator-key").expect("db").expect("key row");
+        let row = db
+            .get_ssh_key("operator-key")
+            .expect("db")
+            .expect("key row");
         assert_eq!(row.0, "operator-key");
         assert_eq!(row.1, "ssh-ed25519 AAAA test@example");
     }
@@ -1962,7 +2289,7 @@ mod tests {
                     resource_key: "vm/v-trace-retry".to_string(),
                     payload: br#"{"opId":"op-trace-r2","controllerId":"ctrl-r","logicalTsUnixMs":1700,"eventType":"vm.create","resourceKey":"vm/v-trace-retry","body":{"vmId":"v-trace-retry","nodeId":"node-retry-trace","name":"vtrace-retry"}}"#.to_vec(),
                 },
-                60,
+                80,
             ),
             (
                 controller_proto::ReplicationEvent {
@@ -1972,7 +2299,7 @@ mod tests {
                     resource_key: "vm/v-trace-retry".to_string(),
                     payload: br#"{"opId":"op-trace-r3","controllerId":"ctrl-r","logicalTsUnixMs":1800,"eventType":"vm.create","resourceKey":"vm/v-trace-retry","body":{"vmId":"v-trace-retry","nodeId":"node-retry-trace","name":"vtrace-retry"}}"#.to_vec(),
                 },
-                50,
+                90,
             ),
         ];
 
@@ -2046,8 +2373,6 @@ mod tests {
             };
             let expected_winner = if let Some(w) = head_op {
                 w
-            } else if reservation_failed {
-                "none".to_string()
             } else {
                 op_id.clone()
             };
@@ -2055,6 +2380,14 @@ mod tests {
                 "resource_key": resource_key,
                 "op_id": op_id,
                 "rank": rank,
+                "logical_ts_unix_ms": payload
+                    .get("logicalTsUnixMs")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(0),
+                "controller_id": payload
+                    .get("controllerId")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default(),
                 "terminal_state": terminal_state,
                 "reservation_status": reservation_status,
                 "compensation_status": compensation_status,

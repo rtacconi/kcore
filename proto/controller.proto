@@ -53,6 +53,8 @@ service Controller {
 
   // Certificate rotation
   rpc RenewNodeCert(RenewNodeCertRequest) returns (RenewNodeCertResponse);
+  // Bootstrap a node cert/key pair signed by controller sub-CA for fresh installs.
+  rpc IssueNodeBootstrapCert(IssueNodeBootstrapCertRequest) returns (IssueNodeBootstrapCertResponse);
   rpc RotateSubCa(RotateSubCaRequest) returns (RotateSubCaResponse);
   rpc ReloadTls(ReloadTlsRequest) returns (ReloadTlsResponse);
 
@@ -743,6 +745,18 @@ message RenewNodeCertRequest {
 }
 
 message RenewNodeCertResponse {
+  bool success = 1;
+  string cert_pem = 2;
+  string key_pem = 3;
+  string message = 4;
+}
+
+message IssueNodeBootstrapCertRequest {
+  string node_id = 1;
+  string node_host = 2;
+}
+
+message IssueNodeBootstrapCertResponse {
   bool success = 1;
   string cert_pem = 2;
   string key_pem = 3;

@@ -780,7 +780,7 @@ impl Database {
             "INSERT INTO replication_ack (peer_id, last_event_id, updated_at)
              VALUES (?1, ?2, datetime('now'))
              ON CONFLICT(peer_id) DO UPDATE SET
-                last_event_id=excluded.last_event_id,
+               last_event_id=MAX(replication_ack.last_event_id, excluded.last_event_id),
                 updated_at=datetime('now')",
             params![peer_id, last_event_id],
         )?;
@@ -837,7 +837,8 @@ impl Database {
         let conn = self.lock_conn()?;
         conn.execute(
             "INSERT INTO replication_received_ops (op_id, origin_controller_id, event_type, resource_key)
-             VALUES (?1, ?2, ?3, ?4)",
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(op_id) DO NOTHING",
             params![op_id, origin_controller_id, event_type, resource_key],
         )?;
         Ok(())
@@ -1553,7 +1554,10 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_workload(&self, workload_id_or_name: &str) -> Result<Option<WorkloadRow>, rusqlite::Error> {
+    pub fn get_workload(
+        &self,
+        workload_id_or_name: &str,
+    ) -> Result<Option<WorkloadRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
             "SELECT id, name, kind, node_id, runtime_state, desired_state, vm_id, container_image, network, storage_backend, storage_size_bytes, created_at
@@ -1644,10 +1648,7 @@ impl Database {
         Ok(rows > 0)
     }
 
-    pub fn delete_workload_by_id_or_name(
-        &self,
-        id_or_name: &str,
-    ) -> Result<bool, rusqlite::Error> {
+    pub fn delete_workload_by_id_or_name(&self, id_or_name: &str) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let rows = conn.execute(
             "DELETE FROM workloads WHERE id = ?1 OR name = ?1",
@@ -1795,11 +1796,13 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_security_group(&self, name: &str) -> Result<Option<SecurityGroupRow>, rusqlite::Error> {
+    pub fn get_security_group(
+        &self,
+        name: &str,
+    ) -> Result<Option<SecurityGroupRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT name, description, created_at FROM security_groups WHERE name = ?1",
-        )?;
+        let mut stmt = conn
+            .prepare("SELECT name, description, created_at FROM security_groups WHERE name = ?1")?;
         let mut rows = stmt.query_map(params![name], |row| {
             Ok(SecurityGroupRow {
                 name: row.get(0)?,
@@ -1812,8 +1815,9 @@ impl Database {
 
     pub fn list_security_groups(&self) -> Result<Vec<SecurityGroupRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
-        let mut stmt = conn
-            .prepare("SELECT name, description, created_at FROM security_groups ORDER BY name ASC")?;
+        let mut stmt = conn.prepare(
+            "SELECT name, description, created_at FROM security_groups ORDER BY name ASC",
+        )?;
         let rows = stmt.query_map([], |row| {
             Ok(SecurityGroupRow {
                 name: row.get(0)?,
@@ -2830,10 +2834,7 @@ mod tests {
         assert!(db
             .update_workload_desired_state(&wl.id, "stopped")
             .expect("update desired"));
-        wl = db
-            .get_workload(&wl.id)
-            .expect("reload")
-            .expect("exists");
+        wl = db.get_workload(&wl.id).expect("reload").expect("exists");
         assert_eq!(wl.runtime_state, "stopped");
         assert_eq!(wl.desired_state, "stopped");
 
@@ -2889,6 +2890,10 @@ mod tests {
 
         db.upsert_replication_ack("peer-a", 105)
             .expect("upsert second");
+        assert_eq!(db.get_replication_ack("peer-a").expect("get"), Some(105));
+
+        db.upsert_replication_ack("peer-a", 7)
+            .expect("upsert should remain monotonic");
         assert_eq!(db.get_replication_ack("peer-a").expect("get"), Some(105));
     }
 
@@ -3297,7 +3302,8 @@ mod tests {
             created_at: String::new(),
         })
         .expect("sg");
-        db.attach_security_group_to_vm("web", "vm-1").expect("attach vm");
+        db.attach_security_group_to_vm("web", "vm-1")
+            .expect("attach vm");
         db.attach_security_group_to_network("web", "private", "node-1")
             .expect("attach network");
 

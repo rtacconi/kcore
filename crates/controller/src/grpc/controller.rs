@@ -31,6 +31,7 @@ use super::validation::{
 #[cfg(test)]
 type PushHook = std::sync::Arc<dyn Fn(&NodeRow) -> Result<(), Status> + Send + Sync + 'static>;
 const EVT_NODE_REGISTER: &str = "node.register";
+const EVT_NODE_HEARTBEAT: &str = "node.heartbeat";
 const EVT_NODE_APPROVE: &str = "node.approve";
 const EVT_NODE_REJECT: &str = "node.reject";
 const EVT_VM_CREATE: &str = "vm.create";
@@ -67,9 +68,7 @@ fn validate_port(port: i32, field: &str) -> Result<i32, Status> {
     }
 }
 
-fn parse_sg_target_kind(
-    kind: i32,
-) -> Result<controller_proto::SecurityGroupTargetKind, Status> {
+fn parse_sg_target_kind(kind: i32) -> Result<controller_proto::SecurityGroupTargetKind, Status> {
     let parsed = controller_proto::SecurityGroupTargetKind::try_from(kind)
         .unwrap_or(controller_proto::SecurityGroupTargetKind::Unspecified);
     match parsed {
@@ -326,10 +325,9 @@ impl ControllerService {
                             .get_vm(rule.target_vm.trim())
                             .map_err(|e| Status::internal(e.to_string()))?
                             .or_else(|| {
-                                self.db
-                                    .list_vms_for_node(&node.id)
-                                    .ok()
-                                    .and_then(|vv| vv.into_iter().find(|v| v.name == rule.target_vm))
+                                self.db.list_vms_for_node(&node.id).ok().and_then(|vv| {
+                                    vv.into_iter().find(|v| v.name == rule.target_vm)
+                                })
                             })
                         {
                             target_vm.vm_ip
@@ -630,8 +628,10 @@ impl ControllerService {
     async fn ensure_container_client_for_address(
         &self,
         address: &str,
-    ) -> Result<node_proto::node_container_client::NodeContainerClient<tonic::transport::Channel>, Status>
-    {
+    ) -> Result<
+        node_proto::node_container_client::NodeContainerClient<tonic::transport::Channel>,
+        Status,
+    > {
         if let Some(client) = self.clients.get_container(address) {
             return Ok(client);
         }
@@ -685,6 +685,37 @@ impl ControllerService {
                 "failed to append replication_outbox row"
             );
         }
+    }
+
+    fn log_replication_event_required(
+        &self,
+        event_type: &str,
+        resource_key: &str,
+        body: serde_json::Value,
+    ) -> Result<(), Status> {
+        let Some(rep) = &self.replication else {
+            return Ok(());
+        };
+        let logical_ts_unix_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
+        let envelope = serde_json::json!({
+            "schemaVersion": 1,
+            "opId": Uuid::new_v4().to_string(),
+            "logicalTsUnixMs": logical_ts_unix_ms,
+            "controllerId": rep.controller_id,
+            "dcId": rep.dc_id,
+            "eventType": event_type,
+            "resourceKey": resource_key,
+            "body": body,
+        });
+        let payload = serde_json::to_vec(&envelope)
+            .map_err(|e| Status::internal(format!("serialize replication envelope: {e}")))?;
+        self.db
+            .append_replication_outbox(event_type, resource_key, &payload)
+            .map_err(|e| Status::internal(format!("append replication outbox row: {e}")))?;
+        Ok(())
     }
 }
 
@@ -744,7 +775,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 .map_err(|e| Status::internal(format!("storing labels: {e}")))?;
         }
 
-        self.log_replication_event(
+        self.log_replication_event_required(
             EVT_NODE_REGISTER,
             &format!("node/{}", req.node_id),
             serde_json::json!({
@@ -762,7 +793,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 "labels": req.labels,
                 "luksMethod": req.luks_method,
             }),
-        );
+        )?;
 
         if approval_status == "approved" {
             if let Err(e) = self.clients.connect(&req.address).await {
@@ -813,6 +844,36 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 "node {} not registered",
                 req.node_id
             )));
+        }
+
+        if let Ok(Some(node)) = self.db.get_node(&req.node_id) {
+            let labels = self.db.get_node_labels(&req.node_id).unwrap_or_default();
+            self.log_replication_event_required(
+                EVT_NODE_HEARTBEAT,
+                &format!("node/{}", req.node_id),
+                serde_json::json!({
+                    "nodeId": node.id,
+                    "hostname": node.hostname,
+                    "address": node.address,
+                    "cpuCores": node.cpu_cores,
+                    "memoryBytes": node.memory_bytes,
+                    "status": node.status,
+                    "gatewayInterface": node.gateway_interface,
+                    "storageBackend": match node.storage_backend.as_str() {
+                        "lvm" => controller_proto::StorageBackendType::Lvm as i32,
+                        "zfs" => controller_proto::StorageBackendType::Zfs as i32,
+                        _ => controller_proto::StorageBackendType::Filesystem as i32,
+                    },
+                    "disableVxlan": node.disable_vxlan,
+                    "certExpiryDays": req.cert_expiry_days,
+                    "approvalStatus": node.approval_status,
+                    "labels": labels,
+                    "luksMethod": req.luks_method,
+                    "cpuUsed": cpu_used,
+                    "memoryUsed": mem_used,
+                    "lastHeartbeat": node.last_heartbeat,
+                }),
+            )?;
         }
 
         Ok(Response::new(controller_proto::HeartbeatResponse {
@@ -1112,9 +1173,12 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     .db
                     .allocate_vm_ip(&vm_network, &node.id)
                     .map_err(|e| Status::internal(format!("allocating VM IP: {e}")))?,
-                "nat" => {
-                    self.reserve_nat_vm_ip_for_network(&node.id, &vm_network, &vm_id, &net.gateway_ip)?
-                }
+                "nat" => self.reserve_nat_vm_ip_for_network(
+                    &node.id,
+                    &vm_network,
+                    &vm_id,
+                    &net.gateway_ip,
+                )?,
                 _ => String::new(),
             }
         } else {
@@ -1621,9 +1685,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .unwrap_or(controller_proto::WorkloadKind::Unspecified);
         match kind {
             controller_proto::WorkloadKind::Vm => {
-                let vm_spec = req
-                    .vm_spec
-                    .ok_or_else(|| Status::invalid_argument("vm_spec is required for VM workload"))?;
+                let vm_spec = req.vm_spec.ok_or_else(|| {
+                    Status::invalid_argument("vm_spec is required for VM workload")
+                })?;
                 let vm_resp = self
                     .create_vm(Request::new(controller_proto::CreateVmRequest {
                         target_node: req.target_node.clone(),
@@ -1787,7 +1851,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     self.db
                         .get_node(&wl.node_id)
                         .map_err(|e| Status::internal(e.to_string()))?
-                        .ok_or_else(|| Status::not_found(format!("node {} not found", wl.node_id)))?
+                        .ok_or_else(|| {
+                            Status::not_found(format!("node {} not found", wl.node_id))
+                        })?
                 } else if !req.target_node.is_empty() {
                     self.db
                         .get_node_by_address(&req.target_node)
@@ -1810,10 +1876,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     .ensure_container_client_for_address(&node.address)
                     .await?;
                 let _ = container
-                    .delete_container(node_proto::DeleteContainerRequest {
-                        name,
-                        force: true,
-                    })
+                    .delete_container(node_proto::DeleteContainerRequest { name, force: true })
                     .await
                     .map_err(|e| Status::internal(format!("deleting container on node: {e}")))?;
                 let _ = self.db.delete_workload_by_id_or_name(&req.workload_id);
@@ -1851,11 +1914,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     }
                 };
                 let resp = self
-                    .set_vm_desired_state(Request::new(controller_proto::SetVmDesiredStateRequest {
-                        vm_id: req.workload_id.clone(),
-                        desired_state: vm_desired,
-                        target_node: req.target_node.clone(),
-                    }))
+                    .set_vm_desired_state(Request::new(
+                        controller_proto::SetVmDesiredStateRequest {
+                            vm_id: req.workload_id.clone(),
+                            desired_state: vm_desired,
+                            target_node: req.target_node.clone(),
+                        },
+                    ))
                     .await?
                     .into_inner();
                 let _ = self.db.update_workload_desired_state(
@@ -1866,18 +1931,22 @@ impl controller_proto::controller_server::Controller for ControllerService {
                         "stopped"
                     },
                 );
-                Ok(Response::new(controller_proto::SetWorkloadDesiredStateResponse {
-                    kind: controller_proto::WorkloadKind::Vm as i32,
-                    vm_state: resp.state,
-                    container_state: controller_proto::ContainerState::Unknown as i32,
-                }))
+                Ok(Response::new(
+                    controller_proto::SetWorkloadDesiredStateResponse {
+                        kind: controller_proto::WorkloadKind::Vm as i32,
+                        vm_state: resp.state,
+                        container_state: controller_proto::ContainerState::Unknown as i32,
+                    },
+                ))
             }
             controller_proto::WorkloadKind::Container => {
                 let wl = self
                     .db
                     .get_workload(&req.workload_id)
                     .map_err(|e| Status::internal(format!("fetching workload: {e}")))?
-                    .ok_or_else(|| Status::not_found(format!("workload {} not found", req.workload_id)))?;
+                    .ok_or_else(|| {
+                        Status::not_found(format!("workload {} not found", req.workload_id))
+                    })?;
                 let node = self
                     .db
                     .get_node(&wl.node_id)
@@ -1919,11 +1988,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
                         return Err(Status::invalid_argument("desired_state is required"));
                     }
                 };
-                Ok(Response::new(controller_proto::SetWorkloadDesiredStateResponse {
-                    kind: controller_proto::WorkloadKind::Container as i32,
-                    vm_state: controller_proto::VmState::Unknown as i32,
-                    container_state: state,
-                }))
+                Ok(Response::new(
+                    controller_proto::SetWorkloadDesiredStateResponse {
+                        kind: controller_proto::WorkloadKind::Container as i32,
+                        vm_state: controller_proto::VmState::Unknown as i32,
+                        container_state: state,
+                    },
+                ))
             }
             controller_proto::WorkloadKind::Unspecified => {
                 Err(Status::invalid_argument("kind is required"))
@@ -1963,7 +2034,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     .db
                     .get_workload(&req.workload_id)
                     .map_err(|e| Status::internal(format!("fetching workload: {e}")))?
-                    .ok_or_else(|| Status::not_found(format!("workload {} not found", req.workload_id)))?;
+                    .ok_or_else(|| {
+                        Status::not_found(format!("workload {} not found", req.workload_id))
+                    })?;
                 let node = self
                     .db
                     .get_node(&wl.node_id)
@@ -2401,26 +2474,28 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .list_security_group_rules(&name)
             .map_err(|e| Status::internal(e.to_string()))?;
 
-        Ok(Response::new(controller_proto::CreateSecurityGroupResponse {
-            success: true,
-            security_group: Some(controller_proto::SecurityGroup {
-                name: created.name,
-                description: created.description,
-                rules: stored_rules
-                    .into_iter()
-                    .map(|r| controller_proto::SecurityGroupRule {
-                        id: r.id,
-                        protocol: r.protocol,
-                        host_port: r.host_port,
-                        target_port: r.target_port,
-                        source_cidr: r.source_cidr,
-                        target_vm: r.target_vm,
-                        enable_dnat: r.enable_dnat,
-                    })
-                    .collect(),
-                created_at: parse_datetime_to_timestamp(&created.created_at),
-            }),
-        }))
+        Ok(Response::new(
+            controller_proto::CreateSecurityGroupResponse {
+                success: true,
+                security_group: Some(controller_proto::SecurityGroup {
+                    name: created.name,
+                    description: created.description,
+                    rules: stored_rules
+                        .into_iter()
+                        .map(|r| controller_proto::SecurityGroupRule {
+                            id: r.id,
+                            protocol: r.protocol,
+                            host_port: r.host_port,
+                            target_port: r.target_port,
+                            source_cidr: r.source_cidr,
+                            target_vm: r.target_vm,
+                            enable_dnat: r.enable_dnat,
+                        })
+                        .collect(),
+                    created_at: parse_datetime_to_timestamp(&created.created_at),
+                }),
+            },
+        ))
     }
 
     async fn get_security_group(
@@ -2451,17 +2526,21 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .list_security_group_network_attachments(name)
             .map_err(|e| Status::internal(e.to_string()))?;
         let mut attachments = Vec::new();
-        attachments.extend(vm_atts.into_iter().map(|a| controller_proto::SecurityGroupAttachment {
-            security_group: a.security_group,
-            target_kind: controller_proto::SecurityGroupTargetKind::Vm as i32,
-            target_id: a.vm_id,
-            target_node: String::new(),
+        attachments.extend(vm_atts.into_iter().map(|a| {
+            controller_proto::SecurityGroupAttachment {
+                security_group: a.security_group,
+                target_kind: controller_proto::SecurityGroupTargetKind::Vm as i32,
+                target_id: a.vm_id,
+                target_node: String::new(),
+            }
         }));
-        attachments.extend(net_atts.into_iter().map(|a| controller_proto::SecurityGroupAttachment {
-            security_group: a.security_group,
-            target_kind: controller_proto::SecurityGroupTargetKind::Network as i32,
-            target_id: a.network_name,
-            target_node: a.node_id,
+        attachments.extend(net_atts.into_iter().map(|a| {
+            controller_proto::SecurityGroupAttachment {
+                security_group: a.security_group,
+                target_kind: controller_proto::SecurityGroupTargetKind::Network as i32,
+                target_id: a.network_name,
+                target_node: a.node_id,
+            }
         }));
 
         Ok(Response::new(controller_proto::GetSecurityGroupResponse {
@@ -2519,9 +2598,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 created_at: parse_datetime_to_timestamp(&sg.created_at),
             });
         }
-        Ok(Response::new(controller_proto::ListSecurityGroupsResponse {
-            security_groups: out,
-        }))
+        Ok(Response::new(
+            controller_proto::ListSecurityGroupsResponse {
+                security_groups: out,
+            },
+        ))
     }
 
     async fn delete_security_group(
@@ -2539,16 +2620,18 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .delete_security_group(name)
             .map_err(|e| Status::internal(e.to_string()))?;
         if !deleted {
-            return Err(Status::not_found(format!("security group '{name}' not found")));
+            return Err(Status::not_found(format!(
+                "security group '{name}' not found"
+            )));
         }
         self.log_replication_event(
             EVT_SECURITY_GROUP_DELETE,
             &format!("security-group/{name}"),
             serde_json::json!({ "name": name }),
         );
-        Ok(Response::new(controller_proto::DeleteSecurityGroupResponse {
-            success: true,
-        }))
+        Ok(Response::new(
+            controller_proto::DeleteSecurityGroupResponse { success: true },
+        ))
     }
 
     async fn attach_security_group(
@@ -2567,7 +2650,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .map_err(|e| Status::internal(e.to_string()))?
             .is_none()
         {
-            return Err(Status::not_found(format!("security group '{sg}' not found")));
+            return Err(Status::not_found(format!(
+                "security group '{sg}' not found"
+            )));
         }
         let kind = parse_sg_target_kind(req.target_kind)?;
         match kind {
@@ -2582,11 +2667,17 @@ impl controller_proto::controller_server::Controller for ControllerService {
                             .ok()
                             .and_then(|vms| vms.into_iter().find(|v| v.name == req.target_id))
                     })
-                    .ok_or_else(|| Status::not_found(format!("vm '{}' not found", req.target_id)))?;
+                    .ok_or_else(|| {
+                        Status::not_found(format!("vm '{}' not found", req.target_id))
+                    })?;
                 self.db
                     .attach_security_group_to_vm(sg, &vm.id)
                     .map_err(|e| Status::internal(e.to_string()))?;
-                if let Some(node) = self.db.get_node(&vm.node_id).map_err(|e| Status::internal(e.to_string()))? {
+                if let Some(node) = self
+                    .db
+                    .get_node(&vm.node_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                {
                     self.push_config_to_node(&node).await?;
                 }
             }
@@ -2596,7 +2687,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
                         .get_node_by_address(req.target_node.trim())
                         .map_err(|e| Status::internal(e.to_string()))?
                         .or_else(|| self.db.get_node(req.target_node.trim()).ok().flatten())
-                        .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.target_node)))?
+                        .ok_or_else(|| {
+                            Status::not_found(format!("node '{}' not found", req.target_node))
+                        })?
                 } else {
                     return Err(Status::invalid_argument(
                         "target_node is required for network attachments",
@@ -2631,7 +2724,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 "targetNode": req.target_node
             }),
         );
-        Ok(Response::new(controller_proto::AttachSecurityGroupResponse { success: true }))
+        Ok(Response::new(
+            controller_proto::AttachSecurityGroupResponse { success: true },
+        ))
     }
 
     async fn detach_security_group(
@@ -2657,11 +2752,17 @@ impl controller_proto::controller_server::Controller for ControllerService {
                             .ok()
                             .and_then(|vms| vms.into_iter().find(|v| v.name == req.target_id))
                     })
-                    .ok_or_else(|| Status::not_found(format!("vm '{}' not found", req.target_id)))?;
+                    .ok_or_else(|| {
+                        Status::not_found(format!("vm '{}' not found", req.target_id))
+                    })?;
                 self.db
                     .detach_security_group_from_vm(sg, &vm.id)
                     .map_err(|e| Status::internal(e.to_string()))?;
-                if let Some(node) = self.db.get_node(&vm.node_id).map_err(|e| Status::internal(e.to_string()))? {
+                if let Some(node) = self
+                    .db
+                    .get_node(&vm.node_id)
+                    .map_err(|e| Status::internal(e.to_string()))?
+                {
                     self.push_config_to_node(&node).await?;
                 }
             }
@@ -2671,7 +2772,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
                         .get_node_by_address(req.target_node.trim())
                         .map_err(|e| Status::internal(e.to_string()))?
                         .or_else(|| self.db.get_node(req.target_node.trim()).ok().flatten())
-                        .ok_or_else(|| Status::not_found(format!("node '{}' not found", req.target_node)))?
+                        .ok_or_else(|| {
+                            Status::not_found(format!("node '{}' not found", req.target_node))
+                        })?
                 } else {
                     return Err(Status::invalid_argument(
                         "target_node is required for network attachments",
@@ -2694,7 +2797,9 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 "targetNode": req.target_node
             }),
         );
-        Ok(Response::new(controller_proto::DetachSecurityGroupResponse { success: true }))
+        Ok(Response::new(
+            controller_proto::DetachSecurityGroupResponse { success: true },
+        ))
     }
 
     async fn list_nodes(
@@ -3049,7 +3154,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 errors.join("; ")
             )
         };
-        self.log_replication_event(
+        self.log_replication_event_required(
             EVT_NODE_DRAIN,
             &format!("node/{}", req.node_id),
             serde_json::json!({
@@ -3058,7 +3163,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 "migrated": migrated,
                 "errors": errors,
             }),
-        );
+        )?;
 
         Ok(Response::new(controller_proto::DrainNodeResponse {
             success: errors.is_empty(),
@@ -3098,14 +3203,14 @@ impl controller_proto::controller_server::Controller for ControllerService {
             warn!(address = %node.address, error = %e, "failed to connect to approved node");
         }
 
-        self.log_replication_event(
+        self.log_replication_event_required(
             EVT_NODE_APPROVE,
             &format!("node/{}", req.node_id),
             serde_json::json!({
                 "nodeId": req.node_id,
                 "address": node.address,
             }),
-        );
+        )?;
 
         info!(node_id = %req.node_id, "node approved");
 
@@ -3135,13 +3240,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .update_node_status(&req.node_id, "rejected")
             .map_err(|e| Status::internal(format!("updating node status: {e}")))?;
 
-        self.log_replication_event(
+        self.log_replication_event_required(
             EVT_NODE_REJECT,
             &format!("node/{}", req.node_id),
             serde_json::json!({
                 "nodeId": req.node_id,
             }),
-        );
+        )?;
 
         info!(node_id = %req.node_id, "node rejected");
 
@@ -3203,6 +3308,50 @@ impl controller_proto::controller_server::Controller for ControllerService {
             key_pem,
             message: format!("certificate renewed for node '{}'", req.node_id),
         }))
+    }
+
+    async fn issue_node_bootstrap_cert(
+        &self,
+        request: Request<controller_proto::IssueNodeBootstrapCertRequest>,
+    ) -> Result<Response<controller_proto::IssueNodeBootstrapCertResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL])?;
+        let req = request.into_inner();
+
+        let node_id = req.node_id.trim();
+        if node_id.is_empty() {
+            return Err(Status::invalid_argument("node_id is required"));
+        }
+        let node_host = req.node_host.trim();
+        if node_host.is_empty() {
+            return Err(Status::invalid_argument("node_host is required"));
+        }
+
+        let sub_ca = self
+            .sub_ca
+            .lock()
+            .map_err(|_| Status::internal("sub-CA lock poisoned"))?
+            .clone();
+
+        if !sub_ca.is_available() {
+            return Err(Status::unavailable(
+                "sub-CA is not configured on this controller; node bootstrap certificate issuance is unavailable",
+            ));
+        }
+
+        let (chain_pem, key_pem) =
+            signing::sign_node_cert(&sub_ca.cert_pem, &sub_ca.key_pem, node_host)
+                .map_err(|e| Status::internal(format!("signing bootstrap node cert: {e}")))?;
+
+        info!(node_id = %node_id, node_host = %node_host, "issued bootstrap node certificate via sub-CA");
+
+        Ok(Response::new(
+            controller_proto::IssueNodeBootstrapCertResponse {
+                success: true,
+                cert_pem: chain_pem,
+                key_pem,
+                message: format!("bootstrap certificate issued for node '{}'", node_id),
+            },
+        ))
     }
 
     async fn rotate_sub_ca(
@@ -3434,63 +3583,69 @@ impl controller_proto::controller_server::Controller for ControllerService {
                             }
                         };
 
-                    let (lvm_inventory_ok, lvm_volume_groups, lvm_logical_volumes, lvm_physical_volumes) =
-                        match admin.get_lvm_info(node_proto::GetLvmInfoRequest {}).await {
-                            Ok(resp) => {
-                                let inner = resp.into_inner();
-                                if inner.available {
-                                    (
-                                        true,
-                                        inner
-                                            .volume_groups
-                                            .into_iter()
-                                            .map(|vg| controller_proto::StorageLvmVolumeGroupDetail {
-                                                name: vg.name,
-                                                size_bytes: vg.size_bytes,
-                                                free_bytes: vg.free_bytes,
-                                                attr: vg.attr,
-                                            })
-                                            .collect(),
-                                        inner
-                                            .logical_volumes
-                                            .into_iter()
-                                            .map(|lv| controller_proto::StorageLvmLogicalVolumeDetail {
-                                                name: lv.name,
-                                                vg_name: lv.vg_name,
-                                                size_bytes: lv.size_bytes,
-                                                attr: lv.attr,
-                                                path: lv.path,
-                                                pool: lv.pool,
-                                                origin: lv.origin,
-                                                data_percent: lv.data_percent,
-                                                metadata_percent: lv.metadata_percent,
-                                            })
-                                            .collect(),
-                                        inner
-                                            .physical_volumes
-                                            .into_iter()
-                                            .map(|pv| controller_proto::StorageLvmPhysicalVolumeDetail {
+                    let (
+                        lvm_inventory_ok,
+                        lvm_volume_groups,
+                        lvm_logical_volumes,
+                        lvm_physical_volumes,
+                    ) = match admin.get_lvm_info(node_proto::GetLvmInfoRequest {}).await {
+                        Ok(resp) => {
+                            let inner = resp.into_inner();
+                            if inner.available {
+                                (
+                                    true,
+                                    inner
+                                        .volume_groups
+                                        .into_iter()
+                                        .map(|vg| controller_proto::StorageLvmVolumeGroupDetail {
+                                            name: vg.name,
+                                            size_bytes: vg.size_bytes,
+                                            free_bytes: vg.free_bytes,
+                                            attr: vg.attr,
+                                        })
+                                        .collect(),
+                                    inner
+                                        .logical_volumes
+                                        .into_iter()
+                                        .map(|lv| controller_proto::StorageLvmLogicalVolumeDetail {
+                                            name: lv.name,
+                                            vg_name: lv.vg_name,
+                                            size_bytes: lv.size_bytes,
+                                            attr: lv.attr,
+                                            path: lv.path,
+                                            pool: lv.pool,
+                                            origin: lv.origin,
+                                            data_percent: lv.data_percent,
+                                            metadata_percent: lv.metadata_percent,
+                                        })
+                                        .collect(),
+                                    inner
+                                        .physical_volumes
+                                        .into_iter()
+                                        .map(|pv| {
+                                            controller_proto::StorageLvmPhysicalVolumeDetail {
                                                 name: pv.name,
                                                 vg_name: pv.vg_name,
                                                 size_bytes: pv.size_bytes,
                                                 free_bytes: pv.free_bytes,
                                                 attr: pv.attr,
-                                            })
-                                            .collect(),
-                                    )
-                                } else {
-                                    (false, vec![], vec![], vec![])
-                                }
-                            }
-                            Err(e) => {
-                                warn!(
-                                    node_id = %node.id,
-                                    error = %e,
-                                    "GetLvmInfo failed for storage overview"
-                                );
+                                            }
+                                        })
+                                        .collect(),
+                                )
+                            } else {
                                 (false, vec![], vec![], vec![])
                             }
-                        };
+                        }
+                        Err(e) => {
+                            warn!(
+                                node_id = %node.id,
+                                error = %e,
+                                "GetLvmInfo failed for storage overview"
+                            );
+                            (false, vec![], vec![], vec![])
+                        }
+                    };
 
                     (
                         disks,
@@ -3656,6 +3811,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             acl("ApproveNode", CN_KCTL),
             acl("RejectNode", CN_KCTL),
             acl("RenewNodeCert", CN_NODE_PREFIX),
+            acl("IssueNodeBootstrapCert", CN_KCTL),
             acl("RotateSubCa", CN_KCTL),
             acl("ReloadTls", CN_KCTL),
             acl("GetComplianceReport", CN_KCTL),
@@ -4735,6 +4891,47 @@ mod tests {
         .expect("register should succeed");
 
         assert_eq!(db.replication_outbox_len().expect("count"), 1);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_appends_replication_outbox_when_configured() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut node = test_node();
+        node.approval_status = "approved".to_string();
+        node.status = "ready".to_string();
+        db.upsert_node(&node).expect("insert");
+        let replication = Some(ReplicationConfig {
+            controller_id: "ctrl-test".into(),
+            dc_id: "DC1".into(),
+            peers: vec![],
+        });
+        let svc = ControllerService::new(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            empty_sub_ca(),
+            replication,
+        );
+        <ControllerService as controller_proto::controller_server::Controller>::heartbeat(
+            &svc,
+            Request::new(controller_proto::HeartbeatRequest {
+                node_id: node.id.clone(),
+                usage: Some(controller_proto::NodeUsage {
+                    cpu_cores_used: 1,
+                    memory_bytes_used: 1024,
+                }),
+                cert_expiry_days: 300,
+                luks_method: "tpm2".to_string(),
+            }),
+        )
+        .await
+        .expect("heartbeat should succeed");
+
+        assert_eq!(db.replication_outbox_len().expect("count"), 1);
+        let rows = db
+            .list_replication_outbox_since(0, 10)
+            .expect("list outbox rows");
+        assert_eq!(rows[0].event_type, EVT_NODE_HEARTBEAT);
     }
 
     #[tokio::test]

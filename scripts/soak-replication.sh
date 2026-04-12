@@ -26,6 +26,7 @@ for i in $(seq 1 "${ITERATIONS}"); do
   echo "==> iteration ${i}/${ITERATIONS}"
   run_step "controller_replication_tests" cargo test -p kcore-controller replication::tests::
   run_step "controller_admin_replication_tests" cargo test -p kcore-controller grpc::admin::tests::
+  run_step "controller_heartbeat_replication_outbox" cargo test -p kcore-controller heartbeat_appends_replication_outbox_when_configured --
   run_step "replication_trace_drift" bash ./scripts/test-replication-trace.sh
 done
 

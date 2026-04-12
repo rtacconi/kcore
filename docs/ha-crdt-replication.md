@@ -305,3 +305,34 @@ Status (incremental):
 - VM create now auto-falls back to a compatible alternative node when an explicit `target_node` fails storage/preflight checks, reducing manual retry loops.
 - Replication status now reports `retry_exhausted_reservations` explicitly, separating bounded-retry terminals from in-progress retryable failures.
 - Dashboard compliance view now shows replication resilience/SLO counters (including retry-exhausted reservations) using the admin replication-status RPC.
+
+## Inventory Reconcile Runbook (Controller Join/Recovery)
+
+When adding or recovering a controller, explicitly verify that `nodes` inventory converges across controllers.
+
+1. Compare node views:
+   - `kcore-kctl -s <controller-a>:9090 get nodes`
+   - `kcore-kctl -s <controller-b>:9090 get nodes`
+2. Force fresh replicated node snapshots by restarting active node agents:
+   - `systemctl restart kcore-node-agent` on each active node.
+3. Wait for replication poll/materialization to settle and compare again.
+4. If approval status remains divergent for an already trusted node, reconcile on the lagging controller:
+   - `kcore-kctl -s <lagging-controller>:9090 node approve <node-id>`
+5. Confirm `kcore-kctl get replication-status` is healthy on all controllers.
+
+Expected steady state:
+- both controllers return the same active node set with matching approval/state;
+- `zero_manual_slo_healthy: true` on each controller.
+
+## Replication hardening — validation evidence (exit criteria)
+
+Automated gates used before merge/release:
+
+- `cargo test -p kcore-controller replication::tests::` — replication merge, materialization, reservations, trace export.
+- `cargo test -p kcore-controller grpc::admin::tests::` — admin replication RPCs and monotonic ack behavior.
+- `cargo test -p kcore-controller heartbeat_appends_replication_outbox_when_configured` — node heartbeat emits replicated inventory snapshots when replication is enabled.
+- `make test-tla-trace` (runs `scripts/test-replication-trace.sh` and `check-replication-trace.py`) — deterministic winner / terminal rules vs trace fixtures.
+- `make test-tla` — bounded TLC checks for `ControllerNodeReconcile`, `ControllerReplication`, `CrossDcReplication`.
+- `bash ./scripts/soak-replication.sh` — loops the above (default 5 iterations) for soak runs.
+
+Live cluster checks: `kctl get nodes` parity across controllers; `kctl get replication-status --require-healthy` on each controller.

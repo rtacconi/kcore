@@ -2,7 +2,7 @@ use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
-use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::config::ReplicationConfig;
 use crate::controller_proto;
 use crate::db::Database;
@@ -78,7 +78,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::GetReplicationEventsRequest>,
     ) -> Result<Response<controller_proto::GetReplicationEventsResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let limit = if req.limit <= 0 {
             500
@@ -109,13 +109,26 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::AckReplicationEventsRequest>,
     ) -> Result<Response<controller_proto::AckReplicationEventsResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
+        let peer_cn = auth::peer_cn(&request);
         let req = request.into_inner();
         if req.peer_id.trim().is_empty() {
             return Err(Status::invalid_argument("peer_id is required"));
         }
         if req.last_event_id < 0 {
             return Err(Status::invalid_argument("last_event_id must be >= 0"));
+        }
+        if let Some(cn) = peer_cn {
+            // Controllers may only acknowledge their own frontier identity.
+            if cn == CN_CONTROLLER || cn.starts_with(CN_CONTROLLER_PREFIX) {
+                if req.peer_id.trim() != cn {
+                    return Err(Status::permission_denied(format!(
+                        "peer '{}' is not allowed to ack as '{}'",
+                        cn,
+                        req.peer_id.trim()
+                    )));
+                }
+            }
         }
         self.db
             .upsert_replication_ack(req.peer_id.trim(), req.last_event_id)
@@ -129,7 +142,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::GetReplicationStatusRequest>,
     ) -> Result<Response<controller_proto::GetReplicationStatusResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
         let outbox_head_event_id = self
             .db
             .replication_outbox_head_id()
@@ -273,7 +286,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::ListReplicationConflictsRequest>,
     ) -> Result<Response<controller_proto::ListReplicationConflictsResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let limit = if req.limit <= 0 {
             100
@@ -305,7 +318,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::ResolveReplicationConflictRequest>,
     ) -> Result<Response<controller_proto::ResolveReplicationConflictResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         if req.id <= 0 {
             return Err(Status::invalid_argument("id must be > 0"));
@@ -381,6 +394,17 @@ mod tests {
         .await
         .expect("ack should succeed");
         assert_eq!(db.get_replication_ack("peer-a").expect("get ack"), Some(9));
+
+        <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::ack_replication_events(
+            &svc,
+            Request::new(controller_proto::AckReplicationEventsRequest {
+                peer_id: "peer-a".to_string(),
+                last_event_id: 3,
+            }),
+        )
+        .await
+        .expect("lower ack should not regress frontier");
+        assert_eq!(db.get_replication_ack("peer-a").expect("get ack"), Some(9));
     }
 
     #[tokio::test]
@@ -450,7 +474,7 @@ mod tests {
             "vm.update",
             r#"{"vmId":"v10","cpu":4}"#,
         )
-            .expect("insert pending job");
+        .expect("insert pending job");
         db.record_replication_reservation_failure(
             "node-capacity/missing",
             "vm/v9",

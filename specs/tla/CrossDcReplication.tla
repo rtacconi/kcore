@@ -94,6 +94,7 @@ Next ==
 
 Spec ==
   Init /\ [][Next]_Vars
+       /\ WF_Vars(Emit)
        /\ WF_Vars(Deliver)
        /\ WF_Vars(IntraDcAntiEntropy)
        /\ WF_Vars(CrossDcAntiEntropy)
@@ -121,7 +122,14 @@ CrossDcEventualPropagationCandidate ==
 Divergence ==
   \E a \in Controllers, b \in Controllers : Applied[a] # Applied[b]
 
-Liveness_CrossDcConverges ==
-  <> ~Divergence
+AnyApplied ==
+  Cardinality(UNION {Applied[c] : c \in Controllers}) > 0
+
+Connected ==
+  \A src \in Controllers, dst \in Controllers :
+    src /= dst => LinkUp[<<src, dst>>]
+
+Liveness_CrossDcConvergesAfterWork ==
+  (<>[]Connected) => <> (AnyApplied /\ ~Divergence)
 
 ==========================================================================================

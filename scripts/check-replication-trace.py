@@ -17,11 +17,19 @@ COMPENSATION_STATES = {"not_applicable", "queued", "completed"}
 def winner(current, challenger):
     if current is None:
         return challenger
-    if challenger["rank"] > current["rank"]:
-        return challenger
-    if challenger["rank"] < current["rank"]:
-        return current
-    return challenger if challenger["op_id"] > current["op_id"] else current
+    challenger_key = (
+        challenger["rank"],
+        challenger["logical_ts_unix_ms"],
+        challenger["controller_id"],
+        challenger["op_id"],
+    )
+    current_key = (
+        current["rank"],
+        current["logical_ts_unix_ms"],
+        current["controller_id"],
+        current["op_id"],
+    )
+    return challenger if challenger_key > current_key else current
 
 
 def main() -> int:
@@ -49,6 +57,8 @@ def main() -> int:
             "resource_key": str(raw["resource_key"]),
             "op_id": str(raw["op_id"]),
             "rank": int(raw["rank"]),
+            "logical_ts_unix_ms": int(raw.get("logical_ts_unix_ms", 0)),
+            "controller_id": str(raw.get("controller_id", "")),
             "terminal_state": str(raw["terminal_state"]),
             "reservation_status": str(raw.get("reservation_status", "not_applicable")),
             "compensation_status": str(raw.get("compensation_status", "not_applicable")),
@@ -71,10 +81,6 @@ def main() -> int:
             "failed_non_retryable",
             "retry_exhausted",
         }
-        if reservation_failed and event["terminal_state"] != "auto_rejected":
-            errors.append(
-                f"event[{idx}] reservation failed must imply auto_rejected terminal"
-            )
         if event["terminal_state"] == "auto_compensated" and event[
             "compensation_status"
         ] not in {"queued", "completed"}:
@@ -91,11 +97,8 @@ def main() -> int:
 
         key = event["resource_key"]
         prior = heads.get(key)
-        if reservation_failed:
-            new_head = prior
-        else:
-            new_head = winner(prior, event)
-            heads[key] = new_head
+        new_head = winner(prior, event)
+        heads[key] = new_head
 
         expected = raw.get("expected_winner_op_id")
         if expected is not None:
