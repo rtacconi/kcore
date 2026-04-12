@@ -757,17 +757,35 @@ fn prepare_install_log() -> Result<(std::fs::File, PathBuf), Status> {
     Ok((file, log_path))
 }
 
+fn normalize_endpoint(s: &str, default_port: u16) -> String {
+    let trimmed = s.trim();
+    if trimmed.parse::<std::net::SocketAddr>().is_ok() {
+        return trimmed.to_string();
+    }
+    if trimmed.starts_with('[') {
+        return format!("{trimmed}:{default_port}");
+    }
+    let colon_count = trimmed.chars().filter(|&c| c == ':').count();
+    if colon_count > 1 {
+        return format!("[{trimmed}]:{default_port}");
+    }
+    if colon_count == 1 {
+        return trimmed.to_string();
+    }
+    format!("{trimmed}:{default_port}")
+}
+
 fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<String>, Status> {
     let mut controllers: Vec<String> = req
         .controllers
         .iter()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .map(|v| if v.contains(':') { v } else { format!("{v}:9090") })
+        .map(|v| normalize_endpoint(&v, 9090))
         .collect();
     if controllers.is_empty() && !req.controller.trim().is_empty() {
         let c = req.controller.trim().to_string();
-        controllers.push(if c.contains(':') { c } else { format!("{c}:9090") });
+        controllers.push(normalize_endpoint(&c, 9090));
     }
     let has_controller = !controllers.is_empty();
     if !has_controller && !req.run_controller {
@@ -1986,5 +2004,39 @@ mod tests {
             n_restarts: 0,
         };
         assert!(!vm_unit_is_fatal(&transient));
+    }
+
+    #[test]
+    fn normalize_endpoint_ipv4_no_port() {
+        assert_eq!(normalize_endpoint("10.0.0.1", 9090), "10.0.0.1:9090");
+    }
+
+    #[test]
+    fn normalize_endpoint_ipv4_with_port() {
+        assert_eq!(normalize_endpoint("10.0.0.1:8080", 9090), "10.0.0.1:8080");
+    }
+
+    #[test]
+    fn normalize_endpoint_ipv6_bracketed_no_port() {
+        assert_eq!(
+            normalize_endpoint("[2001:db8::10]", 9090),
+            "[2001:db8::10]:9090"
+        );
+    }
+
+    #[test]
+    fn normalize_endpoint_ipv6_bracketed_with_port() {
+        assert_eq!(
+            normalize_endpoint("[2001:db8::10]:7070", 9090),
+            "[2001:db8::10]:7070"
+        );
+    }
+
+    #[test]
+    fn normalize_endpoint_bare_ipv6() {
+        assert_eq!(
+            normalize_endpoint("2001:db8::10", 9090),
+            "[2001:db8::10]:9090"
+        );
     }
 }

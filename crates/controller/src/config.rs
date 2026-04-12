@@ -160,6 +160,7 @@ defaultNetwork:
         assert_eq!(cfg.listen_addr, "0.0.0.0:9090");
         assert_eq!(cfg.db_path, "/var/lib/kcore/controller.db");
         assert_eq!(cfg.default_network.internal_netmask, "255.255.255.0");
+        assert!(!cfg.require_manual_approval);
         assert!(cfg.replication.is_none());
         let _ = std::fs::remove_file(path);
     }
@@ -205,6 +206,29 @@ replication:
   dcId: DC1
   peers:
     - 10.0.0.11:9090
+"#,
+        )
+        .expect("write config");
+        let err = Config::load(path.to_str().expect("path str")).expect_err("must fail");
+        assert!(err
+            .to_string()
+            .contains("replication.controllerId is required"));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn load_rejects_empty_peers_replication_without_controller_id() {
+        let path = temp_config_path("repl-empty-peers");
+        std::fs::write(
+            &path,
+            r#"
+defaultNetwork:
+  gatewayInterface: eno1
+  externalIp: 203.0.113.10
+  gatewayIp: 10.0.0.1
+replication:
+  dcId: DC1
+  peers: []
 "#,
         )
         .expect("write config");

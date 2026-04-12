@@ -861,6 +861,9 @@
                         - \"$ctrl\""
                                                                     fi
                                                                   done
+                                                                  if [ -z "$REPL_PEERS_YAML" ]; then
+                                                                    REPL_PEERS_YAML=" []"
+                                                                  fi
                                                                   cat >> /mnt/etc/kcore/controller.yaml <<REPLEOF
                       replication:
                         controllerId: "kcore-controller-$EXTERNAL_IP"

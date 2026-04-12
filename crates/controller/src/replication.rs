@@ -18,6 +18,17 @@ use crate::replication_policy::{
 
 const DEFAULT_PAGE_SIZE: i32 = 500;
 const MAX_PAGE_SIZE: i32 = 5_000;
+
+/// Best-effort detection of a non-loopback, non-link-local IPv4 address
+/// when the controller is bound to a wildcard address and no `external_ip`
+/// is configured. Returns `None` if no suitable address is found.
+fn detect_advertisable_ip() -> Option<String> {
+    use std::net::UdpSocket;
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect("8.8.8.8:80").ok()?;
+    let addr = socket.local_addr().ok()?;
+    Some(addr.ip().to_string())
+}
 const ERROR_BACKOFF_SECS: u64 = 5;
 const IDLE_POLL_SECS: u64 = 2;
 const CROSS_DC_IDLE_POLL_SECS: u64 = 5;
@@ -46,14 +57,29 @@ pub fn emit_controller_register(db: &Database, cfg: &crate::config::Config) {
 
     let listen_addr = cfg.listen_addr.trim();
     let external_ip = cfg.default_network.external_ip.trim();
-    let address = if external_ip.is_empty() {
-        listen_addr.to_string()
-    } else {
-        let port = listen_addr
-            .rsplit_once(':')
-            .map(|(_, p)| p)
-            .unwrap_or("9090");
+    let port = listen_addr
+        .rsplit_once(':')
+        .map(|(_, p)| p)
+        .unwrap_or("9090");
+    let address = if !external_ip.is_empty() {
         format!("{external_ip}:{port}")
+    } else {
+        let host = listen_addr
+            .rsplit_once(':')
+            .map(|(h, _)| h)
+            .unwrap_or(listen_addr);
+        let is_wildcard = host == "0.0.0.0" || host == "::" || host == "[::]" || host.is_empty();
+        if is_wildcard {
+            if let Some(ip) = detect_advertisable_ip() {
+                format!("{ip}:{port}")
+            } else {
+                warn!("controller bound to wildcard address and no external_ip configured; \
+                       emitting listen_addr as-is — peers may not be able to dial this endpoint");
+                listen_addr.to_string()
+            }
+        } else {
+            listen_addr.to_string()
+        }
     };
 
     let dc_id = &replication.dc_id;
@@ -1252,7 +1278,8 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                 })
                 .unwrap_or_default();
             if !ssh_keys.is_empty() {
-                let _ = db.associate_vm_ssh_keys(vm_id, &ssh_keys);
+                db.associate_vm_ssh_keys(vm_id, &ssh_keys)
+                    .map_err(|e| format!("associating SSH keys for vm {vm_id}: {e}"))?;
             }
             Ok(())
         }

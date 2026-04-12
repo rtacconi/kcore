@@ -486,7 +486,7 @@ pub async fn install(
                     match ctx_name {
                         Some(name) => {
                             if let Some(ctx) = cfg.contexts.get_mut(&name) {
-                                if !ctx.controllers.iter().any(|c| c.contains(&node_host)) {
+                                if !ctx.controllers.iter().any(|c| c == &new_addr) {
                                     ctx.controllers.push(new_addr.clone());
                                     match crate::config::save_config(config_path, &cfg) {
                                         Ok(()) => println!("Added {new_addr} to kctl controllers list in context '{name}'"),
@@ -507,6 +507,24 @@ pub async fn install(
     }
 }
 
+fn normalize_controller_endpoint(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.parse::<std::net::SocketAddr>().is_ok() {
+        return trimmed.to_string();
+    }
+    if trimmed.starts_with('[') {
+        return format!("{trimmed}:9090");
+    }
+    let colon_count = trimmed.chars().filter(|&c| c == ':').count();
+    if colon_count > 1 {
+        return format!("[{trimmed}]:9090");
+    }
+    if colon_count == 1 {
+        return trimmed.to_string();
+    }
+    format!("{trimmed}:9090")
+}
+
 fn validate_install_controller_mode(
     join_controllers: &[String],
     run_controller: bool,
@@ -515,7 +533,7 @@ fn validate_install_controller_mode(
         .iter()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
-        .map(|v| if v.contains(':') { v } else { format!("{v}:9090") })
+        .map(|v| normalize_controller_endpoint(&v))
         .collect();
     let has_join = !normalized.is_empty();
     if !has_join && !run_controller {

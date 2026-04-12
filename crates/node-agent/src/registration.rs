@@ -24,7 +24,7 @@ pub fn register_with_controller_tracked(cfg: Config) -> Arc<Notify> {
     let signal = registered.clone();
     tokio::spawn(async move {
         register_with_controller(&cfg).await;
-        signal.notify_waiters();
+        signal.notify_one();
     });
     registered
 }

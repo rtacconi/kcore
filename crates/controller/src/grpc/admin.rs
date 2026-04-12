@@ -1,6 +1,6 @@
 use tokio::process::Command;
 use tonic::{Request, Response, Status};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::config::ReplicationConfig;
@@ -147,12 +147,19 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         // Only address + last_seen_at are updated here; the peer's real dc_id
         // is set authoritatively by controller.register materialization.
         let peer_id = req.peer_id.trim();
-        if let Some(ip) = peer_id.strip_prefix(CN_CONTROLLER_PREFIX) {
-            if !ip.is_empty() {
-                let _ = self.db.upsert_controller_peer_address_only(
+        if let Some(host) = peer_id.strip_prefix(CN_CONTROLLER_PREFIX) {
+            if !host.is_empty() {
+                let peer_addr = if host.contains(':') {
+                    host.to_string()
+                } else {
+                    format!("{host}:9090")
+                };
+                if let Err(e) = self.db.upsert_controller_peer_address_only(
                     peer_id,
-                    &format!("{ip}:{}", self.listen_port),
-                );
+                    &peer_addr,
+                ) {
+                    warn!(peer_id = %peer_id, error = %e, "failed to auto-register acking controller peer");
+                }
             }
         }
 

@@ -16,7 +16,12 @@ pub fn create(
     if !force {
         if let Ok(existing_cfg) = config::load_config(config_path) {
             if let Some(ctx) = existing_cfg.contexts.get(context_name) {
-                let has_creds = ctx.ca_data.is_some() || ctx.ca.is_some();
+                let has_creds = ctx.ca_data.is_some()
+                    || ctx.ca.is_some()
+                    || ctx.cert_data.is_some()
+                    || ctx.cert.is_some()
+                    || ctx.key_data.is_some()
+                    || ctx.key.is_some();
                 if has_creds {
                     anyhow::bail!(
                         "context '{}' already has TLS credentials in {}. \

@@ -192,7 +192,12 @@ pub fn save_config(path: &Path, config: &Config) -> Result<()> {
         std::fs::create_dir_all(parent)?;
     }
     let data = serde_yaml::to_string(config)?;
-    std::fs::write(path, data)?;
+    std::fs::write(path, &data)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600));
+    }
     Ok(())
 }
 
@@ -367,15 +372,29 @@ pub fn resolve_controller(
 }
 
 /// Extract TLS material from a `Context`: inline data (decoded) or file paths.
-/// Inline data takes precedence. No fallback directory.
+/// Inline data takes precedence per field — a config may mix inline `ca_data`
+/// with file-backed `cert`/`key`.
 fn resolve_tls_fields(
     ctx: &Context,
 ) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), String> {
     let (cert_pem, key_pem, ca_pem) = resolve_inline_pems(ctx)?;
-    if cert_pem.is_some() || key_pem.is_some() || ca_pem.is_some() {
-        return Ok((cert_pem, key_pem, ca_pem, None, None, None));
+    let cert_path = if ctx.cert_data.is_some() { None } else { ctx.cert.clone() };
+    let key_path = if ctx.key_data.is_some() { None } else { ctx.key.clone() };
+    let ca_path = if ctx.ca_data.is_some() { None } else { ctx.ca.clone() };
+
+    let has_cert = cert_pem.is_some() || cert_path.is_some();
+    let has_key = key_pem.is_some() || key_path.is_some();
+    let has_ca = ca_pem.is_some() || ca_path.is_some();
+    let present_count = [has_cert, has_key, has_ca].iter().filter(|&&b| b).count();
+    if present_count > 0 && present_count < 3 {
+        return Err(
+            "incomplete TLS config: secure mode requires all of CA, client certificate, and client key \
+             (either inline *_data or file paths)"
+                .to_string(),
+        );
     }
-    Ok((None, None, None, ctx.cert.clone(), ctx.key.clone(), ctx.ca.clone()))
+
+    Ok((cert_pem, key_pem, ca_pem, cert_path, key_path, ca_path))
 }
 
 /// Resolve a node-agent address. The `--node` flag is required for direct node commands.
@@ -383,6 +402,7 @@ pub fn resolve_node(
     config_path: &Path,
     node_flag: &Option<String>,
     insecure_flag: bool,
+    tls_server_name_flag: Option<String>,
 ) -> Result<ConnectionInfo, String> {
     let addr = node_flag
         .as_deref()
@@ -392,11 +412,16 @@ pub fn resolve_node(
     let ctx = cfg.current_context().ok();
 
     let is_insecure = insecure_flag || ctx.map(|c| c.insecure).unwrap_or(false);
-    let tls_server_name = ctx.and_then(|c| {
-        c.tls_server_name
-            .as_ref()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
+    let tls_from_cli = tls_server_name_flag
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+    let tls_server_name = tls_from_cli.or_else(|| {
+        ctx.and_then(|c| {
+            c.tls_server_name
+                .as_ref()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+        })
     });
 
     if is_insecure {
@@ -456,7 +481,7 @@ mod tests {
 
     #[test]
     fn resolve_node_requires_node_flag() {
-        let result = resolve_node(Path::new("/nonexistent"), &None, true);
+        let result = resolve_node(Path::new("/nonexistent"), &None, true, None);
         match result {
             Ok(_) => panic!("expected missing --node error"),
             Err(err) => assert!(err.contains("--node flag is required")),
@@ -465,7 +490,7 @@ mod tests {
 
     #[test]
     fn resolve_node_defaults_port_and_uses_insecure_mode() {
-        let info = resolve_node(Path::new("/nonexistent"), &Some("10.0.0.21".into()), true)
+        let info = resolve_node(Path::new("/nonexistent"), &Some("10.0.0.21".into()), true, None)
             .expect("resolve node");
         assert_eq!(info.address, "10.0.0.21:9091");
         assert_eq!(info.addresses, vec!["10.0.0.21:9091"]);

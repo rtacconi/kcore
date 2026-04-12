@@ -35,6 +35,17 @@ pub struct CreateArgs {
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
+    let has_target_node = args
+        .target_node
+        .as_deref()
+        .is_some_and(|v| !v.trim().is_empty());
+    let has_target_dc = args
+        .target_dc
+        .as_deref()
+        .is_some_and(|v| !v.trim().is_empty());
+    if has_target_node && has_target_dc {
+        bail!("--target-node and --target-dc are mutually exclusive");
+    }
     if args.wait_for_ssh && args.ssh_port <= 0 {
         bail!("--ssh-port must be > 0 when using --wait-for-ssh");
     }
@@ -228,7 +239,7 @@ async fn wait_for_vm_readiness(
                     address: node_address,
                     addresses: vec![],
                     insecure: info.insecure,
-                    tls_server_name: info.tls_server_name.clone(),
+                    tls_server_name: None,
                     cert_pem: info.cert_pem.clone(),
                     key_pem: info.key_pem.clone(),
                     ca_pem: info.ca_pem.clone(),
@@ -450,7 +461,7 @@ pub async fn describe(
             address: node_address,
             addresses: vec![],
             insecure: info.insecure,
-            tls_server_name: info.tls_server_name.clone(),
+            tls_server_name: None,
             cert_pem: info.cert_pem.clone(),
             key_pem: info.key_pem.clone(),
             ca_pem: info.ca_pem.clone(),

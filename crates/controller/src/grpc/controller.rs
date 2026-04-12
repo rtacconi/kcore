@@ -753,6 +753,15 @@ impl controller_proto::controller_server::Controller for ControllerService {
             }
         };
 
+        let dc_id = if req.dc_id.trim().is_empty() {
+            existing
+                .as_ref()
+                .map(|n| n.dc_id.clone())
+                .unwrap_or_default()
+        } else {
+            req.dc_id.clone()
+        };
+
         let node = NodeRow {
             id: req.node_id.clone(),
             hostname: req.hostname.clone(),
@@ -773,7 +782,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             approval_status: approval_status.clone(),
             cert_expiry_days: req.cert_expiry_days,
             luks_method: req.luks_method.clone(),
-            dc_id: req.dc_id.clone(),
+            dc_id: dc_id.clone(),
         };
 
         self.db
@@ -803,7 +812,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 "approvalStatus": approval_status,
                 "labels": req.labels,
                 "luksMethod": req.luks_method,
-                "dcId": req.dc_id,
+                "dcId": dc_id,
             }),
         )?;
 
@@ -1296,7 +1305,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
         let ssh_key_names: Vec<String> = self
             .db
             .get_vm_ssh_key_names(&vm_id)
-            .unwrap_or_default();
+            .map_err(|e| Status::internal(format!("listing VM SSH keys for replication: {e}")))?;
 
         self.log_replication_event(
             EVT_VM_CREATE,

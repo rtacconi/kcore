@@ -382,7 +382,7 @@ mod tests {
                 approval_status: "approved".into(),
                 cert_expiry_days: 90,
                 luks_method: "tpm2".into(),
-                dc_id: String::new(),
+                dc_id: "DC2".into(),
             }],
             nodes_luks_tpm2: 1,
             nodes_luks_keyfile: 0,
@@ -393,6 +393,7 @@ mod tests {
         assert_eq!(d.total_vms, 3);
         assert_eq!(d.nodes.len(), 1);
         assert_eq!(d.nodes[0].hostname, "h1");
+        assert_eq!(d.nodes[0].dc_id, "DC2");
         assert_eq!(d.access_control[0].rpc_method, "ListVms");
     }
 
