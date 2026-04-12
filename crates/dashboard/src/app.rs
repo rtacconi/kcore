@@ -392,6 +392,7 @@ fn NodeDetailsTable(nodes: Vec<NodeSummaryDto>) -> impl IntoView {
                             <th>"ID"</th>
                             <th>"Hostname"</th>
                             <th>"Address"</th>
+                            <th>"DC"</th>
                             <th>"Status"</th>
                             <th>"Cert (days)"</th>
                         </tr>
@@ -402,6 +403,7 @@ fn NodeDetailsTable(nodes: Vec<NodeSummaryDto>) -> impl IntoView {
                                 <td><code class="inline">{n.node_id}</code></td>
                                 <td>{n.hostname}</td>
                                 <td>{n.address}</td>
+                                <td>{if n.dc_id.is_empty() { "-".to_string() } else { n.dc_id }}</td>
                                 <td>{n.approval_status}</td>
                                 <td>{n.cert_expiry_days}</td>
                             </tr>

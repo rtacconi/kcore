@@ -45,6 +45,7 @@ pub struct NodeRow {
     pub approval_status: String,
     pub cert_expiry_days: i32,
     pub luks_method: String,
+    pub dc_id: String,
 }
 
 #[derive(Debug, Clone)]
@@ -206,6 +207,14 @@ pub struct ReplicationReservationRow {
     pub status: String,
     pub error: String,
     pub retry_count: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ControllerPeerRow {
+    pub controller_id: String,
+    pub address: String,
+    pub dc_id: String,
+    pub last_seen_at: String,
 }
 
 impl Database {
@@ -698,7 +707,25 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 24;
+        if version < 25 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS controller_peers (
+                    controller_id TEXT PRIMARY KEY,
+                    address TEXT NOT NULL,
+                    dc_id TEXT NOT NULL DEFAULT 'DC1',
+                    last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        if version < 26 {
+            let _ = conn.execute(
+                "ALTER TABLE nodes ADD COLUMN dc_id TEXT NOT NULL DEFAULT ''",
+                [],
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 26;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -812,6 +839,64 @@ impl Database {
                 peer_id: row.get(0)?,
                 last_event_id: row.get(1)?,
                 updated_at: row.get(2)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn upsert_controller_peer(
+        &self,
+        controller_id: &str,
+        address: &str,
+        dc_id: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO controller_peers (controller_id, address, dc_id, last_seen_at)
+             VALUES (?1, ?2, ?3, datetime('now'))
+             ON CONFLICT(controller_id) DO UPDATE SET
+                address = excluded.address,
+                dc_id = excluded.dc_id,
+                last_seen_at = datetime('now')",
+            params![controller_id, address, dc_id],
+        )?;
+        Ok(())
+    }
+
+    /// Like `upsert_controller_peer` but only updates `address` and
+    /// `last_seen_at`, leaving `dc_id` unchanged. Used by the ack handler
+    /// so that a receiver doesn't clobber the peer's real DC identity
+    /// (which is set authoritatively by `controller.register` materialization).
+    pub fn upsert_controller_peer_address_only(
+        &self,
+        controller_id: &str,
+        address: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO controller_peers (controller_id, address, dc_id, last_seen_at)
+             VALUES (?1, ?2, 'DC1', datetime('now'))
+             ON CONFLICT(controller_id) DO UPDATE SET
+                address = excluded.address,
+                last_seen_at = datetime('now')",
+            params![controller_id, address],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_controller_peers(&self) -> Result<Vec<ControllerPeerRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT controller_id, address, dc_id, last_seen_at
+             FROM controller_peers
+             ORDER BY controller_id ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ControllerPeerRow {
+                controller_id: row.get(0)?,
+                address: row.get(1)?,
+                dc_id: row.get(2)?,
+                last_seen_at: row.get(3)?,
             })
         })?;
         rows.collect()
@@ -1402,8 +1487,8 @@ impl Database {
     pub fn upsert_node(&self, node: &NodeRow) -> Result<(), rusqlite::Error> {
         let conn = self.lock_conn()?;
         conn.execute(
-            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
+            "INSERT INTO nodes (id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method, dc_id)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
              ON CONFLICT(id) DO UPDATE SET
                 hostname=excluded.hostname,
                 address=excluded.address,
@@ -1417,7 +1502,8 @@ impl Database {
                 storage_backend=excluded.storage_backend,
                 disable_vxlan=excluded.disable_vxlan,
                 cert_expiry_days=excluded.cert_expiry_days,
-                luks_method=excluded.luks_method",
+                luks_method=excluded.luks_method,
+                dc_id=excluded.dc_id",
             params![
                 node.id,
                 node.hostname,
@@ -1434,6 +1520,7 @@ impl Database {
                 node.approval_status,
                 node.cert_expiry_days,
                 node.luks_method,
+                node.dc_id,
             ],
         )?;
         Ok(())
@@ -1458,7 +1545,10 @@ impl Database {
     ) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let rows = conn.execute(
-            "UPDATE nodes SET last_heartbeat = datetime('now'), status = 'ready', cpu_used = ?2, memory_used = ?3, cert_expiry_days = ?4, luks_method = ?5 WHERE id = ?1 AND approval_status = 'approved'",
+            "UPDATE nodes SET last_heartbeat = datetime('now'), \
+             status = CASE WHEN approval_status = 'approved' THEN 'ready' ELSE status END, \
+             cpu_used = ?2, memory_used = ?3, cert_expiry_days = ?4, luks_method = ?5 \
+             WHERE id = ?1",
             params![node_id, cpu_used, mem_used, cert_expiry_days, luks_method],
         )?;
         Ok(rows > 0)
@@ -1467,7 +1557,7 @@ impl Database {
     pub fn get_node(&self, node_id: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method FROM nodes WHERE id = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method, dc_id FROM nodes WHERE id = ?1",
         )?;
         let mut rows = stmt.query_map(params![node_id], row_to_node)?;
         rows.next().transpose()
@@ -1476,7 +1566,7 @@ impl Database {
     pub fn list_nodes(&self) -> Result<Vec<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method FROM nodes",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method, dc_id FROM nodes",
         )?;
         let rows = stmt.query_map([], row_to_node)?;
         rows.collect()
@@ -1485,7 +1575,7 @@ impl Database {
     pub fn get_node_by_address(&self, address: &str) -> Result<Option<NodeRow>, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let mut stmt = conn.prepare(
-            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method FROM nodes WHERE address = ?1",
+            "SELECT id, hostname, address, cpu_cores, memory_bytes, status, last_heartbeat, gateway_interface, cpu_used, memory_used, storage_backend, disable_vxlan, approval_status, cert_expiry_days, luks_method, dc_id FROM nodes WHERE address = ?1",
         )?;
         let mut rows = stmt.query_map(params![address], row_to_node)?;
         rows.next().transpose()
@@ -2210,6 +2300,15 @@ impl Database {
         rows.collect()
     }
 
+    pub fn get_vm_ssh_key_names(&self, vm_id: &str) -> Result<Vec<String>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT key_name FROM vm_ssh_keys WHERE vm_id = ?1",
+        )?;
+        let rows = stmt.query_map(params![vm_id], |row| row.get::<_, String>(0))?;
+        rows.collect()
+    }
+
     pub fn update_node_status(&self, node_id: &str, status: &str) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let rows = conn.execute(
@@ -2336,6 +2435,7 @@ fn row_to_node(row: &rusqlite::Row) -> Result<NodeRow, rusqlite::Error> {
         approval_status: row.get(12)?,
         cert_expiry_days: row.get(13)?,
         luks_method: row.get(14)?,
+        dc_id: row.get(15)?,
     })
 }
 
@@ -2445,6 +2545,7 @@ mod tests {
             approval_status: "approved".to_string(),
             cert_expiry_days: -1,
             luks_method: String::new(),
+            dc_id: "DC1".to_string(),
         }
     }
 
@@ -2681,7 +2782,7 @@ mod tests {
     }
 
     #[test]
-    fn heartbeat_skips_non_approved_nodes() {
+    fn heartbeat_updates_timestamp_but_preserves_status_for_non_approved_nodes() {
         let db = Database::open(":memory:").expect("open db");
         let mut node = test_node();
         node.approval_status = "pending".to_string();
@@ -2691,10 +2792,11 @@ mod tests {
         let updated = db
             .update_heartbeat(&node.id, 1, 1000, -1, "")
             .expect("heartbeat");
-        assert!(!updated, "heartbeat should not update a non-approved node");
+        assert!(updated, "heartbeat should update a registered node regardless of approval");
 
         let got = db.get_node(&node.id).expect("get").expect("exists");
-        assert_eq!(got.status, "pending", "status should still be pending");
+        assert_eq!(got.status, "pending", "status should still be pending for non-approved");
+        assert!(!got.last_heartbeat.is_empty(), "heartbeat timestamp should be set");
     }
 
     #[test]
@@ -3258,6 +3360,7 @@ mod tests {
             approval_status: "approved".to_string(),
             cert_expiry_days: -1,
             luks_method: String::new(),
+            dc_id: "DC1".to_string(),
         };
         db.upsert_node(&node).expect("node");
         db.insert_vm(&VmRow {
@@ -3313,5 +3416,33 @@ mod tests {
             .expect("net groups");
         assert_eq!(vm_groups, vec!["web".to_string()]);
         assert_eq!(net_groups, vec!["web".to_string()]);
+    }
+
+    #[test]
+    fn upsert_peer_address_only_preserves_dc_id() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_controller_peer("ctrl-dc2", "10.0.1.50:9090", "DC2")
+            .expect("full upsert");
+        let peers = db.list_controller_peers().expect("list");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].dc_id, "DC2");
+
+        db.upsert_controller_peer_address_only("ctrl-dc2", "10.0.1.50:9091")
+            .expect("address-only upsert");
+        let peers = db.list_controller_peers().expect("list");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].dc_id, "DC2");
+        assert_eq!(peers[0].address, "10.0.1.50:9091");
+    }
+
+    #[test]
+    fn upsert_peer_address_only_inserts_with_default_dc() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_controller_peer_address_only("ctrl-new", "10.0.2.1:9090")
+            .expect("address-only insert");
+        let peers = db.list_controller_peers().expect("list");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].dc_id, "DC1");
+        assert_eq!(peers[0].address, "10.0.2.1:9090");
     }
 }

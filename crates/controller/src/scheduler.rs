@@ -36,6 +36,31 @@ pub fn select_node_for_vm(
         })
 }
 
+/// Like `select_node_for_vm` but restricts candidates to nodes in the
+/// specified datacenter. Returns `None` if no node in that DC has
+/// sufficient capacity.
+pub fn select_node_for_vm_in_dc<'a>(
+    nodes: &'a [NodeRow],
+    requested_cpu: i32,
+    requested_memory: i64,
+    dc_id: &str,
+) -> Option<&'a NodeRow> {
+    let dc_nodes: Vec<&NodeRow> = nodes.iter().filter(|n| n.dc_id == dc_id).collect();
+    dc_nodes
+        .into_iter()
+        .filter(|n| {
+            n.status == "ready"
+                && n.approval_status == "approved"
+                && (n.cpu_cores - n.cpu_used) >= requested_cpu
+                && (n.memory_bytes - n.memory_used) >= requested_memory
+        })
+        .max_by_key(|n| {
+            let free_mem = n.memory_bytes - n.memory_used;
+            let free_cpu = (n.cpu_cores - n.cpu_used) as i64;
+            (free_mem, free_cpu)
+        })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -57,6 +82,7 @@ mod tests {
             approval_status: "approved".into(),
             cert_expiry_days: -1,
             luks_method: String::new(),
+            dc_id: "DC1".into(),
         }
     }
 
@@ -91,5 +117,37 @@ mod tests {
         let mut n = node("n1", 8, 16_000_000_000, 0, 0);
         n.status = "unknown".into();
         assert!(select_node(&[n]).is_none());
+    }
+
+    #[test]
+    fn select_node_for_vm_in_dc_filters_by_dc() {
+        let mut n1 = node("n1", 8, 16_000_000_000, 0, 0);
+        n1.dc_id = "DC1".into();
+        let mut n2 = node("n2", 8, 16_000_000_000, 0, 0);
+        n2.dc_id = "DC2".into();
+        let nodes = vec![n1, n2];
+
+        let picked = select_node_for_vm_in_dc(&nodes, 2, 4_000_000_000, "DC2").unwrap();
+        assert_eq!(picked.id, "n2");
+    }
+
+    #[test]
+    fn select_node_for_vm_in_dc_returns_none_for_empty_dc() {
+        let nodes = vec![node("n1", 8, 16_000_000_000, 0, 0)];
+        assert!(select_node_for_vm_in_dc(&nodes, 2, 4_000_000_000, "DC2").is_none());
+    }
+
+    #[test]
+    fn select_node_for_vm_in_dc_picks_best_in_dc() {
+        let mut n1 = node("n1", 8, 16_000_000_000, 6, 12_000_000_000);
+        n1.dc_id = "DC1".into();
+        let mut n2 = node("n2", 8, 16_000_000_000, 2, 4_000_000_000);
+        n2.dc_id = "DC1".into();
+        let mut n3 = node("n3", 8, 32_000_000_000, 0, 0);
+        n3.dc_id = "DC2".into();
+        let nodes = vec![n1, n2, n3];
+
+        let picked = select_node_for_vm_in_dc(&nodes, 2, 4_000_000_000, "DC1").unwrap();
+        assert_eq!(picked.id, "n2");
     }
 }

@@ -1,7 +1,7 @@
 use tokio::process::Command;
 use tonic::{Request, Response, Status};
 
-use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::proto;
 use crate::vmm;
 
@@ -37,7 +37,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::GetVmRequest>,
     ) -> Result<Response<proto::GetVmResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let vm_id = &request.get_ref().vm_id;
         let info = self
             .client
@@ -70,7 +70,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::ListVmsRequest>,
     ) -> Result<Response<proto::ListVmsResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let vms = self.client.list_vms().await;
 
         let vm_infos = vms
@@ -96,7 +96,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::CreateVmRequest>,
     ) -> Result<Response<proto::CreateVmResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
@@ -104,7 +104,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::UpdateVmRequest>,
     ) -> Result<Response<proto::UpdateVmResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
@@ -112,7 +112,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::DeleteVmRequest>,
     ) -> Result<Response<proto::DeleteVmResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
@@ -120,7 +120,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::SetVmDesiredStateRequest>,
     ) -> Result<Response<proto::SetVmDesiredStateResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let vm_name = req.vm_id.trim();
         if vm_name.is_empty() {
@@ -166,7 +166,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::RebootVmRequest>,
     ) -> Result<Response<proto::RebootVmResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
@@ -174,7 +174,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::PullImageRequest>,
     ) -> Result<Response<proto::PullImageResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         Err(Status::unimplemented(DECLARATIVE_MSG))
     }
 
@@ -182,7 +182,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::ListImagesRequest>,
     ) -> Result<Response<proto::ListImagesResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let cache_dir = std::path::Path::new("/var/lib/kcore/images");
         let mut images = Vec::new();
         if let Ok(entries) = std::fs::read_dir(cache_dir) {
@@ -216,7 +216,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::DeleteImageRequest>,
     ) -> Result<Response<proto::DeleteImageResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let name = req.name.trim();
         if name.is_empty() {
@@ -255,7 +255,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::CreateWorkloadRequest>,
     ) -> Result<Response<proto::CreateWorkloadResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let kind =
             proto::WorkloadKind::try_from(req.kind).unwrap_or(proto::WorkloadKind::Unspecified);
@@ -280,7 +280,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::DeleteWorkloadRequest>,
     ) -> Result<Response<proto::DeleteWorkloadResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let kind =
             proto::WorkloadKind::try_from(req.kind).unwrap_or(proto::WorkloadKind::Unspecified);
@@ -297,7 +297,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::SetWorkloadDesiredStateRequest>,
     ) -> Result<Response<proto::SetWorkloadDesiredStateResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let kind =
             proto::WorkloadKind::try_from(req.kind).unwrap_or(proto::WorkloadKind::Unspecified);
@@ -346,7 +346,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::GetWorkloadRequest>,
     ) -> Result<Response<proto::GetWorkloadResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let kind =
             proto::WorkloadKind::try_from(req.kind).unwrap_or(proto::WorkloadKind::Unspecified);
@@ -386,7 +386,7 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
         &self,
         request: Request<proto::ListWorkloadsRequest>,
     ) -> Result<Response<proto::ListWorkloadsResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let kind =
             proto::WorkloadKind::try_from(req.kind).unwrap_or(proto::WorkloadKind::Unspecified);

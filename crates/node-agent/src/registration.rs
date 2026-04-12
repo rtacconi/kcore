@@ -1,5 +1,7 @@
 use std::path::Path;
+use std::sync::Arc;
 
+use tokio::sync::Notify;
 use tonic::transport::{Certificate, Channel, ClientTlsConfig, Identity};
 use tracing::{error, info, warn};
 
@@ -12,6 +14,20 @@ const MAX_REGISTRATION_RETRIES: u32 = 12;
 const HEARTBEAT_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
 const RENEWAL_THRESHOLD_DAYS: i64 = 30;
 const RENEWAL_CHECK_INTERVAL: std::time::Duration = std::time::Duration::from_secs(86400);
+
+/// Spawn registration in a background task and return a Notify that fires
+/// when registration completes (or exhausts retries). Heartbeat loop waits
+/// on this signal so it doesn't send heartbeats before the node exists on
+/// any controller.
+pub fn register_with_controller_tracked(cfg: Config) -> Arc<Notify> {
+    let registered = Arc::new(Notify::new());
+    let signal = registered.clone();
+    tokio::spawn(async move {
+        register_with_controller(&cfg).await;
+        signal.notify_waiters();
+    });
+    registered
+}
 
 pub async fn register_with_controller(cfg: &Config) {
     let disable_vxlan = Path::new(DISABLE_VXLAN_MARKER).exists();
@@ -159,6 +175,7 @@ async fn connect_and_register(
             disable_vxlan,
             cert_expiry_days: cert_expiry,
             luks_method: detect_luks_method(),
+            dc_id: cfg.dc_id.clone(),
         })
         .await?;
     Ok(())
@@ -243,8 +260,9 @@ pub fn start_cert_renewal_loop(cfg: Config) {
     });
 }
 
-pub fn start_heartbeat_loop(cfg: Config) {
+pub fn start_heartbeat_loop(cfg: Config, registration_done: Arc<Notify>) {
     tokio::spawn(async move {
+        registration_done.notified().await;
         loop {
             if let Err(e) = send_heartbeat_once(&cfg).await {
                 warn!(error = %e, "heartbeat failed on all controller endpoints");

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde_json::Value;
@@ -18,6 +20,10 @@ const DEFAULT_PAGE_SIZE: i32 = 500;
 const MAX_PAGE_SIZE: i32 = 5_000;
 const ERROR_BACKOFF_SECS: u64 = 5;
 const IDLE_POLL_SECS: u64 = 2;
+const CROSS_DC_IDLE_POLL_SECS: u64 = 5;
+const CROSS_DC_ERROR_BACKOFF_SECS: u64 = 15;
+const CONNECT_TIMEOUT_SECS: u64 = 10;
+const RPC_TIMEOUT_SECS: u64 = 30;
 const COMPENSATION_IDLE_SECS: u64 = 2;
 const MATERIALIZER_IDLE_SECS: u64 = 2;
 const MATERIALIZER_BATCH_SIZE: i64 = 256;
@@ -25,6 +31,72 @@ const RESERVATION_MAX_RETRIES: i32 = 3;
 const RESERVATION_RETRY_IDLE_SECS: u64 = 2;
 const RESERVATION_RETRY_COOLDOWN_SECS: i64 = 5;
 const RESERVATION_RETRY_BATCH_SIZE: i64 = 32;
+
+/// Emit a `controller.register` event into the replication outbox so that
+/// other controllers discover this one via CRDT materialization.
+/// Also upserts self into the local `controller_peers` table.
+pub fn emit_controller_register(db: &Database, cfg: &crate::config::Config) {
+    let Some(replication) = &cfg.replication else {
+        return;
+    };
+    let controller_id = replication.controller_id.trim();
+    if controller_id.is_empty() {
+        return;
+    }
+
+    let listen_addr = cfg.listen_addr.trim();
+    let external_ip = cfg.default_network.external_ip.trim();
+    let address = if external_ip.is_empty() {
+        listen_addr.to_string()
+    } else {
+        let port = listen_addr
+            .rsplit_once(':')
+            .map(|(_, p)| p)
+            .unwrap_or("9090");
+        format!("{external_ip}:{port}")
+    };
+
+    let dc_id = &replication.dc_id;
+    let resource_key = format!("controller/{controller_id}");
+
+    let logical_ts_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let envelope = serde_json::json!({
+        "schemaVersion": 1,
+        "opId": uuid::Uuid::new_v4().to_string(),
+        "logicalTsUnixMs": logical_ts_unix_ms,
+        "controllerId": controller_id,
+        "dcId": dc_id,
+        "eventType": "controller.register",
+        "resourceKey": resource_key,
+        "body": {
+            "controllerId": controller_id,
+            "address": address,
+            "dcId": dc_id,
+        },
+    });
+
+    if let Ok(payload) = serde_json::to_vec(&envelope) {
+        if let Err(e) =
+            db.append_replication_outbox("controller.register", &resource_key, &payload)
+        {
+            warn!(error = %e, "failed to emit controller.register event");
+        } else {
+            info!(
+                controller_id = %controller_id,
+                address = %address,
+                "emitted controller.register replication event"
+            );
+        }
+    }
+
+    if let Err(e) = db.upsert_controller_peer(controller_id, &address, dc_id) {
+        warn!(error = %e, "failed to upsert local controller peer record");
+    }
+}
 
 pub fn spawn_replication_pollers(
     db: Database,
@@ -36,32 +108,109 @@ pub fn spawn_replication_pollers(
         return;
     };
 
-    if replication.peers.is_empty() {
-        return;
-    }
-
     let local_controller_id = replication.controller_id.trim().to_string();
     if local_controller_id.is_empty() {
-        warn!("replication configured with peers but empty controller_id; pollers disabled");
+        warn!("replication configured but empty controller_id; pollers disabled");
         return;
     }
+    let local_dc_id = replication.dc_id.clone();
 
-    for peer in replication.peers {
+    let active_peers: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+    let listen_addr_owned = listen_addr.to_string();
+
+    for peer in &replication.peers {
         let peer = peer.trim().to_string();
         if peer.is_empty() {
             continue;
         }
-        if same_endpoint(listen_addr, &peer) {
+        if same_endpoint(&listen_addr_owned, &peer) {
             info!(peer = %peer, "skipping replication peer that resolves to local controller");
             continue;
+        }
+        {
+            let mut set = active_peers.lock().unwrap_or_else(|e| e.into_inner());
+            set.insert(endpoint_host_port(&peer).to_ascii_lowercase());
         }
         let db = db.clone();
         let tls = tls.clone();
         let local_controller_id = local_controller_id.clone();
+        // Static peers from config: DC unknown at startup, assume same-DC (faster polling).
+        // Real DC will be determined by peer discovery once controller.register materializes.
         tokio::spawn(async move {
-            replication_peer_loop(db, &peer, &local_controller_id, tls).await;
+            replication_peer_loop(db, &peer, &local_controller_id, tls, false).await;
         });
     }
+
+    spawn_peer_discovery(
+        db,
+        tls,
+        listen_addr_owned,
+        local_controller_id,
+        local_dc_id,
+        active_peers,
+    );
+}
+
+const PEER_DISCOVERY_INTERVAL_SECS: u64 = 10;
+
+fn spawn_peer_discovery(
+    db: Database,
+    tls: Option<TlsConfig>,
+    listen_addr: String,
+    local_controller_id: String,
+    local_dc_id: String,
+    active_peers: Arc<Mutex<HashSet<String>>>,
+) {
+    tokio::spawn(async move {
+        let mut first_run = true;
+        loop {
+            if first_run {
+                first_run = false;
+            } else {
+                tokio::time::sleep(Duration::from_secs(PEER_DISCOVERY_INTERVAL_SECS)).await;
+            }
+            let peers = match db.list_controller_peers() {
+                Ok(p) => p,
+                Err(e) => {
+                    warn!(error = %e, "peer discovery: failed to list controller_peers");
+                    continue;
+                }
+            };
+            for peer_row in peers {
+                if peer_row.controller_id == local_controller_id {
+                    continue;
+                }
+                let addr = peer_row.address.trim().to_string();
+                if addr.is_empty() {
+                    continue;
+                }
+                if same_endpoint(&listen_addr, &addr) {
+                    continue;
+                }
+                let key = endpoint_host_port(&addr).to_ascii_lowercase();
+                {
+                    let mut set = active_peers.lock().unwrap_or_else(|e| e.into_inner());
+                    if set.contains(&key) {
+                        continue;
+                    }
+                    set.insert(key);
+                }
+                let is_cross_dc = peer_row.dc_id != local_dc_id;
+                info!(
+                    peer = %addr,
+                    controller_id = %peer_row.controller_id,
+                    cross_dc = is_cross_dc,
+                    "peer discovery: starting replication poller for newly discovered controller"
+                );
+                let db = db.clone();
+                let tls = tls.clone();
+                let local_controller_id = local_controller_id.clone();
+                tokio::spawn(async move {
+                    replication_peer_loop(db, &addr, &local_controller_id, tls, is_cross_dc).await;
+                });
+            }
+        }
+    });
 }
 
 pub fn spawn_compensation_executor(db: Database) {
@@ -116,7 +265,10 @@ async fn replication_peer_loop(
     peer: &str,
     local_controller_id: &str,
     tls: Option<TlsConfig>,
+    is_cross_dc: bool,
 ) {
+    let idle_secs = if is_cross_dc { CROSS_DC_IDLE_POLL_SECS } else { IDLE_POLL_SECS };
+    let error_secs = if is_cross_dc { CROSS_DC_ERROR_BACKOFF_SECS } else { ERROR_BACKOFF_SECS };
     let local_frontier_key = format!("pull/{peer}");
     loop {
         match poll_once(
@@ -132,11 +284,11 @@ async fn replication_peer_loop(
                 if did_work {
                     continue;
                 }
-                tokio::time::sleep(Duration::from_secs(IDLE_POLL_SECS)).await;
+                tokio::time::sleep(Duration::from_secs(idle_secs)).await;
             }
             Err(e) => {
                 warn!(peer = %peer, error = %e, "replication poll failed");
-                tokio::time::sleep(Duration::from_secs(ERROR_BACKOFF_SECS)).await;
+                tokio::time::sleep(Duration::from_secs(error_secs)).await;
             }
         }
     }
@@ -444,7 +596,8 @@ fn apply_replication_event(
         | "security_group.attach"
         | "security_group.detach"
         | "ssh_key.create"
-        | "ssh_key.delete" => {
+        | "ssh_key.delete"
+        | "controller.register" => {
             // Phase-2 skeleton: payload validation + typed dispatch point.
             Ok(())
         }
@@ -871,6 +1024,12 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                     .or_else(|| existing.as_ref().map(|n| n.luks_method.as_str()))
                     .unwrap_or_default()
                     .to_string(),
+                dc_id: body
+                    .get("dcId")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.dc_id.as_str()))
+                    .unwrap_or_default()
+                    .to_string(),
             };
             db.upsert_node(&node)
                 .map_err(|e| format!("upsert node {node_id}: {e}"))?;
@@ -977,6 +1136,12 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                     .or_else(|| existing.as_ref().map(|n| n.luks_method.as_str()))
                     .unwrap_or_default()
                     .to_string(),
+                dc_id: body
+                    .get("dcId")
+                    .and_then(Value::as_str)
+                    .or_else(|| existing.as_ref().map(|n| n.dc_id.as_str()))
+                    .unwrap_or_default()
+                    .to_string(),
             };
             db.upsert_node(&node)
                 .map_err(|e| format!("upsert heartbeat node {node_id}: {e}"))?;
@@ -1077,6 +1242,18 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
             let _ = db.delete_vm_by_id_or_name(vm_id);
             db.insert_vm(&vm)
                 .map_err(|e| format!("insert vm {vm_id} from replication head: {e}"))?;
+            let ssh_keys: Vec<String> = body
+                .get("sshKeyNames")
+                .and_then(Value::as_array)
+                .map(|vals| {
+                    vals.iter()
+                        .filter_map(|v| v.as_str().map(ToString::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            if !ssh_keys.is_empty() {
+                let _ = db.associate_vm_ssh_keys(vm_id, &ssh_keys);
+            }
             Ok(())
         }
         "vm.desired_state.set" => {
@@ -1274,6 +1451,7 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                     .map_err(|e| format!("attach security group {sg} to vm {target_id}: {e}"))?,
                 2 => {
                     let node_id = required_str(&body, "targetNode", &head.resource_key)?;
+                    ensure_replicated_node_exists(db, node_id)?;
                     db.attach_security_group_to_network(sg, target_id, node_id)
                         .map_err(|e| {
                             format!(
@@ -1346,6 +1524,17 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
                 .map_err(|e| format!("delete ssh key {name}: {e}"))?;
             Ok(())
         }
+        "controller.register" => {
+            let controller_id = required_str(&body, "controllerId", &head.resource_key)?;
+            let address = required_str(&body, "address", &head.resource_key)?;
+            let dc_id = body
+                .get("dcId")
+                .and_then(Value::as_str)
+                .unwrap_or("DC1");
+            db.upsert_controller_peer(controller_id, address, dc_id)
+                .map_err(|e| format!("upsert controller peer {controller_id}: {e}"))?;
+            Ok(())
+        }
         _ => Ok(()),
     }
 }
@@ -1368,7 +1557,6 @@ fn ensure_replicated_node_exists(db: &Database, node_id: &str) -> Result<(), Str
     let placeholder = NodeRow {
         id: node_id.to_string(),
         hostname: node_id.to_string(),
-        // Use a stable placeholder address; real registration will upsert full data later.
         address: format!("{node_id}.replicated:9091"),
         cpu_cores: 0,
         memory_bytes: 0,
@@ -1382,6 +1570,7 @@ fn ensure_replicated_node_exists(db: &Database, node_id: &str) -> Result<(), Str
         approval_status: "pending".to_string(),
         cert_expiry_days: 0,
         luks_method: "unknown".to_string(),
+        dc_id: String::new(),
     };
     db.upsert_node(&placeholder)
         .map_err(|e| format!("create placeholder node {node_id}: {e}"))
@@ -1460,6 +1649,9 @@ async fn connect_admin(
 ) -> Result<controller_proto::controller_admin_client::ControllerAdminClient<Channel>, String> {
     let endpoint = normalize_endpoint(endpoint, tls.is_some());
     let mut ep = Channel::from_shared(endpoint).map_err(|e| e.to_string())?;
+    ep = ep
+        .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
+        .timeout(Duration::from_secs(RPC_TIMEOUT_SECS));
     if let Some(tls) = tls {
         let ca_pem = std::fs::read_to_string(&tls.ca_file).map_err(|e| e.to_string())?;
         let cert_pem = std::fs::read_to_string(&tls.cert_file).map_err(|e| e.to_string())?;
@@ -1523,6 +1715,7 @@ mod tests {
             approval_status: "approved".to_string(),
             cert_expiry_days: -1,
             luks_method: String::new(),
+            dc_id: "DC1".to_string(),
         }
     }
 
@@ -2401,5 +2594,93 @@ mod tests {
             fs::create_dir_all(parent).expect("create trace parent");
         }
         fs::write(output, as_json).expect("write trace");
+    }
+
+    #[test]
+    fn materializer_applies_controller_register() {
+        let db = Database::open(":memory:").expect("open db");
+        let head = ReplicationResourceHeadRow {
+            resource_key: "controller/kcore-controller-192-168-40-151".to_string(),
+            last_op_id: "op-ctrl-reg".to_string(),
+            last_logical_ts_unix_ms: 1000,
+            last_controller_id: "kcore-controller-192-168-40-151".to_string(),
+            last_event_id: 1,
+            last_event_type: "controller.register".to_string(),
+            last_body_json: serde_json::json!({
+                "controllerId": "kcore-controller-192-168-40-151",
+                "address": "192.168.40.151:9090",
+                "dcId": "DC1"
+            })
+            .to_string(),
+            last_policy_priority: 0,
+            last_intent_epoch: 0,
+            last_validity: "valid".to_string(),
+            last_safety_class: "safe".to_string(),
+        };
+        apply_head_to_domain(&db, &head).expect("materialize controller.register");
+
+        let peers = db.list_controller_peers().expect("list peers");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].controller_id, "kcore-controller-192-168-40-151");
+        assert_eq!(peers[0].address, "192.168.40.151:9090");
+        assert_eq!(peers[0].dc_id, "DC1");
+    }
+
+    #[test]
+    fn emit_controller_register_writes_outbox_and_local_peer() {
+        let db = Database::open(":memory:").expect("open db");
+        let cfg = crate::config::Config {
+            listen_addr: "0.0.0.0:9090".to_string(),
+            db_path: ":memory:".to_string(),
+            tls: None,
+            default_network: crate::config::NetworkConfig {
+                gateway_interface: "eth0".to_string(),
+                external_ip: "192.168.40.105".to_string(),
+                gateway_ip: "10.0.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+            },
+            replication: Some(ReplicationConfig {
+                controller_id: "kcore-controller-192-168-40-105".to_string(),
+                dc_id: "DC1".to_string(),
+                peers: vec![],
+            }),
+            require_manual_approval: false,
+        };
+        emit_controller_register(&db, &cfg);
+
+        let peers = db.list_controller_peers().expect("list peers");
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].controller_id, "kcore-controller-192-168-40-105");
+        assert_eq!(peers[0].address, "192.168.40.105:9090");
+
+        let outbox = db.list_replication_outbox_since(0, 10).expect("list outbox");
+        assert!(
+            outbox
+                .iter()
+                .any(|r| r.event_type == "controller.register"),
+            "controller.register event should be in outbox"
+        );
+    }
+
+    #[test]
+    fn emit_controller_register_skips_without_replication_config() {
+        let db = Database::open(":memory:").expect("open db");
+        let cfg = crate::config::Config {
+            listen_addr: "0.0.0.0:9090".to_string(),
+            db_path: ":memory:".to_string(),
+            tls: None,
+            default_network: crate::config::NetworkConfig {
+                gateway_interface: "eth0".to_string(),
+                external_ip: "192.168.40.105".to_string(),
+                gateway_ip: "10.0.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+            },
+            replication: None,
+            require_manual_approval: false,
+        };
+        emit_controller_register(&db, &cfg);
+
+        let peers = db.list_controller_peers().expect("list peers");
+        assert!(peers.is_empty());
     }
 }

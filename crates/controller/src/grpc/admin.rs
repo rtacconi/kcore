@@ -2,7 +2,7 @@ use tokio::process::Command;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
-use crate::auth::{self, CN_CONTROLLER, CN_CONTROLLER_PREFIX, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::config::ReplicationConfig;
 use crate::controller_proto;
 use crate::db::Database;
@@ -12,14 +12,21 @@ const ZERO_MANUAL_MAX_UNRESOLVED_AGE_SECS: i64 = 30;
 pub struct ControllerAdminService {
     db: Database,
     replication_peers: Vec<String>,
+    replication: Option<ReplicationConfig>,
+    listen_port: u16,
 }
 
 impl ControllerAdminService {
-    pub fn new(db: Database, replication: Option<ReplicationConfig>) -> Self {
-        let replication_peers = replication.map(|r| r.peers).unwrap_or_default();
+    pub fn new(db: Database, replication: Option<ReplicationConfig>, listen_port: u16) -> Self {
+        let replication_peers = replication
+            .as_ref()
+            .map(|r| r.peers.clone())
+            .unwrap_or_default();
         Self {
             db,
             replication_peers,
+            replication,
+            listen_port,
         }
     }
 }
@@ -78,7 +85,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::GetReplicationEventsRequest>,
     ) -> Result<Response<controller_proto::GetReplicationEventsResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let limit = if req.limit <= 0 {
             500
@@ -109,7 +116,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::AckReplicationEventsRequest>,
     ) -> Result<Response<controller_proto::AckReplicationEventsResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let peer_cn = auth::peer_cn(&request);
         let req = request.into_inner();
         if req.peer_id.trim().is_empty() {
@@ -120,7 +127,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         }
         if let Some(cn) = peer_cn {
             // Controllers may only acknowledge their own frontier identity.
-            if cn == CN_CONTROLLER || cn.starts_with(CN_CONTROLLER_PREFIX) {
+            if cn.starts_with(CN_CONTROLLER_PREFIX) {
                 if req.peer_id.trim() != cn {
                     return Err(Status::permission_denied(format!(
                         "peer '{}' is not allowed to ack as '{}'",
@@ -133,6 +140,22 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         self.db
             .upsert_replication_ack(req.peer_id.trim(), req.last_event_id)
             .map_err(|e| Status::internal(format!("upserting replication ack: {e}")))?;
+
+        // Auto-register the acking controller as a peer for CRDT discovery.
+        // When B pulls from A and acks, A learns about B's existence so
+        // A's peer discovery loop can start pulling from B (bidirectional).
+        // Only address + last_seen_at are updated here; the peer's real dc_id
+        // is set authoritatively by controller.register materialization.
+        let peer_id = req.peer_id.trim();
+        if let Some(ip) = peer_id.strip_prefix(CN_CONTROLLER_PREFIX) {
+            if !ip.is_empty() {
+                let _ = self.db.upsert_controller_peer_address_only(
+                    peer_id,
+                    &format!("{ip}:{}", self.listen_port),
+                );
+            }
+        }
+
         Ok(Response::new(
             controller_proto::AckReplicationEventsResponse { success: true },
         ))
@@ -142,7 +165,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::GetReplicationStatusRequest>,
     ) -> Result<Response<controller_proto::GetReplicationStatusResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let outbox_head_event_id = self
             .db
             .replication_outbox_head_id()
@@ -286,7 +309,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::ListReplicationConflictsRequest>,
     ) -> Result<Response<controller_proto::ListReplicationConflictsResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let limit = if req.limit <= 0 {
             100
@@ -318,7 +341,7 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
         &self,
         request: Request<controller_proto::ResolveReplicationConflictRequest>,
     ) -> Result<Response<controller_proto::ResolveReplicationConflictResponse>, Status> {
-        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER, CN_CONTROLLER_PREFIX])?;
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         if req.id <= 0 {
             return Err(Status::invalid_argument("id must be > 0"));
@@ -348,7 +371,7 @@ mod tests {
         let db = Database::open(":memory:").expect("open db");
         db.append_replication_outbox("node.register", "node/n1", br#"{"a":1}"#)
             .expect("append row");
-        let svc = ControllerAdminService::new(db, None);
+        let svc = ControllerAdminService::new(db, None, 9090);
         let resp = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::get_replication_events(
             &svc,
             Request::new(controller_proto::GetReplicationEventsRequest {
@@ -367,7 +390,7 @@ mod tests {
     #[tokio::test]
     async fn ack_replication_events_validates_peer_id() {
         let db = Database::open(":memory:").expect("open db");
-        let svc = ControllerAdminService::new(db, None);
+        let svc = ControllerAdminService::new(db, None, 9090);
         let err = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::ack_replication_events(
             &svc,
             Request::new(controller_proto::AckReplicationEventsRequest {
@@ -383,7 +406,7 @@ mod tests {
     #[tokio::test]
     async fn ack_replication_events_persists_frontier() {
         let db = Database::open(":memory:").expect("open db");
-        let svc = ControllerAdminService::new(db.clone(), None);
+        let svc = ControllerAdminService::new(db.clone(), None, 9090);
         <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::ack_replication_events(
             &svc,
             Request::new(controller_proto::AckReplicationEventsRequest {
@@ -428,6 +451,7 @@ mod tests {
                 dc_id: "DC1".into(),
                 peers: vec!["10.0.0.11:9090".into()],
             }),
+            9090,
         );
 
         let resp = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::get_replication_status(
@@ -508,7 +532,7 @@ mod tests {
         })
         .expect("head");
 
-        let svc = ControllerAdminService::new(db, None);
+        let svc = ControllerAdminService::new(db, None, 9090);
         let resp = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::get_replication_status(
             &svc,
             Request::new(controller_proto::GetReplicationStatusRequest {}),
@@ -544,7 +568,7 @@ mod tests {
                 "test conflict",
             )
             .expect("insert conflict");
-        let svc = ControllerAdminService::new(db.clone(), None);
+        let svc = ControllerAdminService::new(db.clone(), None, 9090);
 
         let listed = <ControllerAdminService as controller_proto::controller_admin_server::ControllerAdmin>::list_replication_conflicts(
             &svc,

@@ -11,7 +11,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tonic::{Request, Response, Status};
 use tracing::{error, info};
 
-use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::discovery;
 use crate::proto;
 use crate::storage::{self, StorageAdapter};
@@ -763,14 +763,16 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
         .iter()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .map(|v| if v.contains(':') { v } else { format!("{v}:9090") })
         .collect();
     if controllers.is_empty() && !req.controller.trim().is_empty() {
-        controllers.push(req.controller.trim().to_string());
+        let c = req.controller.trim().to_string();
+        controllers.push(if c.contains(':') { c } else { format!("{c}:9090") });
     }
     let has_controller = !controllers.is_empty();
-    if has_controller == req.run_controller {
+    if !has_controller && !req.run_controller {
         return Err(Status::invalid_argument(
-            "provide exactly one of controller or run_controller",
+            "provide --controller or --run-controller (or both for a joining controller)",
         ));
     }
 
@@ -859,7 +861,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::ListDisksRequest>,
     ) -> Result<Response<proto::ListDisksResponse>, Status> {
-        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER])?;
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let disks = tokio::task::spawn_blocking(discovery::list_disks)
             .await
             .map_err(|e| Status::internal(format!("task join: {e}")))?
@@ -871,7 +873,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::ListNetworkInterfacesRequest>,
     ) -> Result<Response<proto::ListNetworkInterfacesResponse>, Status> {
-        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER])?;
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let interfaces = tokio::task::spawn_blocking(discovery::list_network_interfaces)
             .await
             .map_err(|e| Status::internal(format!("task join: {e}")))?
@@ -885,7 +887,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::GetLvmInfoRequest>,
     ) -> Result<Response<proto::GetLvmInfoResponse>, Status> {
-        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER])?;
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         Ok(Response::new(collect_lvm_info().await))
     }
 
@@ -893,7 +895,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::ApplyNixConfigRequest>,
     ) -> Result<Response<proto::ApplyNixConfigResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let path = self.nix_config_path.clone();
 
@@ -939,7 +941,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::ApplyDiskoLayoutRequest>,
     ) -> Result<Response<proto::ApplyDiskoLayoutResponse>, Status> {
-        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER])?;
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let mode = read_disko_management_mode();
 
@@ -1027,7 +1029,7 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         &self,
         request: Request<proto::EnsureImageRequest>,
     ) -> Result<Response<proto::EnsureImageResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX])?;
         let req = request.into_inner();
         let storage = Arc::clone(&self.storage);
         let resp = tokio::task::spawn_blocking(move || {
@@ -1632,7 +1634,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn install_requires_exactly_one_controller_mode() {
+    async fn install_rejects_neither_controller_mode() {
         let temp = tempfile::tempdir().expect("tempdir");
         let nix_path = temp.path().join("kcore-vms.nix");
         let svc = AdminService::new(nix_path.display().to_string());
@@ -1669,39 +1671,40 @@ mod tests {
         .await
         .expect_err("missing controller mode should fail");
         assert_eq!(neither.code(), tonic::Code::InvalidArgument);
+    }
 
-        let both = <AdminService as proto::node_admin_server::NodeAdmin>::install_to_disk(
-            &svc,
-            Request::new(proto::InstallToDiskRequest {
-                os_disk: "/dev/sda".to_string(),
-                data_disks: Vec::new(),
-                controller: "127.0.0.1:9090".to_string(),
-                run_controller: true,
-                ca_cert_pem: String::new(),
-                node_cert_pem: String::new(),
-                node_key_pem: String::new(),
-                controller_cert_pem: String::new(),
-                controller_key_pem: String::new(),
-                kctl_cert_pem: String::new(),
-                kctl_key_pem: String::new(),
-                data_disk_mode: String::new(),
-                storage_backend: proto::StorageBackendType::Unspecified as i32,
-                lvm_vg_name: String::new(),
-                lvm_lv_prefix: String::new(),
-                zfs_pool_name: String::new(),
-                zfs_dataset_prefix: String::new(),
-                disable_vxlan: false,
-                sub_ca_cert_pem: String::new(),
-                sub_ca_key_pem: String::new(),
-                controllers: Vec::new(),
-                dc_id: String::new(),
-                hostname: String::new(),
-                node_id: String::new(),
-            }),
-        )
-        .await
-        .expect_err("ambiguous controller mode should fail");
-        assert_eq!(both.code(), tonic::Code::InvalidArgument);
+    #[test]
+    fn build_install_args_accepts_run_controller_with_peers() {
+        let req = proto::InstallToDiskRequest {
+            os_disk: "/dev/sda".to_string(),
+            data_disks: Vec::new(),
+            controller: String::new(),
+            run_controller: true,
+            controllers: vec!["192.168.40.105:9090".to_string()],
+            ca_cert_pem: String::new(),
+            node_cert_pem: String::new(),
+            node_key_pem: String::new(),
+            controller_cert_pem: String::new(),
+            controller_key_pem: String::new(),
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
+            data_disk_mode: String::new(),
+            storage_backend: proto::StorageBackendType::Unspecified as i32,
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
+            disable_vxlan: false,
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
+            dc_id: String::new(),
+            hostname: String::new(),
+            node_id: String::new(),
+        };
+        let args = build_install_command_args(&req).expect("should accept both flags");
+        assert!(args.contains(&"--run-controller".to_string()));
+        assert!(args.contains(&"--controller".to_string()));
+        assert!(args.contains(&"192.168.40.105:9090".to_string()));
     }
 
     #[test]
@@ -1856,6 +1859,40 @@ mod tests {
         assert!(args.contains(&"filesystem".to_string()));
         assert!(args.contains(&"--disk".to_string()));
         assert!(args.contains(&"/dev/sda".to_string()));
+    }
+
+    #[test]
+    fn build_install_args_normalizes_port() {
+        let req = proto::InstallToDiskRequest {
+            os_disk: "/dev/sda".to_string(),
+            data_disks: Vec::new(),
+            storage_backend: 0,
+            controllers: vec!["192.168.1.10".to_string(), "10.0.0.5:7777".to_string()],
+            controller: String::new(),
+            run_controller: false,
+            hostname: "test".to_string(),
+            node_id: "test".to_string(),
+            ca_cert_pem: String::new(),
+            node_cert_pem: String::new(),
+            node_key_pem: String::new(),
+            disable_vxlan: false,
+            dc_id: String::new(),
+            data_disk_mode: String::new(),
+            controller_cert_pem: String::new(),
+            controller_key_pem: String::new(),
+            kctl_cert_pem: String::new(),
+            kctl_key_pem: String::new(),
+            lvm_vg_name: String::new(),
+            lvm_lv_prefix: String::new(),
+            zfs_pool_name: String::new(),
+            zfs_dataset_prefix: String::new(),
+            sub_ca_cert_pem: String::new(),
+            sub_ca_key_pem: String::new(),
+        };
+        let args = build_install_command_args(&req).expect("args");
+        assert!(args.contains(&"192.168.1.10:9090".to_string()));
+        assert!(args.contains(&"10.0.0.5:7777".to_string()));
+        assert!(!args.contains(&"192.168.1.10".to_string()));
     }
 
     #[test]

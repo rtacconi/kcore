@@ -31,6 +31,7 @@ pub struct CreateArgs {
     pub compliant: bool,
     pub storage_backend: Option<String>,
     pub storage_size_bytes: Option<i64>,
+    pub target_dc: Option<String>,
 }
 
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
@@ -143,6 +144,7 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         ssh_key_names: args.ssh_keys,
         storage_backend: storage_backend_to_proto(&storage_backend),
         storage_size_bytes,
+        target_dc: args.target_dc.unwrap_or_default(),
     };
 
     let resp = client.create_vm(req).await?.into_inner();
@@ -226,6 +228,10 @@ async fn wait_for_vm_readiness(
                     address: node_address,
                     addresses: vec![],
                     insecure: info.insecure,
+                    tls_server_name: info.tls_server_name.clone(),
+                    cert_pem: info.cert_pem.clone(),
+                    key_pem: info.key_pem.clone(),
+                    ca_pem: info.ca_pem.clone(),
                     cert: info.cert.clone(),
                     key: info.key.clone(),
                     ca: info.ca.clone(),
@@ -444,6 +450,10 @@ pub async fn describe(
             address: node_address,
             addresses: vec![],
             insecure: info.insecure,
+            tls_server_name: info.tls_server_name.clone(),
+            cert_pem: info.cert_pem.clone(),
+            key_pem: info.key_pem.clone(),
+            ca_pem: info.ca_pem.clone(),
             cert: info.cert.clone(),
             key: info.key.clone(),
             ca: info.ca.clone(),
@@ -1058,6 +1068,7 @@ mod tests {
                 approval_status: "approved".to_string(),
                 cert_expiry_days: -1,
                 luks_method: String::new(),
+                dc_id: String::new(),
             },
             proto::NodeInfo {
                 node_id: "node-b".to_string(),
@@ -1073,6 +1084,7 @@ mod tests {
                 approval_status: "approved".to_string(),
                 cert_expiry_days: -1,
                 luks_method: String::new(),
+                dc_id: String::new(),
             },
         ];
         let addr = node_address_for_vm_node_id(&nodes, "node-b");
@@ -1149,6 +1161,7 @@ mod tests {
             compliant: true,
             storage_backend: Some("filesystem".into()),
             storage_size_bytes: Some(10 * 1024 * 1024 * 1024),
+            target_dc: None,
         }
     }
 

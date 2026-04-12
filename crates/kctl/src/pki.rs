@@ -166,13 +166,8 @@ pub fn create_cluster_pki(
 
     let (sub_ca_cert_pem, sub_ca_key_pem) = generate_sub_ca(&ca_cert_pem, &ca_key_pem)?;
 
-    let (controller_cert_pem, controller_key_pem) = sign_cert(
-        Some(controller_host),
-        "kcore-controller",
-        vec![
-            ExtendedKeyUsagePurpose::ServerAuth,
-            ExtendedKeyUsagePurpose::ClientAuth,
-        ],
+    let (controller_cert_pem, controller_key_pem) = sign_controller_cert(
+        controller_host,
         &ca_cert_pem,
         &ca_key_pem,
     )?;
@@ -195,6 +190,25 @@ pub fn create_cluster_pki(
     write_file(&paths.kctl_key, &kctl_key_pem, 0o600)?;
 
     Ok(paths)
+}
+
+/// Sign a controller leaf certificate with CN `kcore-controller-{host}` and SAN = host.
+/// Every controller gets a unique CN so replication peer identity is unambiguous.
+pub fn sign_controller_cert(
+    host: &str,
+    ca_cert_pem: &str,
+    ca_key_pem: &str,
+) -> Result<(String, String), String> {
+    sign_cert(
+        Some(host),
+        &format!("kcore-controller-{host}"),
+        vec![
+            ExtendedKeyUsagePurpose::ServerAuth,
+            ExtendedKeyUsagePurpose::ClientAuth,
+        ],
+        ca_cert_pem,
+        ca_key_pem,
+    )
 }
 
 fn generate_sub_ca(ca_cert_pem: &str, ca_key_pem: &str) -> Result<(String, String), String> {
@@ -241,16 +255,8 @@ pub fn rotate_controller_cert(certs_dir: &Path, new_controller_host: &str) -> Re
     let ca_key_pem = std::fs::read_to_string(&ca_key_path)
         .map_err(|e| format!("reading {}: {e}", ca_key_path.display()))?;
 
-    let (controller_cert_pem, controller_key_pem) = sign_cert(
-        Some(new_controller_host),
-        "kcore-controller",
-        vec![
-            ExtendedKeyUsagePurpose::ServerAuth,
-            ExtendedKeyUsagePurpose::ClientAuth,
-        ],
-        &ca_cert_pem,
-        &ca_key_pem,
-    )?;
+    let (controller_cert_pem, controller_key_pem) =
+        sign_controller_cert(new_controller_host, &ca_cert_pem, &ca_key_pem)?;
 
     let controller_cert_path = certs_dir.join("controller.crt");
     let controller_key_path = certs_dir.join("controller.key");
@@ -313,9 +319,11 @@ pub fn sign_node_cert_with_sub_ca(
 /// Load PKI material for a node install.
 ///
 /// The CA key is read locally to sign the node certificate but is never sent
-/// over the wire. Controller cert/key are only included when
-/// `include_controller_pki` is true (the node will co-locate the controller).
-/// kctl credentials are never sent -- nodes have no use for CLI keys.
+/// over the wire. When `include_controller_pki` is true (the node will
+/// co-locate the controller), a **fresh** controller certificate is generated
+/// for `node_host` with CN `kcore-controller-{node_host}` — each controller
+/// gets a unique identity so replication peer tracking works correctly.
+/// kctl credentials are never sent — nodes have no use for CLI keys.
 pub fn load_install_pki(
     certs_dir: &Path,
     node_host: &str,
@@ -323,16 +331,11 @@ pub fn load_install_pki(
 ) -> Result<InstallPkiPayload, String> {
     let ca_cert_path = certs_dir.join("ca.crt");
     let ca_key_path = certs_dir.join("ca.key");
-
-    let mut required: Vec<&Path> = vec![&ca_cert_path, &ca_key_path];
-
-    let controller_cert_path = certs_dir.join("controller.crt");
-    let controller_key_path = certs_dir.join("controller.key");
     let sub_ca_cert_path = certs_dir.join("sub-ca.crt");
     let sub_ca_key_path = certs_dir.join("sub-ca.key");
+
+    let mut required: Vec<&Path> = vec![&ca_cert_path, &ca_key_path];
     if include_controller_pki {
-        required.push(&controller_cert_path);
-        required.push(&controller_key_path);
         required.push(&sub_ca_cert_path);
         required.push(&sub_ca_key_path);
     }
@@ -358,15 +361,12 @@ run `kctl create cluster --context <cluster-name> --controller <host:9090>` and 
 
     let (controller_cert_pem, controller_key_pem, sub_ca_cert_pem, sub_ca_key_pem) =
         if include_controller_pki {
-            let cert = std::fs::read_to_string(&controller_cert_path)
-                .map_err(|e| format!("reading {}: {e}", controller_cert_path.display()))?;
-            let key = std::fs::read_to_string(&controller_key_path)
-                .map_err(|e| format!("reading {}: {e}", controller_key_path.display()))?;
+            let (ctrl_cert, ctrl_key) = sign_controller_cert(node_host, &ca_cert_pem, &ca_key_pem)?;
             let sub_cert = std::fs::read_to_string(&sub_ca_cert_path)
                 .map_err(|e| format!("reading {}: {e}", sub_ca_cert_path.display()))?;
             let sub_key = std::fs::read_to_string(&sub_ca_key_path)
                 .map_err(|e| format!("reading {}: {e}", sub_ca_key_path.display()))?;
-            (cert, key, sub_cert, sub_key)
+            (ctrl_cert, ctrl_key, sub_cert, sub_key)
         } else {
             (String::new(), String::new(), String::new(), String::new())
         };
@@ -567,5 +567,69 @@ mod tests {
         let payload = load_install_pki(&certs, "10.0.0.21", false).expect("load");
         assert!(payload.sub_ca_cert_pem.is_empty());
         assert!(payload.sub_ca_key_pem.is_empty());
+    }
+
+    fn extract_cn(cert_pem: &str) -> String {
+        use x509_parser::prelude::FromDer;
+        let pem = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+            .expect("parse pem")
+            .1;
+        let (_, cert) =
+            x509_parser::certificate::X509Certificate::from_der(pem.contents.as_slice())
+                .expect("parse x509");
+        let cn = cert
+            .subject()
+            .iter_common_name()
+            .next()
+            .expect("CN present")
+            .as_str()
+            .expect("CN string")
+            .to_string();
+        cn
+    }
+
+    #[test]
+    fn create_cluster_pki_generates_host_specific_controller_cn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "192.168.1.10", false).expect("create pki");
+
+        let cert_pem = std::fs::read_to_string(certs.join("controller.crt")).expect("read");
+        assert_eq!(extract_cn(&cert_pem), "kcore-controller-192.168.1.10");
+    }
+
+    #[test]
+    fn load_install_pki_generates_fresh_controller_cert_per_host() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "10.0.0.1", false).expect("create pki");
+
+        let first = load_install_pki(&certs, "10.0.0.1", true).expect("first install");
+        let second = load_install_pki(&certs, "10.0.0.2", true).expect("second install");
+
+        let cn1 = extract_cn(&first.controller_cert_pem);
+        let cn2 = extract_cn(&second.controller_cert_pem);
+        assert_eq!(cn1, "kcore-controller-10.0.0.1");
+        assert_eq!(cn2, "kcore-controller-10.0.0.2");
+        assert_ne!(
+            first.controller_cert_pem, second.controller_cert_pem,
+            "each controller must get a unique cert"
+        );
+        assert_ne!(
+            first.controller_key_pem, second.controller_key_pem,
+            "each controller must get a unique key"
+        );
+    }
+
+    #[test]
+    fn rotate_controller_cert_uses_host_specific_cn() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let certs = tmp.path().join("certs");
+        create_cluster_pki(&certs, "10.0.0.1", false).expect("create pki");
+
+        rotate_controller_cert(&certs, "10.0.0.99").expect("rotate");
+
+        let cert_pem = std::fs::read_to_string(certs.join("controller.crt")).expect("read");
+        assert_eq!(extract_cn(&cert_pem), "kcore-controller-10.0.0.99");
     }
 }

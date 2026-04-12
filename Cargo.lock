@@ -1454,6 +1454,8 @@ name = "kcore-kctl"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "aws-lc-rs",
+ "base64",
  "clap",
  "dirs",
  "prost",
@@ -1469,6 +1471,7 @@ dependencies = [
  "tonic",
  "tonic-build",
  "tonic-health",
+ "x509-parser",
 ]
 
 [[package]]
@@ -3940,6 +3943,7 @@ dependencies = [
  "lazy_static",
  "nom",
  "oid-registry",
+ "ring",
  "rusticata-macros",
  "thiserror 2.0.18",
  "time",

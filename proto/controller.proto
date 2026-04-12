@@ -79,6 +79,7 @@ message RegisterNodeRequest {
   bool disable_vxlan = 7; // When true, node does not support VXLAN overlay networking
   int32 cert_expiry_days = 8; // Days until node TLS certificate expires
   string luks_method = 9;     // "tpm2", "key-file", or "" (not reported)
+  string dc_id = 10;          // Datacenter identifier (e.g., "DC1", "DC2")
 }
 
 message RegisterNodeResponse {
@@ -196,6 +197,7 @@ message CreateVmRequest {
   repeated string ssh_key_names = 8;  // SSH key names to inject (looked up from controller DB)
   StorageBackendType storage_backend = 9; // Required VM storage backend for compatibility checks
   int64 storage_size_bytes = 10; // Required VM storage size in bytes (> 0)
+  string target_dc = 11;    // Datacenter preference (optional; controller picks any DC if empty)
 }
 
 message CreateVmResponse {
@@ -498,6 +500,7 @@ message NodeInfo {
   string approval_status = 11; // "pending", "approved", or "rejected"
   int32 cert_expiry_days = 12; // Days until node TLS certificate expires (-1 = unknown)
   string luks_method = 13;     // "tpm2", "key-file", or "" (unknown/not reported)
+  string dc_id = 14;           // Datacenter identifier (e.g., "DC1", "DC2")
 }
 
 message GetNodeRequest {

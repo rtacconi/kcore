@@ -56,6 +56,11 @@ struct Cli {
     #[arg(short = 'k', long, global = true)]
     insecure: bool,
 
+    /// TLS server name (SNI + certificate verification) when the controller address is an IP or the
+    /// server certificate does not match the connection host. Overrides `tls-server-name` in config.
+    #[arg(long = "tls-server-name", global = true)]
+    tls_server_name: Option<String>,
+
     /// Node address for direct node commands (host:port)
     #[arg(long, global = true)]
     node: Option<String>,
@@ -247,6 +252,9 @@ enum CreateResource {
         /// VM storage size in bytes. Can also be set in YAML manifest under spec.storageSizeBytes.
         #[arg(long = "storage-size-bytes")]
         storage_size_bytes: Option<i64>,
+        /// Target datacenter (optional; controller picks any DC if empty)
+        #[arg(long = "dc")]
+        target_dc: Option<String>,
     },
     /// Create a container on a node
     Container {
@@ -823,7 +831,12 @@ fn resolve_controller(cli: &Cli) -> Result<config::ConnectionInfo, String> {
         .config
         .clone()
         .unwrap_or_else(config::default_config_path);
-    config::resolve_controller(&config_path, &cli.controller, cli.insecure)
+    config::resolve_controller(
+        &config_path,
+        &cli.controller,
+        cli.insecure,
+        cli.tls_server_name.as_deref(),
+    )
 }
 
 fn resolve_node(cli: &Cli) -> Result<config::ConnectionInfo, String> {
@@ -866,6 +879,7 @@ async fn main() {
                     compliant,
                     storage_backend,
                     storage_size_bytes,
+                    target_dc,
                 },
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
@@ -899,6 +913,7 @@ async fn main() {
                         StorageBackend::Zfs => "zfs".to_string(),
                     }),
                     storage_size_bytes: *storage_size_bytes,
+                    target_dc: target_dc.clone(),
                 },
             )
             .await
@@ -1210,8 +1225,13 @@ async fn main() {
                 .config
                 .clone()
                 .unwrap_or_else(config::default_config_path);
-            let controller_info =
-                config::resolve_controller(&config_path, &cli.controller, false).ok();
+            let controller_info = config::resolve_controller(
+                &config_path,
+                &cli.controller,
+                false,
+                cli.tls_server_name.as_deref(),
+            )
+            .ok();
             let certs_dir = config::resolve_install_certs_dir(&config_path).unwrap_or_else(|e| {
                 fatal(&format!("resolving install cert directory: {e}"));
             });
@@ -1237,6 +1257,7 @@ async fn main() {
                 dc_id,
                 hostname.as_deref(),
                 node_id.as_deref(),
+                &config_path,
             )
             .await
         }
@@ -1355,7 +1376,13 @@ async fn main() {
             } else {
                 config::resolve_install_certs_dir(&config_path).unwrap_or_else(|e| fatal(&e))
             };
-            let info = config::resolve_controller(&config_path, &[], cli.insecure).ok();
+            let info = config::resolve_controller(
+                &config_path,
+                &[],
+                cli.insecure,
+                cli.tls_server_name.as_deref(),
+            )
+            .ok();
             commands::certs::rotate(&certs_path, controller, info.as_ref()).await
         }
         Command::Rotate {

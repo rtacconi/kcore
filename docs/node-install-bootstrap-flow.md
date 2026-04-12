@@ -13,15 +13,13 @@ Install a node from live ISO to disk and ensure that, after reboot:
 
 Expected local layout on the operator machine:
 
-- `~/.kcore/config` (contexts and current context)
-- `~/.kcore/<cluster-name>/ca.crt`
-- `~/.kcore/<cluster-name>/ca.key`
-- `~/.kcore/<cluster-name>/controller.crt`
-- `~/.kcore/<cluster-name>/controller.key`
-- `~/.kcore/<cluster-name>/kctl.crt`
-- `~/.kcore/<cluster-name>/kctl.key`
+- `~/.kcore/config` (contexts with inline base64 cert data)
+- `~/.kcore/<cluster-name>/ca.crt` / `ca.key` (root CA)
+- `~/.kcore/<cluster-name>/sub-ca.crt` / `sub-ca.key` (intermediate CA)
+- `~/.kcore/<cluster-name>/controller.crt` / `controller.key` (first controller cert)
+- `~/.kcore/<cluster-name>/kctl.crt` / `kctl.key` (CLI client cert)
 
-`kctl` selects a cluster context, resolves its cert directory, and uses that material for bootstrap.
+`~/.kcore/config` embeds CA, cert, and key as base64-encoded inline data (`ca-data`, `cert-data`, `key-data`). File paths are supported as a fallback but inline data takes precedence. No silent fallback to `~/.kcore/certs/` occurs.
 
 ## Procedure
 
@@ -31,11 +29,11 @@ Expected local layout on the operator machine:
 4. Run `node install` with:
    - OS disk (required)
    - optional data disks
-   - one or more join controller endpoints (ordered)
+   - `--run-controller` for controller nodes, or `--join-controller host:9090` for agent-only nodes
    - optional datacenter id (`dcId`, default `DC1`)
 5. `kctl` prepares install PKI payload:
-   - loads cluster CA and existing cert/key material
-   - generates node cert/key signed by cluster CA (SAN = node host/IP)
+   - **Controller node**: loads CA, sub-CA from disk; generates a **fresh controller cert** with CN `kcore-controller-{host}` and a node cert signed by root CA.
+   - **Agent-only node**: calls `IssueNodeBootstrapCert` RPC on the target controller, which signs a node cert using its sub-CA. The root CA is loaded from disk.
 6. `kctl` sends `InstallToDiskRequest` including cert PEM payload, ordered `controllers`, and `dc_id`.
 7. Live `node-agent` writes certs to `/etc/kcore/certs` and starts `install-to-disk`.
 8. Installer generates a `disko-config.nix` from install parameters and runs `disko --mode format,mount` to partition, encrypt, format, and mount disks declaratively.
@@ -59,9 +57,16 @@ flowchart TD
   discover --> installCmd["kctl node install<br/>os-disk, data-disk,<br/>join-controller, dc-id"]
 
   installCmd --> loadCtx["Resolve context<br/>and cluster cert dir"]
-  loadCtx --> loadClusterPki["Load CA / controller<br/>/ kctl certs and keys"]
-  loadClusterPki --> genNodeCert["Generate node cert+key<br/>signed by cluster CA"]
+  loadCtx --> installMode{"--run-controller?"}
+
+  installMode -->|Yes| loadClusterPki["Load CA + sub-CA<br/>from cert dir"]
+  loadClusterPki --> genCtrlCert["Generate fresh controller cert<br/>CN=kcore-controller-{host}"]
+  genCtrlCert --> genNodeCert["Generate node cert<br/>CN=kcore-node-{host}"]
   genNodeCert --> buildReq["Build InstallToDiskRequest<br/>with PEM payload"]
+
+  installMode -->|"No (agent only)"| bootstrapRpc["IssueNodeBootstrapCert RPC<br/>controller signs with sub-CA"]
+  bootstrapRpc --> buildReq
+
   buildReq --> sendRpc["NodeAdmin.InstallToDisk RPC<br/>controllers + dc_id"]
 
   sendRpc --> writeBootstrap["node-agent writes<br/>/etc/kcore/certs/*"]

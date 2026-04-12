@@ -13,6 +13,7 @@ pub struct NodeSummaryDto {
     pub node_id: String,
     pub hostname: String,
     pub address: String,
+    pub dc_id: String,
     pub approval_status: String,
     pub cert_expiry_days: i32,
     pub luks_method: String,

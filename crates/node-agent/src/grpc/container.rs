@@ -1,6 +1,6 @@
 use tonic::{Request, Response, Status};
 
-use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::proto;
 use crate::runtime::cni;
 use crate::runtime::containerd_runtime::ContainerdRuntime;
@@ -124,7 +124,7 @@ impl proto::node_container_server::NodeContainer for ContainerService {
         &self,
         request: Request<proto::CreateContainerRequest>,
     ) -> Result<Response<proto::CreateContainerResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let spec = req
             .spec
@@ -193,7 +193,7 @@ impl proto::node_container_server::NodeContainer for ContainerService {
         &self,
         request: Request<proto::StartContainerRequest>,
     ) -> Result<Response<proto::StartContainerResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let name = request.into_inner().name;
         let name = name.trim();
         if name.is_empty() {
@@ -212,7 +212,7 @@ impl proto::node_container_server::NodeContainer for ContainerService {
         &self,
         request: Request<proto::StopContainerRequest>,
     ) -> Result<Response<proto::StopContainerResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let name = request.into_inner().name;
         let name = name.trim();
         if name.is_empty() {
@@ -231,7 +231,7 @@ impl proto::node_container_server::NodeContainer for ContainerService {
         &self,
         request: Request<proto::DeleteContainerRequest>,
     ) -> Result<Response<proto::DeleteContainerResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let name = req.name.trim();
         if name.is_empty() {
@@ -253,7 +253,7 @@ impl proto::node_container_server::NodeContainer for ContainerService {
         &self,
         request: Request<proto::GetContainerRequest>,
     ) -> Result<Response<proto::GetContainerResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let name = request.into_inner().name;
         let name = name.trim();
         if name.is_empty() {
@@ -270,7 +270,7 @@ impl proto::node_container_server::NodeContainer for ContainerService {
         &self,
         request: Request<proto::ListContainersRequest>,
     ) -> Result<Response<proto::ListContainersResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let rt = ContainerdRuntime::detect().await?;
         let args = vec![
             "ps".to_string(),

@@ -1,4 +1,5 @@
 use anyhow::Result;
+use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -23,6 +24,35 @@ pub struct Context {
     pub controllers: Vec<String>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub insecure: bool,
+    /// Hostname for TLS SNI and certificate name verification when the controller `address` is an
+    /// IP (or when the server cert does not match the connection host).
+    #[serde(
+        rename = "tls-server-name",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub tls_server_name: Option<String>,
+    /// Inline base64-encoded PEM client certificate (preferred over file path).
+    #[serde(
+        rename = "cert-data",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub cert_data: Option<String>,
+    /// Inline base64-encoded PEM client key (preferred over file path).
+    #[serde(
+        rename = "key-data",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub key_data: Option<String>,
+    /// Inline base64-encoded PEM CA certificate (preferred over file path).
+    #[serde(
+        rename = "ca-data",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub ca_data: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -31,13 +61,54 @@ pub struct Context {
     pub ca: Option<String>,
 }
 
+/// Resolved TLS material: either decoded inline PEM or a file path to read at connect time.
+#[derive(Debug)]
 pub struct ConnectionInfo {
     pub address: String,
     pub addresses: Vec<String>,
     pub insecure: bool,
+    /// Override for rustls/tonic TLS server name (SNI + cert verification). See `Context::tls_server_name`.
+    pub tls_server_name: Option<String>,
+    /// PEM string (already decoded from base64 inline data), or `None`.
+    pub cert_pem: Option<String>,
+    /// PEM string (already decoded from base64 inline data), or `None`.
+    pub key_pem: Option<String>,
+    /// PEM string (already decoded from base64 inline data), or `None`.
+    pub ca_pem: Option<String>,
+    /// File path fallback — only used when `*_pem` is `None`.
     pub cert: Option<String>,
+    /// File path fallback — only used when `*_pem` is `None`.
     pub key: Option<String>,
+    /// File path fallback — only used when `*_pem` is `None`.
     pub ca: Option<String>,
+}
+
+/// Decode a base64-encoded PEM string. Returns `Err` if the base64 is invalid.
+fn decode_inline_pem(b64: &str, label: &str) -> Result<String, String> {
+    let bytes = BASE64
+        .decode(b64.trim())
+        .map_err(|e| format!("invalid base64 in {label}: {e}"))?;
+    String::from_utf8(bytes).map_err(|e| format!("invalid UTF-8 in {label}: {e}"))
+}
+
+/// Resolve inline base64 data from a `Context` into decoded PEM strings.
+fn resolve_inline_pems(ctx: &Context) -> Result<(Option<String>, Option<String>, Option<String>), String> {
+    let cert_pem = ctx
+        .cert_data
+        .as_deref()
+        .map(|d| decode_inline_pem(d, "cert-data"))
+        .transpose()?;
+    let key_pem = ctx
+        .key_data
+        .as_deref()
+        .map(|d| decode_inline_pem(d, "key-data"))
+        .transpose()?;
+    let ca_pem = ctx
+        .ca_data
+        .as_deref()
+        .map(|d| decode_inline_pem(d, "ca-data"))
+        .transpose()?;
+    Ok((cert_pem, key_pem, ca_pem))
 }
 
 pub fn default_config_path() -> PathBuf {
@@ -161,30 +232,62 @@ fn normalize_addresses(addrs: &[String], default_port: u16) -> Vec<String> {
 
 /// Resolve a controller address from CLI flags and config file.
 /// Priority: flag > config > error.
+///
+/// Inline cert data (`cert-data`, `key-data`, `ca-data`) takes precedence over
+/// file paths. No silent fallback to `~/.kcore/certs/` — if no TLS credentials
+/// are configured, this returns a clear error.
 pub fn resolve_controller(
     config_path: &Path,
     controller_flags: &[String],
     insecure_flag: bool,
+    tls_server_name_flag: Option<&str>,
 ) -> Result<ConnectionInfo, String> {
-    let default_certs = default_certs_dir();
+    let tls_from_cli = tls_server_name_flag
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(std::string::ToString::to_string);
+
+    // When --controller flag is used directly, we still need certs from the current context.
     if !controller_flags.is_empty() {
         let addresses = normalize_addresses(controller_flags, 9090);
         if addresses.is_empty() {
             return Err("no valid --controller endpoints provided".to_string());
         }
-        let (cert, key, ca) = if insecure_flag {
-            (None, None, None)
+        if insecure_flag {
+            return Ok(ConnectionInfo {
+                address: addresses[0].clone(),
+                addresses,
+                insecure: true,
+                tls_server_name: tls_from_cli,
+                cert_pem: None,
+                key_pem: None,
+                ca_pem: None,
+                cert: None,
+                key: None,
+                ca: None,
+            });
+        }
+        // Try to resolve certs from config context if available.
+        let config = load_config(config_path).unwrap_or_default();
+        let ctx = config.current_context().ok();
+        let (cert_pem, key_pem, ca_pem, cert, key, ca) = if let Some(ctx) = ctx {
+            resolve_tls_fields(ctx)?
         } else {
-            (
-                Some(default_certs.join("kctl.crt").display().to_string()),
-                Some(default_certs.join("kctl.key").display().to_string()),
-                Some(default_certs.join("ca.crt").display().to_string()),
-            )
+            (None, None, None, None, None, None)
         };
+        if cert_pem.is_none() && cert.is_none() {
+            return Err(
+                "no TLS credentials available — run `kctl create cluster` first or use -k for insecure mode".to_string(),
+            );
+        }
         return Ok(ConnectionInfo {
             address: addresses[0].clone(),
             addresses,
-            insecure: insecure_flag,
+            insecure: false,
+            tls_server_name: tls_from_cli,
+            cert_pem,
+            key_pem,
+            ca_pem,
             cert,
             key,
             ca,
@@ -192,6 +295,11 @@ pub fn resolve_controller(
     }
 
     let config = load_config(config_path).map_err(|e| format!("loading config: {e}"))?;
+    let context_name = config
+        .current_context
+        .as_deref()
+        .or_else(|| config.contexts.keys().next().map(|s| s.as_str()))
+        .unwrap_or("<none>");
     let ctx = config.current_context().map_err(|e| {
         format!(
             "no controller configured: use --controller flag or create config at {}: {e}",
@@ -213,32 +321,61 @@ pub fn resolve_controller(
         return Err("no controller endpoints configured in current context".to_string());
     }
 
+    let tls_server_name = tls_from_cli.or_else(|| {
+        ctx.tls_server_name
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+
+    let is_insecure = ctx.insecure || insecure_flag;
+    if is_insecure {
+        return Ok(ConnectionInfo {
+            address: addresses[0].clone(),
+            addresses,
+            insecure: true,
+            tls_server_name,
+            cert_pem: None,
+            key_pem: None,
+            ca_pem: None,
+            cert: None,
+            key: None,
+            ca: None,
+        });
+    }
+
+    let (cert_pem, key_pem, ca_pem, cert, key, ca) = resolve_tls_fields(ctx)?;
+    if cert_pem.is_none() && cert.is_none() {
+        return Err(format!(
+            "no TLS credentials in context '{}' — run `kctl create cluster` or set cert/key/ca paths",
+            context_name
+        ));
+    }
+
     Ok(ConnectionInfo {
         address: addresses[0].clone(),
         addresses,
-        insecure: ctx.insecure || insecure_flag,
-        cert: if ctx.insecure || insecure_flag {
-            None
-        } else {
-            ctx.cert
-                .clone()
-                .or(Some(default_certs.join("kctl.crt").display().to_string()))
-        },
-        key: if ctx.insecure || insecure_flag {
-            None
-        } else {
-            ctx.key
-                .clone()
-                .or(Some(default_certs.join("kctl.key").display().to_string()))
-        },
-        ca: if ctx.insecure || insecure_flag {
-            None
-        } else {
-            ctx.ca
-                .clone()
-                .or(Some(default_certs.join("ca.crt").display().to_string()))
-        },
+        insecure: false,
+        tls_server_name,
+        cert_pem,
+        key_pem,
+        ca_pem,
+        cert,
+        key,
+        ca,
     })
+}
+
+/// Extract TLS material from a `Context`: inline data (decoded) or file paths.
+/// Inline data takes precedence. No fallback directory.
+fn resolve_tls_fields(
+    ctx: &Context,
+) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), String> {
+    let (cert_pem, key_pem, ca_pem) = resolve_inline_pems(ctx)?;
+    if cert_pem.is_some() || key_pem.is_some() || ca_pem.is_some() {
+        return Ok((cert_pem, key_pem, ca_pem, None, None, None));
+    }
+    Ok((None, None, None, ctx.cert.clone(), ctx.key.clone(), ctx.ca.clone()))
 }
 
 /// Resolve a node-agent address. The `--node` flag is required for direct node commands.
@@ -251,27 +388,46 @@ pub fn resolve_node(
         .as_deref()
         .ok_or("--node flag is required for this command")?;
 
-    let default_certs = default_certs_dir();
     let cfg = load_config(config_path).unwrap_or_default();
     let ctx = cfg.current_context().ok();
 
-    let (cert, key, ca) = if insecure_flag || ctx.map(|c| c.insecure).unwrap_or(false) {
-        (None, None, None)
+    let is_insecure = insecure_flag || ctx.map(|c| c.insecure).unwrap_or(false);
+    let tls_server_name = ctx.and_then(|c| {
+        c.tls_server_name
+            .as_ref()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+    });
+
+    if is_insecure {
+        return Ok(ConnectionInfo {
+            address: normalize_address(addr, 9091),
+            addresses: vec![normalize_address(addr, 9091)],
+            insecure: true,
+            tls_server_name,
+            cert_pem: None,
+            key_pem: None,
+            ca_pem: None,
+            cert: None,
+            key: None,
+            ca: None,
+        });
+    }
+
+    let (cert_pem, key_pem, ca_pem, cert, key, ca) = if let Some(ctx) = ctx {
+        resolve_tls_fields(ctx)?
     } else {
-        let ctx_cert = ctx.and_then(|c| c.cert.clone());
-        let ctx_key = ctx.and_then(|c| c.key.clone());
-        let ctx_ca = ctx.and_then(|c| c.ca.clone());
-        (
-            ctx_cert.or(Some(default_certs.join("kctl.crt").display().to_string())),
-            ctx_key.or(Some(default_certs.join("kctl.key").display().to_string())),
-            ctx_ca.or(Some(default_certs.join("ca.crt").display().to_string())),
-        )
+        (None, None, None, None, None, None)
     };
 
     Ok(ConnectionInfo {
         address: normalize_address(addr, 9091),
         addresses: vec![normalize_address(addr, 9091)],
-        insecure: insecure_flag,
+        insecure: false,
+        tls_server_name,
+        cert_pem,
+        key_pem,
+        ca_pem,
         cert,
         key,
         ca,
@@ -284,14 +440,18 @@ mod tests {
 
     #[test]
     fn resolve_controller_uses_flag_and_defaults_port() {
-        let info = resolve_controller(Path::new("/nonexistent"), &["10.0.0.10".into()], true)
+        let info = resolve_controller(Path::new("/nonexistent"), &["10.0.0.10".into()], true, None)
             .expect("resolve controller");
         assert_eq!(info.address, "10.0.0.10:9090");
         assert_eq!(info.addresses, vec!["10.0.0.10:9090"]);
         assert!(info.insecure);
+        assert!(info.tls_server_name.is_none());
         assert!(info.cert.is_none());
         assert!(info.key.is_none());
         assert!(info.ca.is_none());
+        assert!(info.cert_pem.is_none());
+        assert!(info.key_pem.is_none());
+        assert!(info.ca_pem.is_none());
     }
 
     #[test]
@@ -313,6 +473,7 @@ mod tests {
         assert!(info.cert.is_none());
         assert!(info.key.is_none());
         assert!(info.ca.is_none());
+        assert!(info.cert_pem.is_none());
     }
 
     #[test]
@@ -321,9 +482,175 @@ mod tests {
             Path::new("/nonexistent"),
             &["10.0.0.10".into(), "10.0.0.11:9090".into()],
             true,
+            None,
         )
         .expect("resolve controller");
         assert_eq!(info.address, "10.0.0.10:9090");
         assert_eq!(info.addresses, vec!["10.0.0.10:9090", "10.0.0.11:9090"]);
+    }
+
+    #[test]
+    fn resolve_controller_tls_server_name_from_cli() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        let ca_b64 = BASE64.encode(b"---CA---");
+        let cert_b64 = BASE64.encode(b"---CERT---");
+        let key_b64 = BASE64.encode(b"---KEY---");
+        let cfg = Config {
+            current_context: Some("ctx".into()),
+            contexts: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "ctx".into(),
+                    Context {
+                        controller: "192.168.1.1:9090".into(),
+                        ca_data: Some(ca_b64),
+                        cert_data: Some(cert_b64),
+                        key_data: Some(key_b64),
+                        ..Default::default()
+                    },
+                );
+                m
+            },
+        };
+        save_config(&config_path, &cfg).expect("save");
+        let info = resolve_controller(
+            &config_path,
+            &["192.168.1.1".into()],
+            false,
+            Some("controller.example.com"),
+        )
+        .expect("resolve");
+        assert_eq!(
+            info.tls_server_name.as_deref(),
+            Some("controller.example.com")
+        );
+    }
+
+    #[test]
+    fn resolve_controller_inline_data_takes_precedence() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        let ca_b64 = BASE64.encode(b"---CA PEM---");
+        let cert_b64 = BASE64.encode(b"---CERT PEM---");
+        let key_b64 = BASE64.encode(b"---KEY PEM---");
+        let cfg = Config {
+            current_context: Some("test".into()),
+            contexts: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "test".into(),
+                    Context {
+                        controller: "10.0.0.1:9090".into(),
+                        controllers: vec!["10.0.0.1:9090".into()],
+                        ca_data: Some(ca_b64),
+                        cert_data: Some(cert_b64),
+                        key_data: Some(key_b64),
+                        cert: Some("/stale/path/kctl.crt".into()),
+                        key: Some("/stale/path/kctl.key".into()),
+                        ca: Some("/stale/path/ca.crt".into()),
+                        ..Default::default()
+                    },
+                );
+                m
+            },
+        };
+        save_config(&config_path, &cfg).expect("save");
+        let info = resolve_controller(&config_path, &[], false, None).expect("resolve");
+        assert_eq!(info.ca_pem.as_deref(), Some("---CA PEM---"));
+        assert_eq!(info.cert_pem.as_deref(), Some("---CERT PEM---"));
+        assert_eq!(info.key_pem.as_deref(), Some("---KEY PEM---"));
+        assert!(info.cert.is_none(), "file path must not be set when inline data is present");
+        assert!(info.key.is_none());
+        assert!(info.ca.is_none());
+    }
+
+    #[test]
+    fn resolve_controller_no_creds_returns_error() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        let cfg = Config {
+            current_context: Some("empty".into()),
+            contexts: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "empty".into(),
+                    Context {
+                        controller: "10.0.0.1:9090".into(),
+                        controllers: vec!["10.0.0.1:9090".into()],
+                        ..Default::default()
+                    },
+                );
+                m
+            },
+        };
+        save_config(&config_path, &cfg).expect("save");
+        let err = resolve_controller(&config_path, &[], false, None).expect_err("should fail");
+        assert!(
+            err.contains("no TLS credentials"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_controller_file_paths_still_work() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        let cfg = Config {
+            current_context: Some("files".into()),
+            contexts: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "files".into(),
+                    Context {
+                        controller: "10.0.0.1:9090".into(),
+                        controllers: vec!["10.0.0.1:9090".into()],
+                        cert: Some("/path/to/kctl.crt".into()),
+                        key: Some("/path/to/kctl.key".into()),
+                        ca: Some("/path/to/ca.crt".into()),
+                        ..Default::default()
+                    },
+                );
+                m
+            },
+        };
+        save_config(&config_path, &cfg).expect("save");
+        let info = resolve_controller(&config_path, &[], false, None).expect("resolve");
+        assert!(info.cert_pem.is_none());
+        assert_eq!(info.cert.as_deref(), Some("/path/to/kctl.crt"));
+        assert_eq!(info.key.as_deref(), Some("/path/to/kctl.key"));
+        assert_eq!(info.ca.as_deref(), Some("/path/to/ca.crt"));
+    }
+
+    #[test]
+    fn config_roundtrip_with_inline_data() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        let ca_b64 = BASE64.encode(b"ca-pem-content");
+        let cert_b64 = BASE64.encode(b"cert-pem-content");
+        let key_b64 = BASE64.encode(b"key-pem-content");
+        let cfg = Config {
+            current_context: Some("rt".into()),
+            contexts: {
+                let mut m = HashMap::new();
+                m.insert(
+                    "rt".into(),
+                    Context {
+                        controller: "1.2.3.4:9090".into(),
+                        ca_data: Some(ca_b64.clone()),
+                        cert_data: Some(cert_b64.clone()),
+                        key_data: Some(key_b64.clone()),
+                        ..Default::default()
+                    },
+                );
+                m
+            },
+        };
+        save_config(&config_path, &cfg).expect("save");
+        let loaded = load_config(&config_path).expect("load");
+        let ctx = loaded.contexts.get("rt").expect("context");
+        assert_eq!(ctx.ca_data.as_deref(), Some(ca_b64.as_str()));
+        assert_eq!(ctx.cert_data.as_deref(), Some(cert_b64.as_str()));
+        assert_eq!(ctx.key_data.as_deref(), Some(key_b64.as_str()));
     }
 }

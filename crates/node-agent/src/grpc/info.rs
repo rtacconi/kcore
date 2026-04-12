@@ -1,6 +1,6 @@
 use tonic::{Request, Response, Status};
 
-use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::proto;
 
 pub struct InfoService {
@@ -19,7 +19,7 @@ impl proto::node_info_server::NodeInfo for InfoService {
         &self,
         request: Request<proto::GetNodeInfoRequest>,
     ) -> Result<Response<proto::GetNodeInfoResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
 
         let (hostname, cpu_cores, memory_bytes, cpu_used, memory_used) =
             tokio::task::spawn_blocking(|| {

@@ -14,6 +14,10 @@ pub struct Config {
     /// When set, mutating RPCs append JSON envelopes to `replication_outbox` for future peer sync.
     #[serde(default)]
     pub replication: Option<ReplicationConfig>,
+    /// When true, nodes must be manually approved via `kctl node approve`.
+    /// Default false: nodes with valid mTLS certificates are auto-approved on registration.
+    #[serde(default)]
+    pub require_manual_approval: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -114,8 +118,8 @@ impl Config {
             if replication.dc_id.trim().is_empty() {
                 anyhow::bail!("replication.dcId must not be empty");
             }
-            if !replication.peers.is_empty() && replication.controller_id.trim().is_empty() {
-                anyhow::bail!("replication.controllerId is required when replication.peers is set");
+            if replication.controller_id.trim().is_empty() {
+                anyhow::bail!("replication.controllerId is required when replication section is present");
             }
             if replication.peers.iter().any(|p| p.trim().is_empty()) {
                 anyhow::bail!("replication.peers must not contain empty endpoints");

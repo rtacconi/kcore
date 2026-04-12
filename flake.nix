@@ -339,7 +339,11 @@
                                                 shift
                                                 ;;
                                               --controller)
-                                                CONTROLLER_ENDPOINTS+=("''${2:-}")
+                                                _CTRL_VAL="''${2:-}"
+                                                if [[ -n "$_CTRL_VAL" && "$_CTRL_VAL" != *:* ]]; then
+                                                  _CTRL_VAL="''${_CTRL_VAL}:9090"
+                                                fi
+                                                CONTROLLER_ENDPOINTS+=("$_CTRL_VAL")
                                                 shift 2
                                                 ;;
                                               --dc-id)
@@ -699,9 +703,10 @@ DISKOEOF
                                           if [ -d /etc/kcore ]; then
                                             cp -r /etc/kcore/* /mnt/etc/kcore/ 2>/dev/null || true
                                           fi
-
-                                          if [ "''${#CONTROLLER_ENDPOINTS[@]}" -gt 0 ]; then
-                                            echo "''${CONTROLLER_ENDPOINTS[0]}" > /mnt/etc/kcore/bootstrap-controller-endpoint
+                                          # Ensure correct permissions on copied cert material
+                                          if [ -d /mnt/etc/kcore/certs ]; then
+                                            find /mnt/etc/kcore/certs -name '*.key' -exec chmod 0600 {} + 2>/dev/null || true
+                                            find /mnt/etc/kcore/certs -name '*.crt' -exec chmod 0644 {} + 2>/dev/null || true
                                           fi
                                           if [ "''${#DATA_DISKS[@]}" -gt 0 ]; then
                                             printf "%s\n" "''${DATA_DISKS[@]}" > /mnt/etc/kcore/data-disks
@@ -728,13 +733,17 @@ DISKOEOF
                                             EXTERNAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}')
                                           fi
                                           if [ -z "$GATEWAY_INTERFACE" ]; then
+                                            echo "WARNING: no default route detected; defaulting gateway interface to eno1"
                                             GATEWAY_INTERFACE="eno1"
                                           fi
                                           if [[ "$EXTERNAL_IP" == 10.240.* ]]; then
                                             INTERNAL_GATEWAY_IP="10.241.0.1"
                                           fi
                                           if [ -z "$EXTERNAL_IP" ]; then
-                                            EXTERNAL_IP="127.0.0.1"
+                                            echo "ERROR: could not detect external IP address."
+                                            echo "  No default route, no addresses from 'hostname -I'."
+                                            echo "  Fix networking before installing, or set the IP manually."
+                                            exit 1
                                           fi
 
                                           # Auto-generate hostname and nodeId if not provided
@@ -753,13 +762,31 @@ DISKOEOF
                                           CONTROLLER_ADDR=""
                                           if [ "$RUN_CONTROLLER" = "true" ]; then
                                             CONTROLLER_ADDR="$EXTERNAL_IP:9090"
-                                            CONTROLLER_ENDPOINTS=("$CONTROLLER_ADDR")
+                                            if [ "''${#CONTROLLER_ENDPOINTS[@]}" -eq 0 ]; then
+                                              CONTROLLER_ENDPOINTS=("$CONTROLLER_ADDR")
+                                            else
+                                              CONTROLLER_ENDPOINTS=("$CONTROLLER_ADDR" "''${CONTROLLER_ENDPOINTS[@]}")
+                                            fi
                                           elif [ "''${#CONTROLLER_ENDPOINTS[@]}" -eq 0 ]; then
                                             echo "Error: provide --controller <host:9090> or pass --run-controller"
                                             exit 1
                                           else
                                             CONTROLLER_ADDR="''${CONTROLLER_ENDPOINTS[0]}"
                                           fi
+
+                                          # Deduplicate endpoints (preserving order, first occurrence wins)
+                                          _SEEN=""
+                                          _DEDUPED=()
+                                          for ctrl in "''${CONTROLLER_ENDPOINTS[@]}"; do
+                                            if [[ "|$_SEEN|" != *"|$ctrl|"* ]]; then
+                                              _DEDUPED+=("$ctrl")
+                                              _SEEN="$_SEEN|$ctrl"
+                                            fi
+                                          done
+                                          CONTROLLER_ENDPOINTS=("''${_DEDUPED[@]}")
+
+                                          # Write bootstrap controller endpoint (after merge, so correct for all modes)
+                                          echo "''${CONTROLLER_ENDPOINTS[0]}" > /mnt/etc/kcore/bootstrap-controller-endpoint
 
                                           CONTROLLERS_YAML=""
                                           for ctrl in "''${CONTROLLER_ENDPOINTS[@]}"; do
@@ -823,14 +850,31 @@ tls:
   subCaCertFile: /etc/kcore/certs/sub-ca.crt
   subCaKeyFile: /etc/kcore/certs/sub-ca.key
 CTRLEOF
+
+                                            # Always write replication config so the controller emits
+                                            # controller.register and runs peer discovery even when
+                                            # starting as the first (solo) controller.
+                                            REPL_PEERS_YAML=""
+                                            for ctrl in "''${CONTROLLER_ENDPOINTS[@]}"; do
+                                              if [ "$ctrl" != "$CONTROLLER_ADDR" ]; then
+                                                REPL_PEERS_YAML="''${REPL_PEERS_YAML}
+  - \"$ctrl\""
+                                              fi
+                                            done
+                                            cat >> /mnt/etc/kcore/controller.yaml <<REPLEOF
+replication:
+  controllerId: "kcore-controller-$EXTERNAL_IP"
+  dcId: "$DC_ID"
+  peers:$REPL_PEERS_YAML
+REPLEOF
                                           fi
 
                                           if [ "$RUN_CONTROLLER" = "true" ]; then
                                             cat > /mnt/etc/kcore/dashboard.env <<DASHENV
 KCORE_CONTROLLER=$EXTERNAL_IP:9090
 KCORE_CA_FILE=/etc/kcore/certs/ca.crt
-KCORE_CERT_FILE=/etc/kcore/certs/kctl.crt
-KCORE_KEY_FILE=/etc/kcore/certs/kctl.key
+KCORE_CERT_FILE=/etc/kcore/certs/controller.crt
+KCORE_KEY_FILE=/etc/kcore/certs/controller.key
 LEPTOS_SITE_ADDR=0.0.0.0:8080
 LEPTOS_ENV=PROD
 DASHENV
@@ -842,6 +886,18 @@ DASHENV
 {
 }
 VMSEOF
+
+                                          # Build firewall and ordering blocks before configuration.nix heredoc
+                                          EXTRA_TCP_PORTS=""
+                                          EXTRA_UDP_PORTS=""
+                                          NODE_AGENT_AFTER='"network-online.target"'
+                                          if [ "$RUN_CONTROLLER" = "true" ]; then
+                                            EXTRA_TCP_PORTS="9090 8080"
+                                            NODE_AGENT_AFTER='"network-online.target" "kcore-controller.service"'
+                                          fi
+                                          if [ "$DISABLE_VXLAN" != "true" ]; then
+                                            EXTRA_UDP_PORTS="4789"
+                                          fi
 
                                           # Build controller service block conditionally
                                           CONTROLLER_SERVICE=""
@@ -939,7 +995,8 @@ $LUKS_BOOT_CONFIG
   networking.hostName = "$INSTALL_HOSTNAME";
   networking.useDHCP = true;
   networking.firewall.enable = true;
-  networking.firewall.allowedTCPPorts = [ 22 9091 $( [ "$RUN_CONTROLLER" = "true" ] && echo "9090 8080" ) ];
+  networking.firewall.allowedTCPPorts = [ 22 9091 $EXTRA_TCP_PORTS ];
+  networking.firewall.allowedUDPPorts = [ $EXTRA_UDP_PORTS ];
 
   users.users.root = {
     initialPassword = "kcore";
@@ -961,7 +1018,7 @@ $SSH_KEYS
   systemd.services.kcore-node-agent = {
     description = "kcore Node Agent";
     wantedBy = [ "multi-user.target" ];
-    after = [ "network-online.target" ];
+    after = [ $NODE_AGENT_AFTER ];
     wants = [ "network-online.target" ];
     serviceConfig = {
       Type = "simple";

@@ -1,6 +1,6 @@
 use tonic::{Request, Response, Status};
 
-use crate::auth::{self, CN_CONTROLLER, CN_KCTL};
+use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::proto;
 use crate::storage::{self, StorageAdapter};
 use std::sync::Arc;
@@ -27,7 +27,7 @@ impl proto::node_storage_server::NodeStorage for StorageService {
         &self,
         request: Request<proto::CreateVolumeRequest>,
     ) -> Result<Response<proto::CreateVolumeResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let storage = Arc::clone(&self.storage);
         let resp = tokio::task::spawn_blocking(move || {
@@ -49,7 +49,7 @@ impl proto::node_storage_server::NodeStorage for StorageService {
         &self,
         request: Request<proto::DeleteVolumeRequest>,
     ) -> Result<Response<proto::DeleteVolumeResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let storage = Arc::clone(&self.storage);
         tokio::task::spawn_blocking(move || storage.delete_volume(&req.backend_handle))
@@ -62,7 +62,7 @@ impl proto::node_storage_server::NodeStorage for StorageService {
         &self,
         request: Request<proto::AttachVolumeRequest>,
     ) -> Result<Response<proto::AttachVolumeResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let storage = Arc::clone(&self.storage);
         tokio::task::spawn_blocking(move || {
@@ -82,7 +82,7 @@ impl proto::node_storage_server::NodeStorage for StorageService {
         &self,
         request: Request<proto::DetachVolumeRequest>,
     ) -> Result<Response<proto::DetachVolumeResponse>, Status> {
-        auth::require_peer(&request, &[CN_CONTROLLER, CN_KCTL])?;
+        auth::require_peer(&request, &[CN_CONTROLLER_PREFIX, CN_KCTL])?;
         let req = request.into_inner();
         let storage = Arc::clone(&self.storage);
         tokio::task::spawn_blocking(move || {

@@ -116,10 +116,8 @@ async fn main() -> anyhow::Result<()> {
 
     if !cfg.controller_endpoints().is_empty() {
         let reg_cfg = cfg.clone();
-        tokio::spawn(async move {
-            registration::register_with_controller(&reg_cfg).await;
-        });
-        registration::start_heartbeat_loop(cfg.clone());
+        let registered = registration::register_with_controller_tracked(reg_cfg);
+        registration::start_heartbeat_loop(cfg.clone(), registered.clone());
         registration::start_cert_renewal_loop(cfg.clone());
     }
 

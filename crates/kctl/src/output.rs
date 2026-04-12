@@ -48,10 +48,11 @@ pub fn print_vm_detail(
 
 pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
     println!(
-        "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}  {:<8}",
+        "{:<20}  {:<20}  {:<16}  {:<6}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}  {:<8}",
         "ID",
         "HOSTNAME",
         "ADDRESS",
+        "DC",
         "CORES",
         "MEMORY",
         "STATUS",
@@ -68,11 +69,13 @@ pub fn print_node_table(nodes: &[controller_proto::NodeInfo]) {
         };
         let cert_expiry = format_cert_expiry(n.cert_expiry_days);
         let luks = format_luks_method(&n.luks_method);
+        let dc = if n.dc_id.is_empty() { "-" } else { &n.dc_id };
         println!(
-            "{:<20}  {:<20}  {:<16}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}  {:<8}",
+            "{:<20}  {:<20}  {:<16}  {:<6}  {:>6}  {:>10}  {:<10}  {:<10}  {:<10}  {:>11}  {:<8}",
             n.node_id,
             n.hostname,
             n.address,
+            dc,
             cores,
             mem,
             n.status,
@@ -88,6 +91,7 @@ pub fn print_node_detail(n: &controller_proto::NodeInfo) {
     println!("ID:        {}", n.node_id);
     println!("Hostname:  {}", n.hostname);
     println!("Address:   {}", n.address);
+    println!("DC:        {}", if n.dc_id.is_empty() { "-" } else { &n.dc_id });
     println!("Status:    {}", n.status);
     println!("Approval:  {}", n.approval_status);
     if let Some(cap) = &n.capacity {

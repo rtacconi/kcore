@@ -103,18 +103,60 @@ This is needed even with CRDTs, because transport and peer uptime are not perfec
 
 ## Join flow for second controller
 
-Second controller joins by obtaining:
+Each controller gets a unique identity via its TLS certificate CN (`kcore-controller-{host}`), generated fresh at install time. No join token is required; the shared cluster CA is the trust root.
 
-- cluster trust material (same CA trust domain)
-- peer list and replication bootstrap endpoint
-- local `controller_id`, `dc_id` (default `DC1` if omitted)
+### How a controller is added
 
-Then:
+```mermaid
+sequenceDiagram
+    participant op as Operator
+    participant kctl as kctl
+    participant newNode as NewNode_ISO
+    participant existCtrl as ExistingController
 
-1. Register self to existing controller(s).
-2. Pull snapshot + frontier checkpoint.
-3. Start applying live replication stream.
-4. Enable serving client traffic after catch-up threshold is reached.
+    op->>kctl: kctl node install --node Z:9091<br/>--run-controller
+    kctl->>kctl: load_install_pki generates fresh<br/>controller cert CN=kcore-controller-Z
+    kctl->>newNode: InstallToDiskRequest<br/>CA + sub-CA + controller cert + node cert
+    newNode->>newNode: install-to-disk writes certs,<br/>controller.yaml, node-agent.yaml
+    newNode->>newNode: reboot from installed disk
+    newNode->>existCtrl: replication poller connects<br/>authenticates with controller cert
+    existCtrl->>existCtrl: prefix match CN=kcore-controller-Z<br/>authorized for replication RPCs
+    existCtrl->>newNode: GetReplicationEvents stream
+    newNode->>existCtrl: AckReplicationEvents
+    Note over newNode,existCtrl: Bidirectional replication active
+```
+
+### Controller identity and replication peer tracking
+
+```mermaid
+flowchart LR
+    subgraph cluster ["Cluster controllers"]
+        c105["Controller .105<br/>CN=kcore-controller-192.168.40.105"]
+        c151["Controller .151<br/>CN=kcore-controller-192.168.40.151"]
+    end
+
+    subgraph agents ["Node agents"]
+        n105["Agent .105<br/>CN=kcore-node-192.168.40.105"]
+        n107["Agent .107<br/>CN=kcore-node-192.168.40.107"]
+    end
+
+    c105 <-->|"replication events<br/>peer identity from CN"| c151
+    n105 -->|"heartbeat + register"| c105
+    n107 -->|"heartbeat + register"| c105
+    n107 -.->|"fallback"| c151
+```
+
+Each controller's replication ack frontier is tracked by its CN-derived peer ID. Because every controller has a unique CN, there are no identity collisions even when multiple controllers are added simultaneously.
+
+### Steps
+
+1. `kctl create cluster` generates cluster CA and first controller cert.
+2. First controller installs with `--run-controller` and starts as standalone.
+3. Second controller installs with `--run-controller` and is configured with the first controller as a replication peer.
+4. After reboot, the second controller's poller connects to the first and pulls replication events.
+5. When the second controller pulls from the first and acknowledges events, the first controller auto-discovers the second via `ack_replication_events` and registers it in `controller_peers`. The peer discovery loop then starts polling the second controller, establishing bidirectional replication automatically.
+6. Both controllers authenticate via mTLS using their host-specific certificates.
+7. Node inventory converges after node-agents heartbeat and register events are replicated.
 
 ## Node-agent and kctl fallback behavior
 
@@ -145,11 +187,11 @@ Then:
 ```mermaid
 flowchart LR
   Operator[Operator]
-  Kctl[kctl]
-  NodeAgent[nodeAgent]
-  CtrlA[controllerA_DC1]
-  CtrlB[controllerB_DC1]
-  CtrlC[controllerC_DC2]
+  Kctl["kctl<br/>CN=kcore-kctl"]
+  NodeAgent["nodeAgent<br/>CN=kcore-node-{host}"]
+  CtrlA["controllerA_DC1<br/>CN=kcore-controller-10.0.0.10"]
+  CtrlB["controllerB_DC1<br/>CN=kcore-controller-10.0.0.11"]
+  CtrlC["controllerC_DC2<br/>CN=kcore-controller-10.0.0.20"]
   DbA[(sqliteA)]
   DbB[(sqliteB)]
   DbC[(sqliteC)]
@@ -169,14 +211,55 @@ flowchart LR
   CtrlB --> DbB
   CtrlC --> DbC
 
-  CtrlA -->|"replication events"| CtrlB
-  CtrlB -->|"replication events"| CtrlA
+  CtrlA -->|"replication events<br/>(peer tracked by CN)"| CtrlB
+  CtrlB -->|"replication events<br/>(peer tracked by CN)"| CtrlA
   CtrlA -->|"cross-DC replication"| CtrlC
   CtrlC -->|"cross-DC replication"| CtrlA
 
   RecoA -->|"anti-entropy pull/push"| CtrlB
   RecoB -->|"anti-entropy pull/push"| CtrlA
   RecoC -->|"anti-entropy pull/push"| CtrlA
+```
+
+## Controller list and cluster topology
+
+The following diagram shows a typical 3-node production cluster with two controllers and one agent-only node:
+
+```mermaid
+flowchart TD
+    subgraph clusterPKI ["Cluster PKI"]
+        rootCA["Root CA<br/>CN=kcore-cluster-ca"]
+        subCA["Sub-CA<br/>CN=kcore-cluster-sub-ca"]
+        rootCA --> subCA
+    end
+
+    subgraph node105 ["Node 192.168.40.105"]
+        ctrl105["Controller<br/>CN=kcore-controller-192.168.40.105"]
+        agent105["Node Agent<br/>CN=kcore-node-192.168.40.105"]
+        db105[("SQLite<br/>replication outbox + heads")]
+        ctrl105 --- db105
+        ctrl105 --- agent105
+    end
+
+    subgraph node151 ["Node 192.168.40.151"]
+        ctrl151["Controller<br/>CN=kcore-controller-192.168.40.151"]
+        agent151["Node Agent<br/>CN=kcore-node-192.168.40.151"]
+        db151[("SQLite<br/>replication outbox + heads")]
+        ctrl151 --- db151
+        ctrl151 --- agent151
+    end
+
+    subgraph node107 ["Node 192.168.40.107"]
+        agent107["Node Agent<br/>CN=kcore-node-192.168.40.107"]
+    end
+
+    rootCA -.->|signs| ctrl105
+    rootCA -.->|signs| ctrl151
+    subCA -.->|signs| agent107
+
+    ctrl105 <-->|"bidirectional replication<br/>mTLS with host-specific CN"| ctrl151
+    agent107 -->|"heartbeat"| ctrl105
+    agent107 -.->|"failover"| ctrl151
 ```
 
 ## Pros and drawbacks of CRDT approach

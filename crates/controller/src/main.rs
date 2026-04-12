@@ -103,6 +103,8 @@ async fn main() -> anyhow::Result<()> {
     let sub_ca_state = load_sub_ca(&cfg);
     let sub_ca = Arc::new(Mutex::new(sub_ca_state));
 
+    replication::emit_controller_register(&database, &cfg);
+
     replication::spawn_replication_pollers(
         database.clone(),
         cfg.replication.clone(),
@@ -148,6 +150,7 @@ async fn main() -> anyhow::Result<()> {
             cfg.default_network.clone(),
             sub_ca.clone(),
             cfg.replication.clone(),
+            cfg.require_manual_approval,
         );
         if let Some(tls) = cfg.tls.as_ref() {
             svc = svc.with_tls_paths(grpc::TlsPaths {
@@ -158,7 +161,7 @@ async fn main() -> anyhow::Result<()> {
         let controller_svc = controller_proto::controller_server::ControllerServer::new(svc);
 
         let admin_svc = controller_proto::controller_admin_server::ControllerAdminServer::new(
-            grpc::ControllerAdminService::new(database.clone(), cfg.replication.clone()),
+            grpc::ControllerAdminService::new(database.clone(), cfg.replication.clone(), addr.port()),
         );
 
         let (mut health_reporter, health_svc) = tonic_health::server::health_reporter();

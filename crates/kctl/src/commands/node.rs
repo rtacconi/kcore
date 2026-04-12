@@ -330,12 +330,17 @@ pub async fn install(
     dc_id: &str,
     hostname: Option<&str>,
     node_id: Option<&str>,
+    config_path: &Path,
 ) -> Result<()> {
     let join_controllers = validate_install_controller_mode(join_controllers, run_controller)?;
     let primary_controller = join_controllers.first().cloned().unwrap_or_default();
 
     let node_host =
         pki::host_from_address(&info.address).map_err(|e| anyhow::anyhow!("node address: {e}"))?;
+
+    let effective_node_id = node_id
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.trim().to_string());
 
     let node_is_controller = run_controller;
 
@@ -347,18 +352,22 @@ pub async fn install(
         let ca_cert_pem = std::fs::read_to_string(&ca_path)
             .with_context(|| format!("reading {}", ca_path.display()))?;
 
-        // For agent-only installs, always ask the target controller to issue
+        // For agent-only installs, ask the target controller to issue
         // the node bootstrap cert/key so cert issuance is tied to controller CA.
+        // Use inline PEM data from the controller_info when available; fall back
+        // to file paths from the certs_dir.
         let controller_conn = if let Some(ci) = controller_info {
-            let usable_tls = !ci.insecure
-                && ci.cert.as_deref().is_some()
-                && ci.key.as_deref().is_some()
-                && ci.ca.as_deref().is_some();
-            if usable_tls {
+            let has_inline = ci.cert_pem.is_some() && ci.key_pem.is_some() && ci.ca_pem.is_some();
+            let has_files = ci.cert.is_some() && ci.key.is_some() && ci.ca.is_some();
+            if has_inline || has_files {
                 ConnectionInfo {
                     address: primary_controller.clone(),
                     addresses: join_controllers.clone(),
                     insecure: false,
+                    tls_server_name: ci.tls_server_name.clone(),
+                    cert_pem: ci.cert_pem.clone(),
+                    key_pem: ci.key_pem.clone(),
+                    ca_pem: ci.ca_pem.clone(),
                     cert: ci.cert.clone(),
                     key: ci.key.clone(),
                     ca: ci.ca.clone(),
@@ -368,6 +377,10 @@ pub async fn install(
                     address: primary_controller.clone(),
                     addresses: join_controllers.clone(),
                     insecure: false,
+                    tls_server_name: ci.tls_server_name.clone(),
+                    cert_pem: None,
+                    key_pem: None,
+                    ca_pem: None,
                     cert: Some(certs_dir.join("kctl.crt").display().to_string()),
                     key: Some(certs_dir.join("kctl.key").display().to_string()),
                     ca: Some(certs_dir.join("ca.crt").display().to_string()),
@@ -378,73 +391,36 @@ pub async fn install(
                 address: primary_controller.clone(),
                 addresses: join_controllers.clone(),
                 insecure: false,
+                tls_server_name: None,
+                cert_pem: None,
+                key_pem: None,
+                ca_pem: None,
                 cert: Some(certs_dir.join("kctl.crt").display().to_string()),
                 key: Some(certs_dir.join("kctl.key").display().to_string()),
                 ca: Some(certs_dir.join("ca.crt").display().to_string()),
             }
         };
-        let default_certs = crate::config::default_certs_dir();
-        let fallback_conn = ConnectionInfo {
-            address: primary_controller.clone(),
-            addresses: join_controllers.clone(),
-            insecure: false,
-            cert: Some(default_certs.join("kctl.crt").display().to_string()),
-            key: Some(default_certs.join("kctl.key").display().to_string()),
-            ca: Some(default_certs.join("ca.crt").display().to_string()),
-        };
 
-        let mut attempts = vec![controller_conn];
-        if attempts[0].cert != fallback_conn.cert
-            || attempts[0].key != fallback_conn.key
-            || attempts[0].ca != fallback_conn.ca
-        {
-            attempts.push(fallback_conn);
-        }
-
-        let mut last_err: Option<anyhow::Error> = None;
-        let mut issued: Option<controller_proto::IssueNodeBootstrapCertResponse> = None;
-        for conn in attempts {
-            match client::controller_client(&conn).await {
-                Ok(mut ctl) => {
-                    match ctl
-                        .issue_node_bootstrap_cert(
-                            controller_proto::IssueNodeBootstrapCertRequest {
-                                node_id: node_id
-                                    .unwrap_or(&format!("kcore-node-{node_host}"))
-                                    .to_string(),
-                                node_host: node_host.clone(),
-                            },
-                        )
-                        .await
-                    {
-                        Ok(resp) => {
-                            issued = Some(resp.into_inner());
-                            break;
-                        }
-                        Err(e) => {
-                            last_err = Some(e.into());
-                        }
-                    }
-                }
-                Err(e) => {
-                    last_err = Some(e);
-                }
-            }
-        }
-
-        let issued = if let Some(resp) = issued {
-            resp
-        } else if let Some(err) = last_err {
-            return Err(err.context(format!(
-                "connecting to controller {} to issue bootstrap certs",
-                primary_controller
-            )));
-        } else {
-            anyhow::bail!(
-                "connecting to controller {} to issue bootstrap certs",
-                primary_controller
-            );
-        };
+        let mut ctl = client::controller_client(&controller_conn)
+            .await
+            .with_context(|| {
+                format!(
+                    "connecting to controller {primary_controller} to issue bootstrap certs"
+                )
+            })?;
+        let bootstrap_node_id = effective_node_id
+            .clone()
+            .unwrap_or_else(|| format!("kcore-node-{node_host}"));
+        let issued = ctl
+            .issue_node_bootstrap_cert(controller_proto::IssueNodeBootstrapCertRequest {
+                node_id: bootstrap_node_id.clone(),
+                node_host: node_host.clone(),
+            })
+            .await
+            .with_context(|| {
+                format!("requesting node bootstrap cert from controller {primary_controller}")
+            })?
+            .into_inner();
         if !issued.success {
             anyhow::bail!(
                 "controller refused bootstrap cert issuance: {}",
@@ -492,13 +468,39 @@ pub async fn install(
             disable_vxlan,
             dc_id: dc_id.trim().to_string(),
             hostname: hostname.unwrap_or("").trim().to_string(),
-            node_id: node_id.unwrap_or("").trim().to_string(),
+            node_id: effective_node_id.clone().unwrap_or_default(),
         })
         .await?
         .into_inner();
 
     if resp.accepted {
         println!("Install accepted: {}", resp.message);
+        if run_controller {
+            let new_addr = format!("{node_host}:9090");
+            match crate::config::load_config(config_path) {
+                Ok(mut cfg) => {
+                    let ctx_name = cfg
+                        .current_context
+                        .clone()
+                        .or_else(|| cfg.contexts.keys().next().cloned());
+                    match ctx_name {
+                        Some(name) => {
+                            if let Some(ctx) = cfg.contexts.get_mut(&name) {
+                                if !ctx.controllers.iter().any(|c| c.contains(&node_host)) {
+                                    ctx.controllers.push(new_addr.clone());
+                                    match crate::config::save_config(config_path, &cfg) {
+                                        Ok(()) => println!("Added {new_addr} to kctl controllers list in context '{name}'"),
+                                        Err(e) => eprintln!("Warning: failed to save kctl config after adding controller: {e}"),
+                                    }
+                                }
+                            }
+                        }
+                        None => eprintln!("Warning: no kctl context found; add {new_addr} to your config manually"),
+                    }
+                }
+                Err(e) => eprintln!("Warning: could not load kctl config to add new controller: {e}"),
+            }
+        }
         Ok(())
     } else {
         anyhow::bail!("Install rejected: {}", resp.message);
@@ -513,10 +515,14 @@ fn validate_install_controller_mode(
         .iter()
         .map(|v| v.trim().to_string())
         .filter(|v| !v.is_empty())
+        .map(|v| if v.contains(':') { v } else { format!("{v}:9090") })
         .collect();
     let has_join = !normalized.is_empty();
-    if has_join == run_controller {
-        anyhow::bail!("provide exactly one of --join-controller <host:port> or --run-controller");
+    if !has_join && !run_controller {
+        anyhow::bail!(
+            "provide --join-controller <host:port> or --run-controller \
+             (or both for a new controller joining an existing cluster)"
+        );
     }
     Ok(normalized)
 }
@@ -709,16 +715,15 @@ mod tests {
         let err = validate_install_controller_mode(&[], false).expect_err("should fail");
         assert!(err
             .to_string()
-            .contains("provide exactly one of --join-controller"));
+            .contains("provide --join-controller"));
     }
 
     #[test]
-    fn validate_install_mode_rejects_both() {
-        let err = validate_install_controller_mode(&["192.168.1.10:9090".to_string()], true)
-            .expect_err("should fail");
-        assert!(err
-            .to_string()
-            .contains("provide exactly one of --join-controller"));
+    fn validate_install_mode_accepts_both() {
+        let join =
+            validate_install_controller_mode(&["192.168.1.10:9090".to_string()], true)
+                .expect("should pass when both flags are set");
+        assert_eq!(join, vec!["192.168.1.10:9090"]);
     }
 
     #[test]
@@ -732,6 +737,16 @@ mod tests {
     fn validate_install_mode_accepts_run_controller_only() {
         let join = validate_install_controller_mode(&[], true).expect("should pass");
         assert!(join.is_empty());
+    }
+
+    #[test]
+    fn validate_install_mode_normalizes_port() {
+        let join = validate_install_controller_mode(
+            &["192.168.1.10".to_string(), "10.0.0.5:7777".to_string()],
+            false,
+        )
+        .expect("should pass");
+        assert_eq!(join, vec!["192.168.1.10:9090", "10.0.0.5:7777"]);
     }
 
     #[test]
