@@ -844,7 +844,12 @@ fn resolve_node(cli: &Cli) -> Result<config::ConnectionInfo, String> {
         .config
         .clone()
         .unwrap_or_else(config::default_config_path);
-    config::resolve_node(&config_path, &cli.node, cli.insecure, cli.tls_server_name.clone())
+    config::resolve_node(
+        &config_path,
+        &cli.node,
+        cli.insecure,
+        cli.tls_server_name.clone(),
+    )
 }
 
 #[tokio::main]

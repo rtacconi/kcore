@@ -2302,9 +2302,7 @@ impl Database {
 
     pub fn get_vm_ssh_key_names(&self, vm_id: &str) -> Result<Vec<String>, rusqlite::Error> {
         let conn = self.lock_conn()?;
-        let mut stmt = conn.prepare(
-            "SELECT key_name FROM vm_ssh_keys WHERE vm_id = ?1",
-        )?;
+        let mut stmt = conn.prepare("SELECT key_name FROM vm_ssh_keys WHERE vm_id = ?1")?;
         let rows = stmt.query_map(params![vm_id], |row| row.get::<_, String>(0))?;
         rows.collect()
     }
@@ -2792,11 +2790,20 @@ mod tests {
         let updated = db
             .update_heartbeat(&node.id, 1, 1000, -1, "")
             .expect("heartbeat");
-        assert!(updated, "heartbeat should update a registered node regardless of approval");
+        assert!(
+            updated,
+            "heartbeat should update a registered node regardless of approval"
+        );
 
         let got = db.get_node(&node.id).expect("get").expect("exists");
-        assert_eq!(got.status, "pending", "status should still be pending for non-approved");
-        assert!(!got.last_heartbeat.is_empty(), "heartbeat timestamp should be set");
+        assert_eq!(
+            got.status, "pending",
+            "status should still be pending for non-approved"
+        );
+        assert!(
+            !got.last_heartbeat.is_empty(),
+            "heartbeat timestamp should be set"
+        );
     }
 
     #[test]

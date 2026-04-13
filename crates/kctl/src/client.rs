@@ -42,10 +42,9 @@ fn resolve_tls_pems(info: &ConnectionInfo) -> Result<(String, String, String)> {
     let ca_pem = if let Some(pem) = &info.ca_pem {
         pem.clone()
     } else {
-        let path = info
-            .ca
-            .as_deref()
-            .context("no CA certificate configured (set ca-data in config or use `kctl create cluster`)")?;
+        let path = info.ca.as_deref().context(
+            "no CA certificate configured (set ca-data in config or use `kctl create cluster`)",
+        )?;
         crate::path_safety::assert_safe_path(path, "TLS CA certificate path")?;
         std::fs::read_to_string(path)
             .with_context(|| format!("reading TLS CA certificate at {path}"))?
@@ -66,10 +65,9 @@ fn resolve_tls_pems(info: &ConnectionInfo) -> Result<(String, String, String)> {
     let client_key_pem = if let Some(pem) = &info.key_pem {
         pem.clone()
     } else {
-        let path = info
-            .key
-            .as_deref()
-            .context("no client key configured (set key-data in config or use `kctl create cluster`)")?;
+        let path = info.key.as_deref().context(
+            "no client key configured (set key-data in config or use `kctl create cluster`)",
+        )?;
         crate::path_safety::assert_safe_path(path, "TLS client private key path")?;
         std::fs::read_to_string(path)
             .with_context(|| format!("reading TLS client private key at {path}"))?
@@ -110,11 +108,7 @@ fn cert_source_label(info: &ConnectionInfo, is_ca: bool) -> String {
 /// Supports both direct signing (leaf signed by root CA) and intermediate
 /// chains (leaf signed by sub-CA, sub-CA signed by root CA, with both
 /// PEM-concatenated in `client_cert_pem`).
-fn verify_cert_chain(
-    ca_pem: &str,
-    client_cert_pem: &str,
-    info: &ConnectionInfo,
-) -> Result<()> {
+fn verify_cert_chain(ca_pem: &str, client_cert_pem: &str, info: &ConnectionInfo) -> Result<()> {
     let ca_der = pem::parse_x509_pem(ca_pem.as_bytes())
         .map_err(|e| anyhow::anyhow!("CA certificate is not valid PEM: {e}"))?
         .1;
@@ -164,7 +158,11 @@ fn verify_cert_chain(
 /// Pre-flight check: parse the CA and client cert PEMs to catch common
 /// misconfigurations before the TLS handshake.  Produces actionable errors
 /// instead of opaque "transport error" messages.
-fn validate_tls_materials(ca_pem: &str, client_cert_pem: &str, info: &ConnectionInfo) -> Result<()> {
+fn validate_tls_materials(
+    ca_pem: &str,
+    client_cert_pem: &str,
+    info: &ConnectionInfo,
+) -> Result<()> {
     verify_cert_chain(ca_pem, client_cert_pem, info)?;
 
     let ca_der = pem::parse_x509_pem(ca_pem.as_bytes())
@@ -185,11 +183,7 @@ fn validate_tls_materials(ca_pem: &str, client_cert_pem: &str, info: &Connection
 
     let not_after_ts = leaf.validity().not_after.timestamp();
     if now.unix_timestamp() > not_after_ts {
-        let expiry = leaf
-            .validity()
-            .not_after
-            .to_rfc2822()
-            .unwrap_or_default();
+        let expiry = leaf.validity().not_after.to_rfc2822().unwrap_or_default();
         anyhow::bail!(
             "client certificate ({}) expired on {expiry} — \
              regenerate with `kctl create cluster` or rotate certs",
@@ -228,9 +222,7 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
         Some(pems)
     };
 
-    let ca_fp = tls_pems
-        .as_ref()
-        .map(|(ca, _, _)| ca_fingerprint_short(ca));
+    let ca_fp = tls_pems.as_ref().map(|(ca, _, _)| ca_fingerprint_short(ca));
 
     let mut errors = Vec::new();
     for address in &addresses {
@@ -262,10 +254,7 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
                 } else {
                     String::new()
                 };
-                errors.push(format!(
-                    "{address}: {}{hint}",
-                    format_transport_error(&e),
-                ));
+                errors.push(format!("{address}: {}{hint}", format_transport_error(&e),));
             }
         }
     }
@@ -579,7 +568,9 @@ mod tests {
             ca: Some(good_dir.join("ca.crt").display().to_string()),
         };
 
-        let err = super::connect(&info).await.expect_err("preflight should catch mismatch");
+        let err = super::connect(&info)
+            .await
+            .expect_err("preflight should catch mismatch");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("signed by a different CA"),
@@ -637,7 +628,9 @@ mod tests {
             key: Some(bad_dir.join("kctl.key").display().to_string()),
             ca: Some(good_dir.join("ca.crt").display().to_string()),
         };
-        let err = super::connect(&info).await.expect_err("should detect mismatch");
+        let err = super::connect(&info)
+            .await
+            .expect_err("should detect mismatch");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("signed by a different CA"),
@@ -672,7 +665,9 @@ mod tests {
             key: None,
             ca: None,
         };
-        let err = super::connect(&info).await.expect_err("should detect mismatch");
+        let err = super::connect(&info)
+            .await
+            .expect_err("should detect mismatch");
         let msg = format!("{err:#}");
         assert!(
             msg.contains("signed by a different CA"),
@@ -690,8 +685,7 @@ mod tests {
         let ca_pem = std::fs::read_to_string(certs_dir.join("ca.crt")).expect("ca");
         let sub_ca_pem =
             std::fs::read_to_string(certs_dir.join("sub-ca.crt")).expect("sub-ca cert");
-        let sub_ca_key =
-            std::fs::read_to_string(certs_dir.join("sub-ca.key")).expect("sub-ca key");
+        let sub_ca_key = std::fs::read_to_string(certs_dir.join("sub-ca.key")).expect("sub-ca key");
 
         let (leaf_chain, _key) =
             pki::sign_node_cert_with_sub_ca(&sub_ca_pem, &sub_ca_key, "10.0.0.1")

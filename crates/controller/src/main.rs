@@ -161,7 +161,11 @@ async fn main() -> anyhow::Result<()> {
         let controller_svc = controller_proto::controller_server::ControllerServer::new(svc);
 
         let admin_svc = controller_proto::controller_admin_server::ControllerAdminServer::new(
-            grpc::ControllerAdminService::new(database.clone(), cfg.replication.clone(), addr.port()),
+            grpc::ControllerAdminService::new(
+                database.clone(),
+                cfg.replication.clone(),
+                addr.port(),
+            ),
         );
 
         let (mut health_reporter, health_svc) = tonic_health::server::health_reporter();

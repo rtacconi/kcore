@@ -91,7 +91,10 @@ pub fn print_node_detail(n: &controller_proto::NodeInfo) {
     println!("ID:        {}", n.node_id);
     println!("Hostname:  {}", n.hostname);
     println!("Address:   {}", n.address);
-    println!("DC:        {}", if n.dc_id.is_empty() { "-" } else { &n.dc_id });
+    println!(
+        "DC:        {}",
+        if n.dc_id.is_empty() { "-" } else { &n.dc_id }
+    );
     println!("Status:    {}", n.status);
     println!("Approval:  {}", n.approval_status);
     if let Some(cap) = &n.capacity {

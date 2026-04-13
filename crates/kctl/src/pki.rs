@@ -166,11 +166,8 @@ pub fn create_cluster_pki(
 
     let (sub_ca_cert_pem, sub_ca_key_pem) = generate_sub_ca(&ca_cert_pem, &ca_key_pem)?;
 
-    let (controller_cert_pem, controller_key_pem) = sign_controller_cert(
-        controller_host,
-        &ca_cert_pem,
-        &ca_key_pem,
-    )?;
+    let (controller_cert_pem, controller_key_pem) =
+        sign_controller_cert(controller_host, &ca_cert_pem, &ca_key_pem)?;
 
     let (kctl_cert_pem, kctl_key_pem) = sign_cert(
         None,

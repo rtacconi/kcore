@@ -100,7 +100,10 @@ mod tests {
         assert!(ctx.cert_data.is_some(), "cert-data must be embedded inline");
         assert!(ctx.key_data.is_some(), "key-data must be embedded inline");
 
-        assert!(ctx.ca.is_none(), "file path should not be set when inline data is used");
+        assert!(
+            ctx.ca.is_none(),
+            "file path should not be set when inline data is used"
+        );
         assert!(ctx.cert.is_none());
         assert!(ctx.key.is_none());
 
@@ -108,7 +111,10 @@ mod tests {
             .decode(ctx.ca_data.as_ref().unwrap().trim())
             .expect("decode ca");
         let ca_str = String::from_utf8(ca_decoded).expect("utf8");
-        assert!(ca_str.contains("BEGIN CERTIFICATE"), "decoded ca must be PEM");
+        assert!(
+            ca_str.contains("BEGIN CERTIFICATE"),
+            "decoded ca must be PEM"
+        );
 
         assert!(certs_dir.join("controller.crt").exists());
         assert!(certs_dir.join("controller.key").exists());
@@ -137,8 +143,7 @@ mod tests {
         let certs_dir_1 = temp.path().join("certs1");
         let certs_dir_2 = temp.path().join("certs2");
 
-        create(&config_path, "127.0.0.1:9090", &certs_dir_1, "prod", false)
-            .expect("first create");
+        create(&config_path, "127.0.0.1:9090", &certs_dir_1, "prod", false).expect("first create");
 
         let err = create(&config_path, "10.0.0.1:9090", &certs_dir_2, "prod", false)
             .expect_err("should refuse");
@@ -156,8 +161,7 @@ mod tests {
         let certs_dir_1 = temp.path().join("certs1");
         let certs_dir_2 = temp.path().join("certs2");
 
-        create(&config_path, "127.0.0.1:9090", &certs_dir_1, "prod", false)
-            .expect("first create");
+        create(&config_path, "127.0.0.1:9090", &certs_dir_1, "prod", false).expect("first create");
         create(&config_path, "10.0.0.1:9090", &certs_dir_2, "prod", true)
             .expect("force overwrite should succeed");
 

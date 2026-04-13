@@ -73,8 +73,10 @@ pub fn emit_controller_register(db: &Database, cfg: &crate::config::Config) {
             if let Some(ip) = detect_advertisable_ip() {
                 format!("{ip}:{port}")
             } else {
-                warn!("controller bound to wildcard address and no external_ip configured; \
-                       emitting listen_addr as-is — peers may not be able to dial this endpoint");
+                warn!(
+                    "controller bound to wildcard address and no external_ip configured; \
+                       emitting listen_addr as-is — peers may not be able to dial this endpoint"
+                );
                 listen_addr.to_string()
             }
         } else {
@@ -106,8 +108,7 @@ pub fn emit_controller_register(db: &Database, cfg: &crate::config::Config) {
     });
 
     if let Ok(payload) = serde_json::to_vec(&envelope) {
-        if let Err(e) =
-            db.append_replication_outbox("controller.register", &resource_key, &payload)
+        if let Err(e) = db.append_replication_outbox("controller.register", &resource_key, &payload)
         {
             warn!(error = %e, "failed to emit controller.register event");
         } else {
@@ -293,8 +294,16 @@ async fn replication_peer_loop(
     tls: Option<TlsConfig>,
     is_cross_dc: bool,
 ) {
-    let idle_secs = if is_cross_dc { CROSS_DC_IDLE_POLL_SECS } else { IDLE_POLL_SECS };
-    let error_secs = if is_cross_dc { CROSS_DC_ERROR_BACKOFF_SECS } else { ERROR_BACKOFF_SECS };
+    let idle_secs = if is_cross_dc {
+        CROSS_DC_IDLE_POLL_SECS
+    } else {
+        IDLE_POLL_SECS
+    };
+    let error_secs = if is_cross_dc {
+        CROSS_DC_ERROR_BACKOFF_SECS
+    } else {
+        ERROR_BACKOFF_SECS
+    };
     let local_frontier_key = format!("pull/{peer}");
     loop {
         match poll_once(
@@ -384,9 +393,11 @@ fn local_peer_identity(local_controller_id: &str, tls: Option<&TlsConfig>) -> Op
     let tls = tls?;
     let cert_pem = std::fs::read_to_string(&tls.cert_file).ok()?;
     use x509_parser::prelude::FromDer;
-    let cert = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes()).ok()?.1;
-    let (_, cert) = x509_parser::certificate::X509Certificate::from_der(cert.contents.as_slice())
-        .ok()?;
+    let cert = x509_parser::pem::parse_x509_pem(cert_pem.as_bytes())
+        .ok()?
+        .1;
+    let (_, cert) =
+        x509_parser::certificate::X509Certificate::from_der(cert.contents.as_slice()).ok()?;
     let cn = cert
         .subject()
         .iter_common_name()
@@ -1554,10 +1565,7 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
         "controller.register" => {
             let controller_id = required_str(&body, "controllerId", &head.resource_key)?;
             let address = required_str(&body, "address", &head.resource_key)?;
-            let dc_id = body
-                .get("dcId")
-                .and_then(Value::as_str)
-                .unwrap_or("DC1");
+            let dc_id = body.get("dcId").and_then(Value::as_str).unwrap_or("DC1");
             db.upsert_controller_peer(controller_id, address, dc_id)
                 .map_err(|e| format!("upsert controller peer {controller_id}: {e}"))?;
             Ok(())
@@ -2062,10 +2070,7 @@ mod tests {
         .expect("upsert network head");
 
         assert!(process_materialization_once(&db).expect("materialize create"));
-        assert!(db
-            .get_node("node-missing")
-            .expect("node lookup")
-            .is_some());
+        assert!(db.get_node("node-missing").expect("node lookup").is_some());
         assert!(db
             .get_network_for_node("node-missing", "repl-net")
             .expect("network lookup")
@@ -2680,11 +2685,11 @@ mod tests {
         assert_eq!(peers[0].controller_id, "kcore-controller-192-168-40-105");
         assert_eq!(peers[0].address, "192.168.40.105:9090");
 
-        let outbox = db.list_replication_outbox_since(0, 10).expect("list outbox");
+        let outbox = db
+            .list_replication_outbox_since(0, 10)
+            .expect("list outbox");
         assert!(
-            outbox
-                .iter()
-                .any(|r| r.event_type == "controller.register"),
+            outbox.iter().any(|r| r.event_type == "controller.register"),
             "controller.register event should be in outbox"
         );
     }

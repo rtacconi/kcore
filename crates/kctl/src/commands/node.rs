@@ -404,9 +404,7 @@ pub async fn install(
         let mut ctl = client::controller_client(&controller_conn)
             .await
             .with_context(|| {
-                format!(
-                    "connecting to controller {primary_controller} to issue bootstrap certs"
-                )
+                format!("connecting to controller {primary_controller} to issue bootstrap certs")
             })?;
         let bootstrap_node_id = effective_node_id
             .clone()
@@ -498,7 +496,9 @@ pub async fn install(
                         None => eprintln!("Warning: no kctl context found; add {new_addr} to your config manually"),
                     }
                 }
-                Err(e) => eprintln!("Warning: could not load kctl config to add new controller: {e}"),
+                Err(e) => {
+                    eprintln!("Warning: could not load kctl config to add new controller: {e}")
+                }
             }
         }
         Ok(())
@@ -731,16 +731,13 @@ mod tests {
     #[test]
     fn validate_install_mode_rejects_neither() {
         let err = validate_install_controller_mode(&[], false).expect_err("should fail");
-        assert!(err
-            .to_string()
-            .contains("provide --join-controller"));
+        assert!(err.to_string().contains("provide --join-controller"));
     }
 
     #[test]
     fn validate_install_mode_accepts_both() {
-        let join =
-            validate_install_controller_mode(&["192.168.1.10:9090".to_string()], true)
-                .expect("should pass when both flags are set");
+        let join = validate_install_controller_mode(&["192.168.1.10:9090".to_string()], true)
+            .expect("should pass when both flags are set");
         assert_eq!(join, vec!["192.168.1.10:9090"]);
     }
 

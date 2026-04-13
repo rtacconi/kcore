@@ -33,25 +33,13 @@ pub struct Context {
     )]
     pub tls_server_name: Option<String>,
     /// Inline base64-encoded PEM client certificate (preferred over file path).
-    #[serde(
-        rename = "cert-data",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "cert-data", default, skip_serializing_if = "Option::is_none")]
     pub cert_data: Option<String>,
     /// Inline base64-encoded PEM client key (preferred over file path).
-    #[serde(
-        rename = "key-data",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "key-data", default, skip_serializing_if = "Option::is_none")]
     pub key_data: Option<String>,
     /// Inline base64-encoded PEM CA certificate (preferred over file path).
-    #[serde(
-        rename = "ca-data",
-        default,
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(rename = "ca-data", default, skip_serializing_if = "Option::is_none")]
     pub ca_data: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cert: Option<String>,
@@ -92,7 +80,9 @@ fn decode_inline_pem(b64: &str, label: &str) -> Result<String, String> {
 }
 
 /// Resolve inline base64 data from a `Context` into decoded PEM strings.
-fn resolve_inline_pems(ctx: &Context) -> Result<(Option<String>, Option<String>, Option<String>), String> {
+fn resolve_inline_pems(
+    ctx: &Context,
+) -> Result<(Option<String>, Option<String>, Option<String>), String> {
     let cert_pem = ctx
         .cert_data
         .as_deref()
@@ -376,11 +366,33 @@ pub fn resolve_controller(
 /// with file-backed `cert`/`key`.
 fn resolve_tls_fields(
     ctx: &Context,
-) -> Result<(Option<String>, Option<String>, Option<String>, Option<String>, Option<String>, Option<String>), String> {
+) -> Result<
+    (
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ),
+    String,
+> {
     let (cert_pem, key_pem, ca_pem) = resolve_inline_pems(ctx)?;
-    let cert_path = if ctx.cert_data.is_some() { None } else { ctx.cert.clone() };
-    let key_path = if ctx.key_data.is_some() { None } else { ctx.key.clone() };
-    let ca_path = if ctx.ca_data.is_some() { None } else { ctx.ca.clone() };
+    let cert_path = if ctx.cert_data.is_some() {
+        None
+    } else {
+        ctx.cert.clone()
+    };
+    let key_path = if ctx.key_data.is_some() {
+        None
+    } else {
+        ctx.key.clone()
+    };
+    let ca_path = if ctx.ca_data.is_some() {
+        None
+    } else {
+        ctx.ca.clone()
+    };
 
     let has_cert = cert_pem.is_some() || cert_path.is_some();
     let has_key = key_pem.is_some() || key_path.is_some();
@@ -490,8 +502,13 @@ mod tests {
 
     #[test]
     fn resolve_node_defaults_port_and_uses_insecure_mode() {
-        let info = resolve_node(Path::new("/nonexistent"), &Some("10.0.0.21".into()), true, None)
-            .expect("resolve node");
+        let info = resolve_node(
+            Path::new("/nonexistent"),
+            &Some("10.0.0.21".into()),
+            true,
+            None,
+        )
+        .expect("resolve node");
         assert_eq!(info.address, "10.0.0.21:9091");
         assert_eq!(info.addresses, vec!["10.0.0.21:9091"]);
         assert!(info.insecure);
@@ -585,7 +602,10 @@ mod tests {
         assert_eq!(info.ca_pem.as_deref(), Some("---CA PEM---"));
         assert_eq!(info.cert_pem.as_deref(), Some("---CERT PEM---"));
         assert_eq!(info.key_pem.as_deref(), Some("---KEY PEM---"));
-        assert!(info.cert.is_none(), "file path must not be set when inline data is present");
+        assert!(
+            info.cert.is_none(),
+            "file path must not be set when inline data is present"
+        );
         assert!(info.key.is_none());
         assert!(info.ca.is_none());
     }

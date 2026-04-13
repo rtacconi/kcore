@@ -93,7 +93,10 @@ mod tests {
             &[CN_CONTROLLER_PREFIX]
         ));
         assert!(!is_authorized("kcore-kctl", &[CN_CONTROLLER_PREFIX]));
-        assert!(!is_authorized("kcore-node-10.0.0.1", &[CN_CONTROLLER_PREFIX]));
+        assert!(!is_authorized(
+            "kcore-node-10.0.0.1",
+            &[CN_CONTROLLER_PREFIX]
+        ));
     }
 
     #[test]

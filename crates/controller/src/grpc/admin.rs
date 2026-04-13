@@ -154,10 +154,10 @@ impl controller_proto::controller_admin_server::ControllerAdmin for ControllerAd
                 } else {
                     format!("{host}:9090")
                 };
-                if let Err(e) = self.db.upsert_controller_peer_address_only(
-                    peer_id,
-                    &peer_addr,
-                ) {
+                if let Err(e) = self
+                    .db
+                    .upsert_controller_peer_address_only(peer_id, &peer_addr)
+                {
                     warn!(peer_id = %peer_id, error = %e, "failed to auto-register acking controller peer");
                 }
             }

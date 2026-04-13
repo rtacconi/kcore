@@ -119,7 +119,9 @@ impl Config {
                 anyhow::bail!("replication.dcId must not be empty");
             }
             if replication.controller_id.trim().is_empty() {
-                anyhow::bail!("replication.controllerId is required when replication section is present");
+                anyhow::bail!(
+                    "replication.controllerId is required when replication section is present"
+                );
             }
             if replication.peers.iter().any(|p| p.trim().is_empty()) {
                 anyhow::bail!("replication.peers must not contain empty endpoints");
