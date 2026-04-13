@@ -228,7 +228,9 @@ pub async fn connect(info: &ConnectionInfo) -> Result<Channel> {
     for address in &addresses {
         let scheme = if info.insecure { "http" } else { "https" };
         let uri = format!("{scheme}://{address}");
-        let mut endpoint = Endpoint::from_shared(uri.clone())?;
+        let mut endpoint = Endpoint::from_shared(uri.clone())?
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(30));
 
         if let Some((ca_pem, client_cert_pem, client_key_pem)) = &tls_pems {
             let mut tls = ClientTlsConfig::new();

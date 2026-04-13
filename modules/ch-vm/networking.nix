@@ -8,7 +8,14 @@ let
   cfg = config.ch-vm.vms;
   helpers = import ./helpers.nix { inherit lib; };
 
-  bridgeName = name: "kbr-${name}";
+  bridgeName =
+    name:
+    let
+      full = "kbr-${name}";
+      hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
+      short = "kb-${hash}";
+    in
+    if builtins.stringLength full <= 15 then full else short;
   inherit (helpers) tapName;
   upstreamIface =
     _netName: netCfg:

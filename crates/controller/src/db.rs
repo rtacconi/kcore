@@ -1866,6 +1866,29 @@ impl Database {
         Ok(format!("{}.{}", prefix, next_ip))
     }
 
+    /// Allocate a VM IP that is unique across *all* nodes sharing this
+    /// network name (used for VXLAN overlays where every node is in the
+    /// same L2 domain). Picks the global max `next_ip`, returns it, and
+    /// bumps every row's counter so the next call is also unique.
+    pub fn allocate_vm_ip_global(
+        &self,
+        network_name: &str,
+    ) -> Result<String, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let (gateway_ip, global_next): (String, i32) = conn.query_row(
+            "SELECT gateway_ip, MAX(next_ip) FROM networks WHERE name = ?1",
+            params![network_name],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        let new_next = global_next + 1;
+        conn.execute(
+            "UPDATE networks SET next_ip = ?1 WHERE name = ?2",
+            params![new_next, network_name],
+        )?;
+        let prefix = gateway_ip.rsplit_once('.').map(|x| x.0).unwrap_or("10.0.0");
+        Ok(format!("{}.{}", prefix, global_next))
+    }
+
     pub fn delete_network(&self, node_id: &str, name: &str) -> Result<bool, rusqlite::Error> {
         let conn = self.lock_conn()?;
         let rows = conn.execute(
@@ -2900,6 +2923,49 @@ mod tests {
 
         let ip3 = db.allocate_vm_ip("vxnet", &node.id).expect("alloc 3");
         assert_eq!(ip3, "10.200.0.4");
+    }
+
+    #[test]
+    fn allocate_vm_ip_global_is_unique_across_nodes() {
+        let db = Database::open(":memory:").expect("open db");
+        let mut n1 = test_node();
+        n1.id = "n1".to_string();
+        let mut n2 = test_node();
+        n2.id = "n2".to_string();
+        db.upsert_node(&n1).expect("insert n1");
+        db.upsert_node(&n2).expect("insert n2");
+
+        for nid in ["n1", "n2"] {
+            db.insert_network(&NetworkRow {
+                name: "overlay".to_string(),
+                external_ip: "0.0.0.0".to_string(),
+                gateway_ip: "10.50.0.1".to_string(),
+                internal_netmask: "255.255.255.0".to_string(),
+                node_id: nid.to_string(),
+                allowed_tcp_ports: String::new(),
+                allowed_udp_ports: String::new(),
+                vlan_id: 0,
+                network_type: "vxlan".to_string(),
+                enable_outbound_nat: false,
+                vni: 10200,
+                next_ip: 2,
+            })
+            .expect("insert");
+        }
+
+        let ip1 = db.allocate_vm_ip_global("overlay").expect("alloc 1");
+        assert_eq!(ip1, "10.50.0.2");
+
+        let ip2 = db.allocate_vm_ip_global("overlay").expect("alloc 2");
+        assert_eq!(ip2, "10.50.0.3");
+
+        let ip3 = db.allocate_vm_ip_global("overlay").expect("alloc 3");
+        assert_eq!(ip3, "10.50.0.4");
+
+        let nets = db.list_networks_by_name("overlay").expect("list");
+        for n in &nets {
+            assert_eq!(n.next_ip, 5, "both node rows should be at 5");
+        }
     }
 
     #[test]

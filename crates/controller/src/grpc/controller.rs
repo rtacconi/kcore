@@ -436,6 +436,41 @@ impl ControllerService {
         Ok(())
     }
 
+    /// Re-push config to all other nodes sharing a VXLAN network so their
+    /// FDB peer lists stay current when a node joins or leaves the overlay.
+    async fn refresh_vxlan_peers(&self, network_name: &str, skip_node_id: &str) {
+        let peer_networks = match self.db.list_networks_by_name(network_name) {
+            Ok(nets) => nets,
+            Err(e) => {
+                warn!(network = %network_name, error = %e, "failed to list vxlan peer networks");
+                return;
+            }
+        };
+        for peer_net in &peer_networks {
+            if peer_net.node_id == skip_node_id {
+                continue;
+            }
+            let peer_node = match self.db.get_node(&peer_net.node_id) {
+                Ok(Some(n)) => n,
+                _ => continue,
+            };
+            if let Err(e) = self.push_config_to_node(&peer_node).await {
+                warn!(
+                    node = %peer_node.id,
+                    network = %network_name,
+                    error = %e,
+                    "failed to refresh vxlan peers on node"
+                );
+            } else {
+                info!(
+                    node = %peer_node.id,
+                    network = %network_name,
+                    "refreshed vxlan peer list"
+                );
+            }
+        }
+    }
+
     #[allow(clippy::result_large_err)]
     fn resolve_node_for_vm(&self, vm_id: &str, target_node: &str) -> Result<NodeRow, Status> {
         if !target_node.is_empty() {
@@ -1209,7 +1244,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             match net.network_type.as_str() {
                 "vxlan" => self
                     .db
-                    .allocate_vm_ip(&vm_network, &node.id)
+                    .allocate_vm_ip_global(&vm_network)
                     .map_err(|e| Status::internal(format!("allocating VM IP: {e}")))?,
                 "nat" => self.reserve_nat_vm_ip_for_network(
                     &node.id,
@@ -2292,6 +2327,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .map_err(|e| Status::internal(format!("storing network: {e}")))?;
 
         self.push_config_to_node(&node).await?;
+
+        if network_type == "vxlan" {
+            self.refresh_vxlan_peers(&name, &node.id).await;
+        }
+
         self.log_replication_event(
             EVT_NETWORK_CREATE,
             &format!("network/{}/{}", node.id, name),
@@ -2377,6 +2417,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
             )));
         }
 
+        let was_vxlan = self
+            .db
+            .get_network_for_node(&node.id, name)
+            .map_err(|e| Status::internal(format!("reading network: {e}")))?
+            .map(|n| n.network_type == "vxlan")
+            .unwrap_or(false);
+
         let deleted = self
             .db
             .delete_network(&node.id, name)
@@ -2389,6 +2436,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
         }
 
         self.push_config_to_node(&node).await?;
+
+        if was_vxlan {
+            self.refresh_vxlan_peers(name, &node.id).await;
+        }
+
         self.log_replication_event(
             EVT_NETWORK_DELETE,
             &format!("network/{}/{}", node.id, name),

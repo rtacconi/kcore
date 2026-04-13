@@ -70,24 +70,52 @@ pub async fn list(info: &ConnectionInfo, target_node: Option<String>) -> Result<
         return Ok(());
     }
 
-    println!(
-        "{:<20}  {:<7}  {:<16}  {:<16}  {:<15}  {:>4}  {:<16}",
-        "NAME", "TYPE", "GATEWAY", "NETMASK", "EXTERNAL_IP", "VLAN", "NODE"
-    );
+    struct NetworkSummary {
+        name: String,
+        net_type: String,
+        gateway_ip: String,
+        internal_netmask: String,
+        vlan_id: i32,
+        node_count: usize,
+    }
+
+    let mut grouped: Vec<NetworkSummary> = Vec::new();
     for n in &resp.networks {
-        let vlan = if n.vlan_id > 0 {
-            n.vlan_id.to_string()
+        let net_type = if n.network_type.is_empty() {
+            "nat".to_string()
+        } else {
+            n.network_type.clone()
+        };
+        if let Some(existing) = grouped.iter_mut().find(|g| g.name == n.name) {
+            existing.node_count += 1;
+        } else {
+            grouped.push(NetworkSummary {
+                name: n.name.clone(),
+                net_type,
+                gateway_ip: n.gateway_ip.clone(),
+                internal_netmask: n.internal_netmask.clone(),
+                vlan_id: n.vlan_id,
+                node_count: 1,
+            });
+        }
+    }
+
+    println!(
+        "{:<20}  {:<7}  {:<16}  {:<16}  {:>4}  {:<8}  {:<16}  {:<8}",
+        "NAME", "TYPE", "GATEWAY", "NETMASK", "VLAN", "OVERLAY", "BRIDGE", "NODES"
+    );
+    for s in &grouped {
+        let vlan = if s.vlan_id > 0 {
+            s.vlan_id.to_string()
         } else {
             "-".to_string()
         };
-        let net_type = if n.network_type.is_empty() {
-            "nat"
-        } else {
-            &n.network_type
-        };
+        let overlay = if s.net_type == "vxlan" { "yes" } else { "no" };
+        let bridge = compute_bridge_name(&s.name);
         println!(
-            "{:<20}  {:<7}  {:<16}  {:<16}  {:<15}  {:>4}  {:<16}",
-            n.name, net_type, n.gateway_ip, n.internal_netmask, n.external_ip, vlan, n.node_id
+            "{:<20}  {:<7}  {:<16}  {:<16}  {:>4}  {:<8}  {:<16}  {:<8}",
+            s.name, s.net_type, s.gateway_ip, s.internal_netmask, vlan, overlay, bridge,
+            s.node_count
         );
     }
     Ok(())
@@ -96,17 +124,17 @@ pub async fn list(info: &ConnectionInfo, target_node: Option<String>) -> Result<
 pub async fn describe(
     info: &ConnectionInfo,
     name: &str,
-    target_node: Option<String>,
+    _target_node: Option<String>,
 ) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     let resp = client
         .list_networks(proto::ListNetworksRequest {
-            target_node: target_node.clone().unwrap_or_default(),
+            target_node: String::new(),
         })
         .await?
         .into_inner();
 
-    let mut matches: Vec<_> = resp
+    let matches: Vec<_> = resp
         .networks
         .into_iter()
         .filter(|n| n.name == name)
@@ -114,52 +142,48 @@ pub async fn describe(
     if matches.is_empty() {
         anyhow::bail!("network '{name}' not found");
     }
-    if matches.len() > 1 && target_node.is_none() {
-        let nodes = matches
-            .iter()
-            .map(|n| n.node_id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        anyhow::bail!(
-            "network '{name}' exists on multiple nodes ({nodes}); rerun with --target-node"
-        );
-    }
-    let net = matches.swap_remove(0);
-    let net_type = if net.network_type.is_empty() {
+
+    let first = &matches[0];
+    let net_type = if first.network_type.is_empty() {
         "nat".to_string()
     } else {
-        net.network_type.clone()
+        first.network_type.clone()
     };
-    let vlan = if net.vlan_id > 0 {
-        net.vlan_id.to_string()
+    let is_overlay = net_type == "vxlan";
+    let vlan = if first.vlan_id > 0 {
+        first.vlan_id.to_string()
     } else {
         "-".to_string()
     };
 
-    println!("Name:              {}", net.name);
-    println!("Node:              {}", net.node_id);
+    println!("Name:              {}", first.name);
     println!("Type:              {net_type}");
-    println!("Gateway IP:        {}", net.gateway_ip);
-    println!("Internal netmask:  {}", net.internal_netmask);
-    if let Some(cidr) = ipv4_subnet_from_gateway_mask(&net.gateway_ip, &net.internal_netmask) {
+    println!("Overlay:           {}", if is_overlay { "yes" } else { "no" });
+    println!("Bridge:            {}", compute_bridge_name(name));
+    println!("Gateway IP:        {}", first.gateway_ip);
+    println!("Internal netmask:  {}", first.internal_netmask);
+    if let Some(cidr) =
+        ipv4_subnet_from_gateway_mask(&first.gateway_ip, &first.internal_netmask)
+    {
         println!("Network CIDR:      {cidr}");
     }
-    println!("External IP:       {}", net.external_ip);
     println!("VLAN:              {vlan}");
     println!(
         "Outbound NAT:      {}",
-        if net.enable_outbound_nat {
+        if first.enable_outbound_nat {
             "enabled"
         } else {
             "disabled"
         }
     );
+    let tcp_ports = &first.allowed_tcp_ports;
+    let udp_ports = &first.allowed_udp_ports;
     println!(
         "Allowed TCP ports: {}",
-        if net.allowed_tcp_ports.is_empty() {
+        if tcp_ports.is_empty() {
             "(none)".to_string()
         } else {
-            net.allowed_tcp_ports
+            tcp_ports
                 .iter()
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
@@ -168,17 +192,39 @@ pub async fn describe(
     );
     println!(
         "Allowed UDP ports: {}",
-        if net.allowed_udp_ports.is_empty() {
+        if udp_ports.is_empty() {
             "(none)".to_string()
         } else {
-            net.allowed_udp_ports
+            udp_ports
                 .iter()
                 .map(|p| p.to_string())
                 .collect::<Vec<_>>()
                 .join(", ")
         }
     );
+
+    println!("Nodes:             {} participating", matches.len());
+    for m in &matches {
+        if is_overlay {
+            println!("  - {}  (vtep: {})", m.node_id, m.external_ip);
+        } else {
+            println!("  - {}  (external: {})", m.node_id, m.external_ip);
+        }
+    }
     Ok(())
+}
+
+fn compute_bridge_name(network_name: &str) -> String {
+    let full = format!("kbr-{network_name}");
+    if full.len() <= 15 {
+        return full;
+    }
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let mut hasher = DefaultHasher::new();
+    network_name.hash(&mut hasher);
+    let hash = format!("{:016x}", hasher.finish());
+    format!("kb-{}", &hash[..8])
 }
 
 fn ipv4_subnet_from_gateway_mask(gateway_ip: &str, netmask: &str) -> Option<String> {
