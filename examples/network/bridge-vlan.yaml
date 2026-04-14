@@ -1,0 +1,10 @@
+kind: Network
+metadata:
+  name: bridge-vlan100
+spec:
+  type: bridge
+  vlanId: 100
+  externalIp: 192.168.100.1
+  gatewayIp: 192.168.100.1
+  internalNetmask: "255.255.255.0"
+  enableOutboundNat: false

@@ -1,4 +1,4 @@
-.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace test-replication-soak coverage test-controller test-node-agent test-kctl test-rust-filter loc iso iso-remote kctl clean help
+.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace test-replication-soak coverage test-controller test-node-agent test-kctl test-rust-filter loc iso iso-remote kctl clean install-hooks help
 
 VERSION := $(shell cat VERSION)
 V ?= v$(VERSION)
@@ -91,6 +91,13 @@ iso-remote:
 kctl:
 	cargo build --release -p kcore-kctl
 
+install-hooks:
+	@for hook in scripts/hooks/*; do \
+		name=$$(basename "$$hook"); \
+		ln -sf "../../$$hook" ".git/hooks/$$name"; \
+		echo "installed .git/hooks/$$name -> $$hook"; \
+	done
+
 clean:
 	cargo clean
 	rm -rf result result-iso dist
@@ -122,5 +129,6 @@ help:
 	@echo "  iso         Build NixOS ISO (Linux only)"
 	@echo "  iso-remote  Build NixOS ISO on remote Linux server (from macOS)"
 	@echo "  kctl        Build kctl CLI only"
+	@echo "  install-hooks  Install git pre-commit/pre-push hooks"
 	@echo "  clean       Remove build artifacts"
 	@echo "  help        Show this help"

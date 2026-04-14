@@ -32,6 +32,8 @@ pub async fn create(
                     model: "virtio".to_string(),
                     mac_address: String::new(),
                 }],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             container_spec: None,
             image_url: image.unwrap_or_default().to_string(),

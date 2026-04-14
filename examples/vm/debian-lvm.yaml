@@ -1,0 +1,19 @@
+kind: VM
+metadata:
+  name: web-server
+spec:
+  cpu: 4
+  memoryBytes: "4G"
+  storageBackend: lvm
+  storageSizeBytes: "20G"
+  targetNode: kvm-node-01
+  sshKeys:
+    - my-deploy-key
+  nics:
+    - network: vxlan-prod
+    - network: nat-mgmt
+      model: virtio
+  disks:
+    - image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+      sha256: abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+      format: qcow2

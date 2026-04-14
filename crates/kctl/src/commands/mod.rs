@@ -11,4 +11,5 @@ pub mod security_group;
 pub mod ssh_key;
 pub mod storage_class;
 pub mod vm;
+pub mod volume;
 pub mod workload;

@@ -96,6 +96,13 @@ pub fn generate_node_config_with_security_groups(
         nix_escape(gateway_interface)
     ));
 
+    if vms.iter().any(|v| v.storage_backend == "lvm") {
+        out.push_str("    lvmVgName = \"vg_kcore\";\n");
+    }
+    if vms.iter().any(|v| v.storage_backend == "zfs") {
+        out.push_str("    zfsPoolName = \"tank0\";\n");
+    }
+
     out.push_str("    networks.default = {\n");
     out.push_str(&format!(
         "      externalIP = \"{}\";\n",
@@ -706,6 +713,78 @@ mod tests {
         assert!(config.contains("dhcp4: false"));
         assert!(config.contains("10.200.0.5/24"));
         assert!(config.contains("gateway4"));
+    }
+
+    #[test]
+    fn emits_lvm_vg_name_when_vm_uses_lvm() {
+        let mut v = vm(true, "lvm-vm");
+        v.storage_backend = "lvm".into();
+        let config = generate_node_config(
+            &[v],
+            "eno1",
+            &default_net(),
+            &[],
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert!(
+            config.contains("lvmVgName = \"vg_kcore\";"),
+            "should contain lvmVgName"
+        );
+    }
+
+    #[test]
+    fn omits_lvm_vg_name_for_filesystem_backend() {
+        let config = generate_node_config(
+            &[vm(true, "fs-vm")],
+            "eno1",
+            &default_net(),
+            &[],
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert!(
+            !config.contains("lvmVgName"),
+            "should not contain lvmVgName"
+        );
+    }
+
+    #[test]
+    fn emits_zfs_pool_name_when_vm_uses_zfs() {
+        let mut v = vm(true, "zfs-vm");
+        v.storage_backend = "zfs".into();
+        let config = generate_node_config(
+            &[v],
+            "eno1",
+            &default_net(),
+            &[],
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert!(
+            config.contains("zfsPoolName = \"tank0\";"),
+            "should contain zfsPoolName"
+        );
+        assert!(
+            !config.contains("lvmVgName"),
+            "ZFS VM should not contain lvmVgName"
+        );
+    }
+
+    #[test]
+    fn omits_zfs_pool_name_for_filesystem_backend() {
+        let config = generate_node_config(
+            &[vm(true, "fs-vm")],
+            "eno1",
+            &default_net(),
+            &[],
+            &std::collections::HashMap::new(),
+            &std::collections::HashMap::new(),
+        );
+        assert!(
+            !config.contains("zfsPoolName"),
+            "should not contain zfsPoolName"
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use super::helpers::compute_vni;
 use super::helpers::{
     controller_state_from_node_state, parse_datetime_to_timestamp, parse_port_list,
-    short_vm_id_seed, state_fallback_without_runtime,
+    short_vm_id_seed, state_fallback_without_runtime, vm_backend_handle,
 };
 use super::signing;
 use super::validation::{
@@ -434,6 +434,41 @@ impl ControllerService {
 
         info!(node = %node.id, "pushed config and triggered rebuild");
         Ok(())
+    }
+
+    /// Re-push config to all other nodes sharing a VXLAN network so their
+    /// FDB peer lists stay current when a node joins or leaves the overlay.
+    async fn refresh_vxlan_peers(&self, network_name: &str, skip_node_id: &str) {
+        let peer_networks = match self.db.list_networks_by_name(network_name) {
+            Ok(nets) => nets,
+            Err(e) => {
+                warn!(network = %network_name, error = %e, "failed to list vxlan peer networks");
+                return;
+            }
+        };
+        for peer_net in &peer_networks {
+            if peer_net.node_id == skip_node_id {
+                continue;
+            }
+            let peer_node = match self.db.get_node(&peer_net.node_id) {
+                Ok(Some(n)) => n,
+                _ => continue,
+            };
+            if let Err(e) = self.push_config_to_node(&peer_node).await {
+                warn!(
+                    node = %peer_node.id,
+                    network = %network_name,
+                    error = %e,
+                    "failed to refresh vxlan peers on node"
+                );
+            } else {
+                info!(
+                    node = %peer_node.id,
+                    network = %network_name,
+                    "refreshed vxlan peer list"
+                );
+            }
+        }
     }
 
     #[allow(clippy::result_large_err)]
@@ -1209,7 +1244,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
             match net.network_type.as_str() {
                 "vxlan" => self
                     .db
-                    .allocate_vm_ip(&vm_network, &node.id)
+                    .allocate_vm_ip_global(&vm_network)
                     .map_err(|e| Status::internal(format!("allocating VM IP: {e}")))?,
                 "nat" => self.reserve_nat_vm_ip_for_network(
                     &node.id,
@@ -1506,7 +1541,7 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     memory_bytes: db_vm.memory_bytes,
                     disks: vec![controller_proto::Disk {
                         name: "boot".to_string(),
-                        backend_handle: db_vm.image_path.clone(),
+                        backend_handle: vm_backend_handle(&db_vm),
                         bus: String::new(),
                         device: String::new(),
                     }],
@@ -1515,6 +1550,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
                         model: "virtio".to_string(),
                         mac_address: String::new(),
                     }],
+                    storage_backend: db_vm.storage_backend.clone(),
+                    storage_size_bytes: db_vm.storage_size_bytes,
                 });
                 let status = Some(controller_proto::VmStatus {
                     id: db_vm.id.clone(),
@@ -1542,10 +1579,19 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     device: d.device,
                 })
                 .collect();
+            if db_vm.storage_backend == "lvm" || db_vm.storage_backend == "zfs" {
+                let block_path = vm_backend_handle(&db_vm);
+                let single = disks.len() == 1;
+                for d in &mut disks {
+                    if d.name == "boot" || single {
+                        d.backend_handle.clone_from(&block_path);
+                    }
+                }
+            }
             if disks.is_empty() {
                 disks.push(controller_proto::Disk {
                     name: "boot".to_string(),
-                    backend_handle: db_vm.image_path.clone(),
+                    backend_handle: vm_backend_handle(&db_vm),
                     bus: String::new(),
                     device: String::new(),
                 });
@@ -1601,6 +1647,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 },
                 disks,
                 nics,
+                storage_backend: db_vm.storage_backend.clone(),
+                storage_size_bytes: db_vm.storage_size_bytes,
             }
         });
 
@@ -1710,6 +1758,8 @@ impl controller_proto::controller_server::Controller for ControllerService {
                     memory_bytes: vm.memory_bytes,
                     node_id: vm.node_id,
                     created_at: None,
+                    storage_backend: vm.storage_backend,
+                    storage_size_bytes: vm.storage_size_bytes,
                 }
             })
             .collect();
@@ -2244,6 +2294,15 @@ impl controller_proto::controller_server::Controller for ControllerService {
 
         let network_type = validate_network_type(&req.network_type)?;
 
+        if network_type == "bridge" && req.vlan_id == 0 {
+            return Err(Status::failed_precondition(
+                "bridge-mode networks without a VLAN ID enslave the management NIC, \
+                 which severs host connectivity. Use --vlan-id to create a VLAN \
+                 sub-interface, or use 'nat' or 'vxlan' network types instead."
+                    .to_string(),
+            ));
+        }
+
         if network_type == "vxlan" && node.disable_vxlan {
             return Err(Status::failed_precondition(format!(
                 "VXLAN is disabled on node '{}'; cannot create vxlan network",
@@ -2292,6 +2351,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
             .map_err(|e| Status::internal(format!("storing network: {e}")))?;
 
         self.push_config_to_node(&node).await?;
+
+        if network_type == "vxlan" {
+            self.refresh_vxlan_peers(&name, &node.id).await;
+        }
+
         self.log_replication_event(
             EVT_NETWORK_CREATE,
             &format!("network/{}/{}", node.id, name),
@@ -2377,6 +2441,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
             )));
         }
 
+        let was_vxlan = self
+            .db
+            .get_network_for_node(&node.id, name)
+            .map_err(|e| Status::internal(format!("reading network: {e}")))?
+            .map(|n| n.network_type == "vxlan")
+            .unwrap_or(false);
+
         let deleted = self
             .db
             .delete_network(&node.id, name)
@@ -2389,6 +2460,11 @@ impl controller_proto::controller_server::Controller for ControllerService {
         }
 
         self.push_config_to_node(&node).await?;
+
+        if was_vxlan {
+            self.refresh_vxlan_peers(name, &node.id).await;
+        }
+
         self.log_replication_event(
             EVT_NETWORK_DELETE,
             &format!("network/{}/{}", node.id, name),
@@ -3750,6 +3826,88 @@ impl controller_proto::controller_server::Controller for ControllerService {
         ))
     }
 
+    async fn list_volumes(
+        &self,
+        request: Request<controller_proto::ListVolumesRequest>,
+    ) -> Result<Response<controller_proto::ListVolumesResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let _ = request.into_inner();
+
+        let vms = self
+            .db
+            .list_vms()
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let node_address_by_id: std::collections::HashMap<String, String> = self
+            .db
+            .list_nodes()
+            .map_err(|e| Status::internal(e.to_string()))?
+            .into_iter()
+            .map(|n| (n.id, n.address))
+            .collect();
+
+        let vm_count = vms.len();
+        let mut fallback_states: Vec<i32> = Vec::with_capacity(vm_count);
+        let mut set = tokio::task::JoinSet::new();
+
+        for (idx, vm) in vms.iter().enumerate() {
+            fallback_states.push(state_fallback_without_runtime(vm.auto_start));
+            if let Some(node_address) = node_address_by_id.get(&vm.node_id) {
+                if self.clients.get_compute(node_address).is_none() {
+                    let _ = self.clients.connect(node_address).await;
+                }
+                if let Some(mut compute) = self.clients.get_compute(node_address) {
+                    let vm_name = vm.name.clone();
+                    set.spawn(async move {
+                        let result = tokio::time::timeout(
+                            Duration::from_secs(3),
+                            compute.get_vm(node_proto::GetVmRequest {
+                                vm_id: vm_name.clone(),
+                            }),
+                        )
+                        .await;
+                        (idx, result)
+                    });
+                }
+            }
+        }
+
+        let mut live_states: Vec<Option<i32>> = vec![None; vm_count];
+        while let Some(Ok((idx, result))) = set.join_next().await {
+            if let Ok(Ok(resp)) = result {
+                if let Some(status) = resp.into_inner().status {
+                    live_states[idx] = Some(controller_state_from_node_state(status.state));
+                }
+            }
+        }
+
+        let volumes: Vec<_> = vms
+            .into_iter()
+            .enumerate()
+            .map(|(i, vm)| {
+                let state = live_states[i].unwrap_or(fallback_states[i]);
+                controller_proto::VolumeInfo {
+                    vm_id: vm.id.clone(),
+                    vm_name: vm.name.clone(),
+                    node_id: vm.node_id.clone(),
+                    storage_backend: vm.storage_backend.clone(),
+                    storage_size_bytes: vm.storage_size_bytes,
+                    backend_handle: vm_backend_handle(&vm),
+                    image_format: if vm.storage_backend == "lvm" || vm.storage_backend == "zfs" {
+                        "raw".to_string()
+                    } else {
+                        vm.image_format.clone()
+                    },
+                    vm_state: state,
+                }
+            })
+            .collect();
+
+        Ok(Response::new(controller_proto::ListVolumesResponse {
+            volumes,
+        }))
+    }
+
     // TODO(rbac): restrict to admin role when RBAC is implemented
     async fn get_compliance_report(
         &self,
@@ -4174,6 +4332,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4222,6 +4382,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: "https://example.com/debian.raw".to_string(),
             image_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -4276,6 +4438,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4324,6 +4488,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4379,6 +4545,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4428,6 +4596,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4483,6 +4653,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4531,6 +4703,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 disks: vec![],
                 nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }),
             image_url: String::new(),
             image_sha256: String::new(),
@@ -4769,6 +4943,8 @@ mod tests {
                             model: String::new(),
                             mac_address: String::new(),
                         }],
+                        storage_backend: String::new(),
+                        storage_size_bytes: 0,
                     }),
                     image_url: "https://example.com/img.raw".to_string(),
                     image_sha256:

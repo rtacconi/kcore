@@ -1,5 +1,5 @@
 use crate::client::{self, controller_proto};
-use crate::commands::security_group;
+use crate::commands::{container, network, security_group, ssh_key, vm};
 use crate::config::ConnectionInfo;
 use anyhow::{Context, Result};
 
@@ -14,8 +14,15 @@ pub async fn apply(info: &ConnectionInfo, file: &str, dry_run: bool) -> Result<(
     }
 
     if let Some(kind) = detect_manifest_kind(&content) {
-        if kind.eq_ignore_ascii_case("SecurityGroup") {
-            return security_group::apply_from_file(info, file).await;
+        match kind.to_ascii_lowercase().as_str() {
+            "securitygroup" => return security_group::apply_from_file(info, file).await,
+            "vm" => return vm::create_from_manifest(info, file).await,
+            "network" => return network::create_from_manifest(info, file).await,
+            "sshkey" | "ssh-key" | "ssh_key" => {
+                return ssh_key::create_from_manifest(info, file).await
+            }
+            "container" => return container::create_from_manifest(info, file).await,
+            _ => {}
         }
     }
 
@@ -70,5 +77,29 @@ metadata:
   name: no-kind
 "#;
         assert_eq!(detect_manifest_kind(manifest), None);
+    }
+
+    #[test]
+    fn detect_manifest_kind_vm() {
+        let manifest = "kind: VM\nmetadata:\n  name: test\n";
+        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("VM"));
+    }
+
+    #[test]
+    fn detect_manifest_kind_network() {
+        let manifest = "kind: Network\nmetadata:\n  name: net1\n";
+        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("Network"));
+    }
+
+    #[test]
+    fn detect_manifest_kind_sshkey() {
+        let manifest = "kind: SshKey\nmetadata:\n  name: k1\n";
+        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("SshKey"));
+    }
+
+    #[test]
+    fn detect_manifest_kind_container() {
+        let manifest = "kind: Container\nmetadata:\n  name: c1\n";
+        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("Container"));
     }
 }

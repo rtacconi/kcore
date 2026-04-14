@@ -1,0 +1,9 @@
+kind: Network
+metadata:
+  name: nat-mgmt
+spec:
+  type: nat
+  gatewayIp: 10.100.0.1
+  internalNetmask: "255.255.255.0"
+  enableOutboundNat: true
+  targetNode: kvm-node-01

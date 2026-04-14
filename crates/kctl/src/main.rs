@@ -462,6 +462,9 @@ enum GetResource {
     /// List storage classes
     #[command(name = "storage-class", alias = "storage-classes")]
     StorageClass,
+    /// List VM volumes across the cluster
+    #[command(alias = "volume")]
+    Volumes,
     /// Show compliance report
     #[command(alias = "compliance")]
     ComplianceReport,
@@ -1122,6 +1125,12 @@ async fn main() {
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::storage_class::list(&info).await
+        }
+        Command::Get {
+            resource: GetResource::Volumes,
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::volume::list(&info).await
         }
         Command::Get {
             resource: GetResource::ComplianceReport,

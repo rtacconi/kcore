@@ -1,0 +1,8 @@
+kind: Network
+metadata:
+  name: vxlan-prod
+spec:
+  type: vxlan
+  gatewayIp: 10.200.0.1
+  internalNetmask: "255.255.255.0"
+  enableOutboundNat: true

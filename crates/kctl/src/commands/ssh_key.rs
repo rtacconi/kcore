@@ -19,6 +19,26 @@ pub async fn create(info: &ConnectionInfo, name: &str, public_key: &str) -> Resu
     Ok(())
 }
 
+pub async fn create_from_manifest(info: &ConnectionInfo, path: &str) -> Result<()> {
+    let data = std::fs::read_to_string(path)?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&data)?;
+
+    let kind = doc["kind"].as_str().unwrap_or("");
+    if !kind.eq_ignore_ascii_case("SshKey") && !kind.eq_ignore_ascii_case("SSHKey") {
+        anyhow::bail!("expected kind=SshKey, got {kind}");
+    }
+
+    let name = doc["metadata"]["name"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("metadata.name is required"))?;
+    let public_key = doc["spec"]["publicKey"]
+        .as_str()
+        .or_else(|| doc["spec"]["public_key"].as_str())
+        .ok_or_else(|| anyhow::anyhow!("spec.publicKey is required"))?;
+
+    create(info, name, public_key).await
+}
+
 pub async fn delete(info: &ConnectionInfo, name: &str) -> Result<()> {
     let mut client = client::controller_client(info).await?;
     client

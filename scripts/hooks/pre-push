@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Pre-push checks: clippy + tests (~30s incremental).
+# Installed automatically by `nix develop` shellHook or `make install-hooks`.
+set -euo pipefail
+
+echo "pre-push: running clippy..."
+cargo clippy --all-targets -- --deny warnings || {
+    echo ""
+    echo "  Clippy found warnings. Fix them before pushing."
+    exit 1
+}
+
+echo "pre-push: running tests..."
+cargo test --workspace || {
+    echo ""
+    echo "  Tests failed. Fix them before pushing."
+    exit 1
+}
+
+echo "pre-push: all checks passed."

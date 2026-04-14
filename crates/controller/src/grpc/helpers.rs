@@ -66,6 +66,30 @@ pub fn parse_port_list(s: &str) -> Vec<i32> {
     s.split(',').filter_map(|p| p.trim().parse().ok()).collect()
 }
 
+/// Derive the actual disk backend handle (path or device) for a VM.
+/// LVM  → `/dev/vg_kcore/kcore-<name>`
+/// ZFS  → `/dev/zvol/tank0/kcore-<name>`
+/// else → cached image file path
+pub fn vm_backend_handle(vm: &crate::db::VmRow) -> String {
+    let sanitized = || -> String {
+        vm.name
+            .chars()
+            .map(|c| {
+                if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                    c
+                } else {
+                    '-'
+                }
+            })
+            .collect()
+    };
+    match vm.storage_backend.as_str() {
+        "lvm" => format!("/dev/vg_kcore/kcore-{}", sanitized()),
+        "zfs" => format!("/dev/zvol/tank0/kcore-{}", sanitized()),
+        _ => vm.image_path.clone(),
+    }
+}
+
 /// Deterministic VNI from network name. Range 10000–15999.
 pub fn compute_vni(name: &str) -> i32 {
     let mut hash: u32 = 5381;
@@ -91,5 +115,46 @@ mod tests {
     #[test]
     fn compute_vni_is_deterministic() {
         assert_eq!(compute_vni("overlay"), compute_vni("overlay"));
+    }
+
+    fn test_vm_row(name: &str, backend: &str) -> crate::db::VmRow {
+        crate::db::VmRow {
+            id: "test-id".to_string(),
+            name: name.to_string(),
+            cpu: 1,
+            memory_bytes: 1024 * 1024 * 1024,
+            image_path: "/var/lib/kcore/images/test.qcow2".to_string(),
+            image_url: String::new(),
+            image_sha256: String::new(),
+            image_format: "qcow2".to_string(),
+            image_size: 0,
+            network: "default".to_string(),
+            auto_start: true,
+            node_id: "node-1".to_string(),
+            created_at: String::new(),
+            runtime_state: "running".to_string(),
+            cloud_init_user_data: String::new(),
+            storage_backend: backend.to_string(),
+            storage_size_bytes: 3221225472,
+            vm_ip: String::new(),
+        }
+    }
+
+    #[test]
+    fn vm_backend_handle_lvm() {
+        let vm = test_vm_row("my-vm", "lvm");
+        assert_eq!(vm_backend_handle(&vm), "/dev/vg_kcore/kcore-my-vm");
+    }
+
+    #[test]
+    fn vm_backend_handle_zfs() {
+        let vm = test_vm_row("my-vm", "zfs");
+        assert_eq!(vm_backend_handle(&vm), "/dev/zvol/tank0/kcore-my-vm");
+    }
+
+    #[test]
+    fn vm_backend_handle_filesystem() {
+        let vm = test_vm_row("my-vm", "filesystem");
+        assert_eq!(vm_backend_handle(&vm), "/var/lib/kcore/images/test.qcow2");
     }
 }

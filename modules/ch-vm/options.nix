@@ -246,6 +246,18 @@ in
       description = "Named networks, each backed by a bridge with NAT.";
     };
 
+    lvmVgName = lib.mkOption {
+      type = lib.types.str;
+      default = "vg_kcore";
+      description = "LVM volume group used for VM disk volumes when storageBackend = lvm.";
+    };
+
+    zfsPoolName = lib.mkOption {
+      type = lib.types.str;
+      default = "tank0";
+      description = "ZFS pool used for VM zvol volumes when storageBackend = zfs.";
+    };
+
     virtualMachines = lib.mkOption {
       type = lib.types.attrsOf vmSubmodule;
       default = { };

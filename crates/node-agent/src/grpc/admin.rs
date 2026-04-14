@@ -40,6 +40,24 @@ async fn resolve_nixpkgs_path() -> Option<String> {
         }
     }
 
+    if let Ok(contents) = tokio::fs::read_to_string(NIXOS_CONFIG_PATH).await {
+        for line in contents.lines() {
+            if let Some(rest) = line.trim().strip_prefix("nix.nixPath") {
+                if let Some(start) = rest.find("nixpkgs=") {
+                    let path_start = start + "nixpkgs=".len();
+                    let path_end = rest[path_start..]
+                        .find(['"', '\'', ']'])
+                        .map(|i| path_start + i)
+                        .unwrap_or(rest.len());
+                    let p = rest[path_start..path_end].trim();
+                    if !p.is_empty() && std::path::Path::new(p).exists() {
+                        return Some(p.to_string());
+                    }
+                }
+            }
+        }
+    }
+
     let out = Command::new("nix")
         .args(["eval", "--raw", "nixpkgs#path"])
         .output()
@@ -136,12 +154,16 @@ fn rebuild_sequence(test_success: bool) -> Vec<&'static str> {
 }
 
 async fn run_rebuild_mode(mode: &'static str) -> Result<std::process::Output, std::io::Error> {
+    let nixpkgs_path = resolve_nixpkgs_path().await;
+    if let Some(ref p) = nixpkgs_path {
+        info!(nixpkgs_path = %p, "resolved nixpkgs path for rebuild");
+    }
     let mut cmd = Command::new("nixos-rebuild");
     cmd.args(rebuild_args(mode));
-    if let Some(nixpkgs_path) = resolve_nixpkgs_path().await {
+    if let Some(ref p) = nixpkgs_path {
         cmd.env(
             "NIX_PATH",
-            format!("nixos-config={NIXOS_CONFIG_PATH}:nixpkgs={nixpkgs_path}"),
+            format!("nixos-config={NIXOS_CONFIG_PATH}:nixpkgs={p}"),
         );
     }
     cmd.output().await
@@ -241,46 +263,53 @@ async fn enforce_stopped_vm_units(stopped_vms: &[String]) {
     }
 }
 
-async fn run_test_then_switch(path: PathBuf, desired_stopped_vms: Vec<String>) {
-    info!("starting nixos-rebuild test");
-    let test_out = match run_rebuild_mode("test").await {
-        Ok(out) => out,
-        Err(e) => {
-            error!(path = %path.display(), error = %e, "failed to run nixos-rebuild test");
-            return;
-        }
-    };
+async fn run_test_then_switch(path: PathBuf, _desired_stopped_vms: Vec<String>) {
+    let nixpkgs_path = resolve_nixpkgs_path().await;
+    let nix_path_val = nixpkgs_path
+        .as_deref()
+        .map(|p| format!("nixos-config={NIXOS_CONFIG_PATH}:nixpkgs={p}"))
+        .unwrap_or_default();
 
-    if !test_out.status.success() {
-        let stderr = String::from_utf8_lossy(&test_out.stderr);
-        error!(
-            path = %path.display(),
-            stderr = %stderr,
-            "nixos-rebuild test failed; skipping switch"
-        );
-        log_failed_kcore_units("after_nixos_rebuild_test_failure").await;
-        return;
-    }
+    let script = format!(
+        "set -e; export PATH=\"/run/current-system/sw/bin:$PATH\"; \
+         export NIX_PATH='{nix_path_val}'; \
+         nixos-rebuild test && nixos-rebuild switch"
+    );
 
-    info!("nixos-rebuild test succeeded; starting nixos-rebuild switch");
-    match run_rebuild_mode("switch").await {
-        Ok(out) if out.status.success() => {
-            info!("nixos-rebuild switch completed");
-            enforce_stopped_vm_units(&desired_stopped_vms).await;
-            log_failed_kcore_units("after_nixos_rebuild_switch_success").await;
+    info!(path = %path.display(), "launching nixos-rebuild test+switch via transient systemd unit");
+
+    let _ = Command::new("systemctl")
+        .args(["stop", "kcore-nix-rebuild.service"])
+        .output()
+        .await;
+    let _ = Command::new("systemctl")
+        .args(["reset-failed", "kcore-nix-rebuild.service"])
+        .output()
+        .await;
+
+    let out = Command::new("systemd-run")
+        .args([
+            "--unit=kcore-nix-rebuild",
+            "--collect",
+            "--property=Type=exec",
+            "--",
+            "bash",
+            "-c",
+            &script,
+        ])
+        .output()
+        .await;
+
+    match out {
+        Ok(o) if o.status.success() => {
+            info!("kcore-nix-rebuild transient unit launched successfully");
         }
-        Ok(out) => {
-            let stderr = String::from_utf8_lossy(&out.stderr);
-            error!(
-                path = %path.display(),
-                stderr = %stderr,
-                "nixos-rebuild switch failed"
-            );
-            log_failed_kcore_units("after_nixos_rebuild_switch_failure").await;
+        Ok(o) => {
+            let stderr = String::from_utf8_lossy(&o.stderr);
+            error!(stderr = %stderr, "failed to launch kcore-nix-rebuild transient unit");
         }
         Err(e) => {
-            error!(path = %path.display(), error = %e, "failed to run nixos-rebuild switch");
-            log_failed_kcore_units("after_nixos_rebuild_switch_spawn_failure").await;
+            error!(error = %e, "failed to spawn systemd-run for nix rebuild");
         }
     }
 }

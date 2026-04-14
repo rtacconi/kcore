@@ -408,6 +408,8 @@ mod tests {
                 memory_bytes: 1024 * 1024 * 1024,
                 node_id: "n".into(),
                 created_at: None,
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             },
             controller_proto::VmInfo {
                 id: "2".into(),
@@ -417,6 +419,8 @@ mod tests {
                 memory_bytes: 512 * 1024 * 1024,
                 node_id: "n".into(),
                 created_at: None,
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             },
         ];
         let p = vms_page_from_proto(vms, 1);

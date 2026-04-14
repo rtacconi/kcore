@@ -8,7 +8,14 @@ let
   cfg = config.ch-vm.vms;
   helpers = import ./helpers.nix { inherit lib; };
 
-  bridgeName = name: "kbr-${name}";
+  bridgeName =
+    name:
+    let
+      full = "kbr-${name}";
+      hash = builtins.substring 0 8 (builtins.hashString "sha256" name);
+      short = "kb-${hash}";
+    in
+    if builtins.stringLength full <= 15 then full else short;
   inherit (helpers) tapName;
   upstreamIface =
     _netName: netCfg:
@@ -142,10 +149,15 @@ let
 in
 {
   config = lib.mkIf cfg.enable {
-    assertions = lib.mapAttrsToList (vmName: vmCfg: {
-      assertion = cfg.networks ? ${vmCfg.network};
-      message = "VM '${vmName}' references network '${vmCfg.network}' which is not defined in ch-vm.vms.networks.";
-    }) cfg.virtualMachines;
+    assertions =
+      lib.mapAttrsToList (vmName: vmCfg: {
+        assertion = cfg.networks ? ${vmCfg.network};
+        message = "VM '${vmName}' references network '${vmCfg.network}' which is not defined in ch-vm.vms.networks.";
+      }) cfg.virtualMachines
+      ++ lib.mapAttrsToList (netName: netCfg: {
+        assertion = !(netCfg.networkType == "bridge" && netCfg.vlanId == 0);
+        message = "Network '${netName}' uses bridge mode without a VLAN ID. This would enslave the management NIC (${cfg.gatewayInterface}) and sever host connectivity. Set vlanId > 0 or use nat/vxlan instead.";
+      }) cfg.networks;
 
     boot.kernelModules = [
       "tun"

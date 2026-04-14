@@ -34,6 +34,36 @@ pub struct CreateArgs {
     pub target_dc: Option<String>,
 }
 
+pub async fn create_from_manifest(info: &ConnectionInfo, path: &str) -> Result<()> {
+    let args = CreateArgs {
+        name: None,
+        filename: Some(path.to_string()),
+        cpu: 2,
+        memory: "2G".to_string(),
+        image: None,
+        image_sha256: None,
+        image_path: None,
+        image_format: None,
+        network: None,
+        target_node: None,
+        wait: false,
+        wait_for_ssh: false,
+        wait_timeout_seconds: 300,
+        ssh_port: 22,
+        ssh_probe_timeout_ms: 1200,
+        ssh_keys: vec![],
+        ssh_public_keys: vec![],
+        cloud_init_user_data_file: None,
+        username: None,
+        password: None,
+        compliant: true,
+        storage_backend: None,
+        storage_size_bytes: None,
+        target_dc: None,
+    };
+    create(info, args).await
+}
+
 pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
     let has_target_node = args
         .target_node
@@ -70,6 +100,10 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         manifest_image_format,
         manifest_storage_backend,
         manifest_storage_size_bytes,
+        manifest_target_node,
+        manifest_target_dc,
+        manifest_ssh_keys,
+        manifest_cloud_init,
     ) = if let Some(path) = &args.filename {
         let manifest = parse_vm_manifest(path)?;
         let n = args.name.clone().unwrap_or(manifest.name);
@@ -83,6 +117,10 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
             manifest.image_format,
             manifest.storage_backend,
             manifest.storage_size_bytes,
+            manifest.target_node,
+            manifest.target_dc,
+            manifest.ssh_keys,
+            manifest.cloud_init_user_data,
         )
     } else {
         let n = args
@@ -102,7 +140,21 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
                 }]
             })
             .unwrap_or_default();
-        (n, cpu, mem, nics, None, None, None, None, None)
+        (
+            n,
+            cpu,
+            mem,
+            nics,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            vec![],
+            None,
+        )
     };
     let image = resolve_create_image_source(
         args.image.as_deref(),
@@ -142,20 +194,38 @@ pub async fn create(info: &ConnectionInfo, args: CreateArgs) -> Result<()> {
         memory_bytes: mem_bytes,
         disks: vec![],
         nics,
+        storage_backend: String::new(),
+        storage_size_bytes: 0,
+    };
+
+    let target_node = args
+        .target_node
+        .or(manifest_target_node)
+        .unwrap_or_default();
+    let target_dc = args.target_dc.or(manifest_target_dc).unwrap_or_default();
+    let ssh_key_names = if args.ssh_keys.is_empty() {
+        manifest_ssh_keys
+    } else {
+        args.ssh_keys
+    };
+    let cloud_init_user_data = if cloud_init_user_data.is_empty() {
+        manifest_cloud_init.unwrap_or_default()
+    } else {
+        cloud_init_user_data
     };
 
     let req = proto::CreateVmRequest {
-        target_node: args.target_node.unwrap_or_default(),
+        target_node,
         spec: Some(spec),
         image_url: image.url,
         image_sha256: image.sha256,
         cloud_init_user_data,
         image_path: image.path,
         image_format: image.format,
-        ssh_key_names: args.ssh_keys,
+        ssh_key_names,
         storage_backend: storage_backend_to_proto(&storage_backend),
         storage_size_bytes,
-        target_dc: args.target_dc.unwrap_or_default(),
+        target_dc,
     };
 
     let resp = client.create_vm(req).await?.into_inner();
@@ -624,6 +694,10 @@ struct VmManifest {
     image_format: Option<String>,
     storage_backend: Option<String>,
     storage_size_bytes: Option<i64>,
+    target_node: Option<String>,
+    target_dc: Option<String>,
+    ssh_keys: Vec<String>,
+    cloud_init_user_data: Option<String>,
 }
 
 #[derive(Debug)]
@@ -952,6 +1026,29 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
                 .and_then(|s| client::parse_size_bytes(s).ok())
         });
 
+    let target_node = doc["spec"]["targetNode"]
+        .as_str()
+        .or_else(|| doc["spec"]["target_node"].as_str())
+        .map(|s| s.to_string());
+    let target_dc = doc["spec"]["dc"]
+        .as_str()
+        .or_else(|| doc["spec"]["targetDc"].as_str())
+        .or_else(|| doc["spec"]["target_dc"].as_str())
+        .map(|s| s.to_string());
+    let ssh_keys = doc["spec"]["sshKeys"]
+        .as_sequence()
+        .or_else(|| doc["spec"]["ssh_keys"].as_sequence())
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let cloud_init_user_data = doc["spec"]["cloudInitUserData"]
+        .as_str()
+        .or_else(|| doc["spec"]["cloud_init_user_data"].as_str())
+        .map(|s| s.to_string());
+
     Ok(VmManifest {
         name,
         cpu,
@@ -962,6 +1059,10 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
         image_format,
         storage_backend,
         storage_size_bytes,
+        target_node,
+        target_dc,
+        ssh_keys,
+        cloud_init_user_data,
     })
 }
 
@@ -1219,5 +1320,58 @@ mod tests {
         }];
         assert_eq!(network_type_for("vxlan-test", "node-a", &networks), "vxlan");
         assert_eq!(network_type_for("missing", "node-a", &networks), "unknown");
+    }
+
+    #[test]
+    fn parse_vm_manifest_parses_all_fields() {
+        let path = std::env::temp_dir().join("kctl-test-vm-manifest.yaml");
+        std::fs::write(
+            &path,
+            r#"
+kind: VM
+metadata:
+  name: full-test
+spec:
+  cpu: 4
+  memoryBytes: "8G"
+  storageBackend: zfs
+  storageSizeBytes: "20G"
+  targetNode: node-42
+  dc: eu-west
+  sshKeys:
+    - deploy-key
+    - ops-key
+  cloudInitUserData: |
+    #cloud-config
+    packages: [htop]
+  nics:
+    - network: vxlan-prod
+    - network: nat-mgmt
+      model: e1000
+  disks:
+    - image: https://example.com/debian.qcow2
+      sha256: abc123
+      format: qcow2
+"#,
+        )
+        .unwrap();
+        let m = parse_vm_manifest(path.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(m.name, "full-test");
+        assert_eq!(m.cpu, 4);
+        assert_eq!(m.memory_bytes, 8_589_934_592);
+        assert_eq!(m.storage_backend.as_deref(), Some("zfs"));
+        assert_eq!(m.storage_size_bytes, Some(21_474_836_480));
+        assert_eq!(m.target_node.as_deref(), Some("node-42"));
+        assert_eq!(m.target_dc.as_deref(), Some("eu-west"));
+        assert_eq!(m.ssh_keys, vec!["deploy-key", "ops-key"]);
+        assert!(m.cloud_init_user_data.as_ref().unwrap().contains("htop"));
+        assert_eq!(m.nics.len(), 2);
+        assert_eq!(m.nics[0].network, "vxlan-prod");
+        assert_eq!(m.nics[1].network, "nat-mgmt");
+        assert_eq!(m.nics[1].model, "e1000");
+        assert_eq!(m.image.as_deref(), Some("https://example.com/debian.qcow2"));
+        assert_eq!(m.image_sha256.as_deref(), Some("abc123"));
+        assert_eq!(m.image_format.as_deref(), Some("qcow2"));
     }
 }

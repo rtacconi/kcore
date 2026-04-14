@@ -1,0 +1,24 @@
+kind: VM
+metadata:
+  name: db-server
+spec:
+  cpu: 8
+  memoryBytes: "16G"
+  storageBackend: zfs
+  storageSizeBytes: "100G"
+  dc: dc-eu-west
+  sshKeys:
+    - ops-team
+  cloudInitUserData: |
+    #cloud-config
+    packages:
+      - postgresql-15
+    runcmd:
+      - systemctl enable postgresql
+      - systemctl start postgresql
+  nics:
+    - network: vxlan-prod
+  disks:
+    - image: https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2
+      sha256: abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890
+      format: qcow2

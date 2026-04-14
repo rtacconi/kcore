@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Fast pre-commit checks: formatting only (~5s).
+# Installed automatically by `nix develop` shellHook or `make install-hooks`.
+set -euo pipefail
+
+echo "pre-commit: checking Rust formatting..."
+cargo fmt --check || {
+    echo ""
+    echo "  Rust formatting check failed. Run 'cargo fmt' to fix."
+    exit 1
+}
+
+echo "pre-commit: checking Nix formatting..."
+find . -name '*.nix' -not -path './result*' -exec nixfmt --check {} + || {
+    echo ""
+    echo "  Nix formatting check failed. Run 'make fmt' to fix."
+    exit 1
+}
+
+echo "pre-commit: all formatting checks passed."

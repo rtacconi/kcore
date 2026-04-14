@@ -1,0 +1,12 @@
+kind: Container
+metadata:
+  name: nginx-web
+spec:
+  image: docker.io/library/nginx:latest
+  network: nat-mgmt
+  ports:
+    - "80:80"
+    - "443:443"
+  env:
+    NGINX_HOST: example.com
+  command: []

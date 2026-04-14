@@ -54,6 +54,55 @@ pub async fn create(
     Ok(())
 }
 
+pub async fn create_from_manifest(info: &ConnectionInfo, path: &str) -> Result<()> {
+    let data = std::fs::read_to_string(path)?;
+    let doc: serde_yaml::Value = serde_yaml::from_str(&data)?;
+
+    let kind = doc["kind"].as_str().unwrap_or("");
+    if !kind.eq_ignore_ascii_case("Container") {
+        anyhow::bail!("expected kind=Container, got {kind}");
+    }
+
+    let name = doc["metadata"]["name"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("metadata.name is required"))?;
+    let spec = &doc["spec"];
+    let image = spec["image"]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("spec.image is required"))?;
+    let network = spec["network"].as_str();
+    let ports: Vec<String> = spec["ports"]
+        .as_sequence()
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+    let env: Vec<String> = spec["env"]
+        .as_mapping()
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| {
+                    let key = k.as_str()?;
+                    let val = v.as_str().unwrap_or("");
+                    Some(format!("{key}={val}"))
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let command: Vec<String> = spec["command"]
+        .as_sequence()
+        .map(|seq| {
+            seq.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    create(info, name, image, network, ports, env, command).await
+}
+
 pub async fn start(info: &ConnectionInfo, name: &str) -> Result<()> {
     let mut client = client::node_container_client(info).await?;
     let resp = client

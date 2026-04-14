@@ -95,6 +95,8 @@ impl Controller for MockController {
                 memory_bytes: 512 * 1024 * 1024,
                 node_id: "node-mock-a".into(),
                 created_at: None,
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             }],
         }))
     }
@@ -434,6 +436,13 @@ impl Controller for MockController {
             nodes_luks_keyfile: 0,
             nodes_luks_unknown: 0,
         }))
+    }
+
+    async fn list_volumes(
+        &self,
+        _: Request<ListVolumesRequest>,
+    ) -> Result<Response<ListVolumesResponse>, Status> {
+        Err(unimp("list_volumes"))
     }
 }
 

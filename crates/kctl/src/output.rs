@@ -3,15 +3,16 @@ use crate::client::node_proto;
 
 pub fn print_vm_table(vms: &[controller_proto::VmInfo]) {
     println!(
-        "{:<36}  {:<20}  {:>4}  {:>10}  {:<10}  {:<16}",
-        "ID", "NAME", "CPU", "MEMORY", "STATE", "NODE"
+        "{:<36}  {:<20}  {:>4}  {:>10}  {:>8}  {:<10}  {:<16}",
+        "ID", "NAME", "CPU", "MEMORY", "DISK", "STATE", "NODE"
     );
     for vm in vms {
         let state = vm_state_str(vm.state);
         let mem = crate::client::format_bytes(vm.memory_bytes);
+        let disk = crate::client::format_bytes(vm.storage_size_bytes);
         println!(
-            "{:<36}  {:<20}  {:>4}  {:>10}  {:<10}  {:<16}",
-            vm.id, vm.name, vm.cpu, mem, state, vm.node_id
+            "{:<36}  {:<20}  {:>4}  {:>10}  {:>8}  {:<10}  {:<16}",
+            vm.id, vm.name, vm.cpu, mem, disk, state, vm.node_id
         );
     }
 }
@@ -31,18 +32,59 @@ pub fn print_vm_detail(
         crate::client::format_bytes(spec.memory_bytes)
     );
 
+    let backend = if spec.storage_backend.is_empty() {
+        "filesystem"
+    } else {
+        &spec.storage_backend
+    };
+    println!("\nStorage:");
+    println!("  Backend:  {backend}");
+    println!(
+        "  Size:     {}",
+        crate::client::format_bytes(spec.storage_size_bytes)
+    );
     if !spec.disks.is_empty() {
-        println!("Disks:");
         for d in &spec.disks {
-            println!("  - {} ({})", d.name, d.backend_handle);
+            println!("  Volume:   {} ({})", d.name, d.backend_handle);
         }
     }
 
     if !spec.nics.is_empty() {
-        println!("NICs:");
+        println!("\nNICs:");
         for n in &spec.nics {
             println!("  - network={} mac={}", n.network, n.mac_address);
         }
+    }
+}
+
+pub fn print_volume_table(volumes: &[controller_proto::VolumeInfo]) {
+    println!(
+        "{:<20}  {:<12}  {:<20}  {:<10}  {:>8}  {:<40}  {:<8}",
+        "VM", "VM_ID", "NODE", "BACKEND", "SIZE", "VOLUME", "STATE"
+    );
+    for v in volumes {
+        let size = crate::client::format_bytes(v.storage_size_bytes);
+        let state = vm_state_str(v.vm_state);
+        println!(
+            "{:<20}  {:<12}  {:<20}  {:<10}  {:>8}  {:<40}  {:<8}",
+            v.vm_name,
+            &v.vm_id[..v.vm_id.len().min(12)],
+            truncate_node_id(&v.node_id),
+            v.storage_backend,
+            size,
+            v.backend_handle,
+            state,
+        );
+    }
+}
+
+fn truncate_node_id(id: &str) -> String {
+    if let Some(stripped) = id.strip_prefix("kvm-node-") {
+        stripped.to_string()
+    } else if id.len() > 20 {
+        format!("{}...", &id[..17])
+    } else {
+        id.to_string()
     }
 }
 

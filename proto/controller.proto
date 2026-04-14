@@ -67,6 +67,9 @@ service Controller {
   // Storage overview: cluster-wide VM data-plane backends (filesystem / LVM / ZFS), LUKS stats,
   // and per-node block inventory from each node agent (lsblk).
   rpc GetStorageOverview(GetStorageOverviewRequest) returns (GetStorageOverviewResponse);
+
+  // Volume inventory: list all provisioned VM volumes across the cluster.
+  rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse);
 }
 
 message RegisterNodeRequest {
@@ -476,6 +479,8 @@ message VmInfo {
   int64 memory_bytes = 5;
   string node_id = 6;  // Which node it's on
   google.protobuf.Timestamp created_at = 7;
+  string storage_backend = 8;   // filesystem, lvm, zfs
+  int64 storage_size_bytes = 9; // Provisioned volume size
 }
 
 // Node Operations
@@ -520,6 +525,8 @@ message VmSpec {
   int64 memory_bytes = 4;
   repeated Disk disks = 5;
   repeated Nic nics = 6;
+  string storage_backend = 7;   // filesystem, lvm, zfs
+  int64 storage_size_bytes = 8; // Provisioned volume size
 }
 
 message Disk {
@@ -929,4 +936,23 @@ message GetStorageOverviewResponse {
   int32 nodes_luks_unknown = 9;
   int32 total_block_devices = 10;
   repeated NodeStorageOverview nodes = 11;
+}
+
+// Volume inventory
+
+message ListVolumesRequest {}
+
+message ListVolumesResponse {
+  repeated VolumeInfo volumes = 1;
+}
+
+message VolumeInfo {
+  string vm_id = 1;
+  string vm_name = 2;
+  string node_id = 3;
+  string storage_backend = 4;    // filesystem, lvm, zfs
+  int64 storage_size_bytes = 5;  // Provisioned size
+  string backend_handle = 6;     // Actual path: /dev/vg_kcore/kcore-<vm> or /var/lib/...
+  string image_format = 7;       // raw, qcow2
+  VmState vm_state = 8;
 }

@@ -95,6 +95,8 @@ impl Controller for ManyVmsController {
                 memory_bytes: (i as i64) * 512 * 1024 * 1024,
                 node_id: format!("node-{}", if i <= 8 { "a" } else { "b" }),
                 created_at: None,
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
             })
             .collect();
         Ok(Response::new(ListVmsResponse { vms }))
@@ -350,6 +352,13 @@ impl Controller for ManyVmsController {
             bridge_networks: 1,
             ..Default::default()
         }))
+    }
+
+    async fn list_volumes(
+        &self,
+        _: TRequest<ListVolumesRequest>,
+    ) -> Result<Response<ListVolumesResponse>, Status> {
+        Err(Status::unimplemented(""))
     }
 }
 
