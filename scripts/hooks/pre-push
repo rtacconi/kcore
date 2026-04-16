@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-push checks: clippy + tests (~30s incremental).
+# Pre-push checks: clippy + tests + security audit (~30-60s incremental).
 # Installed automatically by `nix develop` shellHook or `make install-hooks`.
 set -euo pipefail
 
@@ -16,5 +16,19 @@ cargo test --workspace || {
     echo "  Tests failed. Fix them before pushing."
     exit 1
 }
+
+# Match CI: fail on advisories with active vulnerabilities. Pre-existing
+# maintenance / unsoundness warnings (paste, rustls-pemfile, rand) are
+# allowed by `cargo audit` and don't block.
+if command -v cargo-audit >/dev/null 2>&1; then
+    echo "pre-push: running cargo audit..."
+    cargo audit || {
+        echo ""
+        echo "  cargo audit found vulnerabilities. Run 'cargo update -p <crate>' or update Cargo.toml."
+        exit 1
+    }
+else
+    echo "pre-push: cargo-audit not installed; skipping (CI will still run it)."
+fi
 
 echo "pre-push: all checks passed."
