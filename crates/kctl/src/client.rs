@@ -469,6 +469,150 @@ mod size_tests {
     }
 }
 
+/// Property-based tests (Phase 1) for the size parser.
+///
+/// `parse_size_bytes` accepts arbitrary user input (CLI flags, YAML manifest
+/// strings) so the strongest guarantees we want are: it never panics, it
+/// never returns a negative byte count, and the obvious round-trip with the
+/// canonical units (`B`, `K`, `M`, `G`, `T`) holds for every non-overflowing
+/// integer value.
+#[cfg(test)]
+mod size_proptests {
+    use super::{format_bytes, parse_size_bytes};
+    use proptest::prelude::*;
+
+    fn unit_multiplier(unit: &str) -> i64 {
+        match unit {
+            "" | "B" => 1,
+            "K" | "KB" | "KiB" => 1024,
+            "M" | "MB" | "MiB" => 1024 * 1024,
+            "G" | "GB" | "GiB" => 1024 * 1024 * 1024,
+            "T" | "TB" | "TiB" => 1024i64 * 1024 * 1024 * 1024,
+            _ => panic!("unknown unit in test: {unit}"),
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 4_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `parse_size_bytes` must never panic on arbitrary input. The
+        /// previous greedy split could produce confusing errors but, more
+        /// importantly, a future bug here would translate any malformed
+        /// CLI flag into a process crash.
+        #[test]
+        fn parse_size_bytes_never_panics(s in ".{0,32}") {
+            let _ = parse_size_bytes(&s);
+        }
+
+        /// Whenever parsing succeeds, the result is non-negative. The
+        /// production caller (`kctl vm create`, `kctl vm update`, manifest
+        /// parsing) treats the return value as a byte count and would
+        /// silently accept a negative size as "0 or unset" with very
+        /// surprising downstream effects.
+        #[test]
+        fn parse_size_bytes_result_is_non_negative(s in ".{0,32}") {
+            if let Ok(n) = parse_size_bytes(&s) {
+                prop_assert!(n >= 0, "parse_size_bytes({s:?}) = {n}");
+            }
+        }
+
+        /// Round-trip: any non-negative integer paired with any canonical
+        /// unit string parses back to `value * unit_multiplier`. The value
+        /// bound is `2^22`, which keeps `value * 2^40` (TiB multiplier)
+        /// safely under `i64::MAX = 2^63 - 1` for every unit. (We have
+        /// a separate property below that exercises the overflow path.)
+        #[test]
+        fn parse_size_bytes_round_trip_canonical_units(
+            value in 0i64..=(1i64 << 22),
+            unit in prop::sample::select(vec![
+                "", "B",
+                "K", "KB", "KiB",
+                "M", "MB", "MiB",
+                "G", "GB", "GiB",
+                "T", "TB", "TiB",
+            ]),
+        ) {
+            let s = format!("{value}{unit}");
+            let parsed = parse_size_bytes(&s).expect("canonical input must parse");
+            let expected = value
+                .checked_mul(unit_multiplier(unit))
+                .expect("test bounds prevent overflow");
+            prop_assert_eq!(parsed, expected);
+        }
+
+        /// Case insensitivity: the unit suffix must be matched
+        /// case-insensitively after trimming. Mixing case must not change
+        /// the parsed value. Uses the same conservative bound as the
+        /// round-trip property to stay clear of overflow.
+        #[test]
+        fn parse_size_bytes_unit_is_case_insensitive(
+            value in 0i64..=(1i64 << 22),
+            unit in prop::sample::select(vec!["K", "M", "G", "T", "Kb", "mB", "gIb", "TiB"]),
+        ) {
+            let lower = format!("{value}{}", unit.to_lowercase());
+            let upper = format!("{value}{}", unit.to_uppercase());
+            let a = parse_size_bytes(&lower).expect("lower parses");
+            let b = parse_size_bytes(&upper).expect("upper parses");
+            prop_assert_eq!(a, b);
+        }
+
+        /// Overflow path: any value that exceeds `i64::MAX / multiplier`
+        /// must be rejected with the documented "overflows i64" error
+        /// rather than silently wrapping (which `value * multiplier`
+        /// would do under release-mode unchecked arithmetic).
+        #[test]
+        fn parse_size_bytes_rejects_overflow_with_clear_message(
+            unit in prop::sample::select(vec!["K", "M", "G", "T"]),
+            extra in 1i128..=1_000_000,
+        ) {
+            let mult = unit_multiplier(unit) as i128;
+            let max_safe = (i64::MAX as i128) / mult;
+            let value = max_safe + extra;
+            let s = format!("{value}{unit}");
+            let err = parse_size_bytes(&s).expect_err("overflow must be rejected");
+            prop_assert!(
+                err.contains("overflow") || err.contains("invalid number"),
+                "expected overflow message for {s:?}, got: {err}"
+            );
+        }
+
+        /// Decimal sizes must always be rejected with the documented
+        /// message — no silent truncation, no nonsense unit error. This
+        /// is the property-level encoding of the `1.5G` regression test.
+        #[test]
+        fn parse_size_bytes_always_rejects_decimals(
+            integer_part in 0u64..=u64::MAX,
+            fractional in 1u64..=999,
+            unit in prop::sample::select(vec!["", "K", "M", "G", "T"]),
+        ) {
+            let s = format!("{integer_part}.{fractional}{unit}");
+            let err = parse_size_bytes(&s)
+                .expect_err("decimal sizes must always be rejected");
+            prop_assert!(
+                err.contains("decimal sizes are not supported"),
+                "expected decimal-rejection message for {s:?}, got: {err}"
+            );
+        }
+
+        /// `format_bytes` must never panic and must always produce a non-empty
+        /// string with a recognised unit suffix.
+        #[test]
+        fn format_bytes_never_panics(n in any::<i64>()) {
+            let s = format_bytes(n);
+            prop_assert!(!s.is_empty());
+            prop_assert!(
+                ["B", "KB", "MB", "GB", "TB", "PB"]
+                    .iter()
+                    .any(|u| s.ends_with(u)),
+                "unexpected unit in {s:?}"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::path::Path;

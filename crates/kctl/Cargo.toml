@@ -25,6 +25,7 @@ x509-parser = { version = "0.18.1", features = ["verify"] }
 tempfile = "3"
 tonic-health = "0.12"
 tokio-stream = { version = "0.1", features = ["net"] }
+proptest = "1.11"
 
 [build-dependencies]
 tonic-build = "0.12"

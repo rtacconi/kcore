@@ -888,3 +888,379 @@ mod tests {
         );
     }
 }
+
+/// Property-based tests (Phase 1).
+///
+/// The diff helpers underpin every server-side apply, so we want stronger
+/// guarantees than example tests can give:
+///   * `mutable` and `immutable` are disjoint and de-duplicated for any
+///     stored/incoming pair (an idempotent reconcile reads `mutable` and
+///     errors on `immutable`; if a field appeared in both, behaviour
+///     would depend on iteration order);
+///   * `rules_match` is order-independent and case-insensitive on
+///     protocol (the regression we just shipped a fix for);
+///   * `diff_security_group` and `diff_vm` are reflexive — diffing a
+///     stored row against a spec built directly from it is unchanged.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use crate::db::{SecurityGroupRow, SecurityGroupRuleRow, VmRow};
+    use proptest::prelude::*;
+
+    fn arb_protocol() -> impl Strategy<Value = String> {
+        // Protocols we actually accept, in mixed case to exercise the
+        // case-insensitive normalization path.
+        prop::sample::select(vec![
+            "tcp".to_string(),
+            "TCP".to_string(),
+            "Tcp".to_string(),
+            "udp".to_string(),
+            "UDP".to_string(),
+            "icmp".to_string(),
+        ])
+    }
+
+    fn arb_rule_seed() -> impl Strategy<Value = (String, i32, i32, String, String, bool)> {
+        // (protocol, host_port, target_port, source_cidr, target_vm, enable_dnat)
+        (
+            arb_protocol(),
+            1i32..=65_535,
+            // target_port = 0 means "same as host_port"; cover both branches.
+            0i32..=65_535,
+            prop::sample::select(vec!["", "10.0.0.0/8", "192.168.1.0/24"]).prop_map(String::from),
+            prop::sample::select(vec!["", "vm-web", "vm-db"]).prop_map(String::from),
+            any::<bool>(),
+        )
+    }
+
+    fn make_stored_rule(
+        idx: usize,
+        seed: &(String, i32, i32, String, String, bool),
+    ) -> SecurityGroupRuleRow {
+        let (proto, host, target, cidr, vm, dnat) = seed.clone();
+        SecurityGroupRuleRow {
+            id: format!("r{idx}"),
+            security_group: "sg".into(),
+            protocol: proto,
+            host_port: host,
+            // The DB stores the resolved target_port, so for a faithful
+            // comparison build it the same way `rules_match` does.
+            target_port: if target <= 0 { host } else { target },
+            source_cidr: cidr,
+            target_vm: vm,
+            enable_dnat: dnat,
+        }
+    }
+
+    fn make_incoming_rule(
+        idx: usize,
+        seed: &(String, i32, i32, String, String, bool),
+    ) -> controller_proto::SecurityGroupRule {
+        let (proto, host, target, cidr, vm, dnat) = seed.clone();
+        controller_proto::SecurityGroupRule {
+            id: format!("r{idx}"),
+            protocol: proto,
+            host_port: host,
+            target_port: target,
+            source_cidr: cidr,
+            target_vm: vm,
+            enable_dnat: dnat,
+        }
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `mutable` and `immutable` are always disjoint and de-duplicated.
+        /// This is the contract callers rely on when they write
+        /// `if !diff.immutable.is_empty() { reject } else { apply diff.mutable }`.
+        #[test]
+        fn diff_security_group_fields_are_disjoint(
+            seeds in proptest::collection::vec(arb_rule_seed(), 0..6),
+            stored_desc in "[a-z ]{0,32}",
+            incoming_desc in "[a-z ]{0,32}",
+            extra_seed in arb_rule_seed(),
+            mutate_rules in any::<bool>(),
+        ) {
+            let row = SecurityGroupRow {
+                name: "sg".into(),
+                description: stored_desc,
+                created_at: String::new(),
+            };
+            let stored: Vec<_> = seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| make_stored_rule(i, s))
+                .collect();
+            let mut incoming: Vec<_> = seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| make_incoming_rule(i, s))
+                .collect();
+            if mutate_rules {
+                incoming.push(make_incoming_rule(seeds.len(), &extra_seed));
+            }
+
+            let apply = SecurityGroupApply {
+                description: &incoming_desc,
+                rules: &incoming,
+            };
+            let diff = diff_security_group(&row, &stored, &apply);
+
+            let mut all = diff.mutable.clone();
+            all.extend(diff.immutable.iter().cloned());
+            let mut sorted = all.clone();
+            sorted.sort();
+            sorted.dedup();
+            prop_assert_eq!(
+                sorted.len(),
+                all.len(),
+                "duplicate field name in diff: mutable={:?} immutable={:?}",
+                diff.mutable,
+                diff.immutable
+            );
+            for f in &diff.mutable {
+                prop_assert!(
+                    !diff.immutable.contains(f),
+                    "field {f:?} appears in both mutable and immutable"
+                );
+            }
+        }
+
+        /// **Reflexivity**: building an `incoming` apply directly from a
+        /// stored row produces an unchanged diff for any value of every
+        /// field. This is exactly the property a healthy reconcile loop
+        /// depends on (idempotent re-apply must be a no-op).
+        #[test]
+        fn diff_security_group_is_reflexive(
+            seeds in proptest::collection::vec(arb_rule_seed(), 0..6),
+            description in "[a-z ]{0,32}",
+        ) {
+            let row = SecurityGroupRow {
+                name: "sg".into(),
+                description: description.clone(),
+                created_at: String::new(),
+            };
+            let stored: Vec<_> = seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| make_stored_rule(i, s))
+                .collect();
+            let incoming: Vec<_> = seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| make_incoming_rule(i, s))
+                .collect();
+            let apply = SecurityGroupApply {
+                description: &description,
+                rules: &incoming,
+            };
+            let diff = diff_security_group(&row, &stored, &apply);
+            prop_assert!(
+                diff.is_unchanged(),
+                "reflexive apply produced a diff: mutable={:?} immutable={:?}",
+                diff.mutable,
+                diff.immutable
+            );
+        }
+
+        /// **Order independence**: shuffling the incoming rule list
+        /// must not change the result of `diff_security_group`. This
+        /// property would have failed if `rules_match` had compared
+        /// `Vec<_>` directly instead of sorting first.
+        #[test]
+        fn diff_security_group_is_order_independent(
+            seeds in proptest::collection::vec(arb_rule_seed(), 1..6),
+            shuffle_seed in any::<u64>(),
+        ) {
+            let row = SecurityGroupRow {
+                name: "sg".into(),
+                description: "d".into(),
+                created_at: String::new(),
+            };
+            let stored: Vec<_> = seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| make_stored_rule(i, s))
+                .collect();
+            let incoming: Vec<_> = seeds
+                .iter()
+                .enumerate()
+                .map(|(i, s)| make_incoming_rule(i, s))
+                .collect();
+
+            // Deterministic shuffle so failures are reproducible.
+            let mut shuffled = incoming.clone();
+            let mut state = shuffle_seed;
+            for i in (1..shuffled.len()).rev() {
+                state = state.wrapping_mul(6364136223846793005).wrapping_add(1);
+                let j = (state as usize) % (i + 1);
+                shuffled.swap(i, j);
+            }
+
+            let apply_a = SecurityGroupApply { description: "d", rules: &incoming };
+            let apply_b = SecurityGroupApply { description: "d", rules: &shuffled };
+            let diff_a = diff_security_group(&row, &stored, &apply_a);
+            let diff_b = diff_security_group(&row, &stored, &apply_b);
+            prop_assert_eq!(diff_a, diff_b);
+        }
+
+        /// **Case insensitivity** (regression): for any rule, mutating
+        /// only the case of the protocol on either side must not change
+        /// the diff result. Encodes the previous bug where a stored
+        /// `TCP` vs incoming `tcp` reported a spurious `rules` change.
+        #[test]
+        fn diff_security_group_protocol_case_does_not_matter(
+            seed in arb_rule_seed(),
+        ) {
+            let row = SecurityGroupRow {
+                name: "sg".into(),
+                description: "d".into(),
+                created_at: String::new(),
+            };
+
+            // Build stored with upper-case protocol, incoming with lower-case.
+            let mut stored_rule = make_stored_rule(0, &seed);
+            stored_rule.protocol = stored_rule.protocol.to_uppercase();
+            let mut incoming_rule = make_incoming_rule(0, &seed);
+            incoming_rule.protocol = incoming_rule.protocol.to_lowercase();
+
+            let stored = vec![stored_rule];
+            let incoming = vec![incoming_rule];
+            let apply = SecurityGroupApply { description: "d", rules: &incoming };
+            let diff = diff_security_group(&row, &stored, &apply);
+            prop_assert!(
+                diff.is_unchanged(),
+                "case mismatch must not produce a diff, got {diff:?}"
+            );
+        }
+
+        /// **`diff_vm` reflexivity over the mutable axes**: for any
+        /// `(cpu, memory_bytes, auto_start)` triple, building a `VmRow`
+        /// and a `VmApply` whose only meaningful payload is the same
+        /// triple yields `is_unchanged()`. We leave every "incoming"
+        /// string field empty so `diff_vm` skips comparing them, which
+        /// matches the production "spec only carries the mutable
+        /// fields" path.
+        #[test]
+        fn diff_vm_is_reflexive_on_mutable_fields(
+            cpu in 1i32..=64,
+            memory_bytes in 1i64..=(1i64 << 40),
+            auto_start in any::<bool>(),
+        ) {
+            let stored = VmRow {
+                id: "vm-1".into(),
+                name: "vm".into(),
+                cpu,
+                memory_bytes,
+                image_path: "/img".into(),
+                image_url: "https://x/y.qcow2".into(),
+                image_sha256: "sha".into(),
+                image_format: "qcow2".into(),
+                image_size: 1,
+                network: "default".into(),
+                auto_start,
+                node_id: "node".into(),
+                created_at: String::new(),
+                runtime_state: String::new(),
+                cloud_init_user_data: String::new(),
+                storage_backend: "filesystem".into(),
+                storage_size_bytes: 0,
+                vm_ip: String::new(),
+            };
+            let desired_state = if auto_start {
+                controller_proto::VmDesiredState::Running as i32
+            } else {
+                controller_proto::VmDesiredState::Stopped as i32
+            };
+            let spec = controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm".into(),
+                cpu,
+                memory_bytes,
+                disks: Vec::new(),
+                nics: Vec::new(),
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
+                desired_state,
+            };
+            let apply = VmApply {
+                spec: &spec,
+                image_url: "",
+                image_sha256: "",
+                image_path: "",
+                cloud_init_user_data: "",
+                ssh_key_names: &[],
+                storage_backend: "",
+                storage_size_bytes: 0,
+                target_node: "",
+                target_dc: "",
+            };
+            let diff = diff_vm(&stored, &[], &apply);
+            prop_assert!(
+                diff.is_unchanged(),
+                "reflexive vm apply produced diff: {diff:?}"
+            );
+        }
+
+        /// `diff_vm` correctly classifies a CPU change as **mutable**
+        /// (never immutable) for any starting CPU and any non-zero delta.
+        #[test]
+        fn diff_vm_cpu_change_is_always_mutable(
+            base_cpu in 1i32..=32,
+            new_cpu in 1i32..=64,
+            base_mem in 1i64..=(1i64 << 36),
+        ) {
+            prop_assume!(base_cpu != new_cpu);
+            let stored = VmRow {
+                id: "vm-1".into(),
+                name: "vm".into(),
+                cpu: base_cpu,
+                memory_bytes: base_mem,
+                image_path: "/img".into(),
+                image_url: String::new(),
+                image_sha256: String::new(),
+                image_format: String::new(),
+                image_size: 0,
+                network: "default".into(),
+                auto_start: true,
+                node_id: "node".into(),
+                created_at: String::new(),
+                runtime_state: String::new(),
+                cloud_init_user_data: String::new(),
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
+                vm_ip: String::new(),
+            };
+            let spec = controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm".into(),
+                cpu: new_cpu,
+                memory_bytes: base_mem,
+                disks: Vec::new(),
+                nics: Vec::new(),
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
+                desired_state: controller_proto::VmDesiredState::Running as i32,
+            };
+            let apply = VmApply {
+                spec: &spec,
+                image_url: "",
+                image_sha256: "",
+                image_path: "",
+                cloud_init_user_data: "",
+                ssh_key_names: &[],
+                storage_backend: "",
+                storage_size_bytes: 0,
+                target_node: "",
+                target_dc: "",
+            };
+            let diff = diff_vm(&stored, &[], &apply);
+            prop_assert!(diff.mutable.contains(&"cpu".to_string()));
+            prop_assert!(!diff.immutable.contains(&"cpu".to_string()));
+        }
+    }
+}
