@@ -3,33 +3,77 @@ use crate::commands::{container, network, security_group, ssh_key, vm};
 use crate::config::ConnectionInfo;
 use anyhow::{Context, Result};
 
+/// Manifest kinds that `kctl` handles entirely on the client side, without
+/// reaching the controller. Cluster/NodeInstall manifests are bootstrap
+/// resources — they configure how to *find* a controller and therefore can't
+/// require one to be reachable.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LocalManifestKind {
+    Cluster,
+    NodeInstall,
+}
+
+/// Outcome of reading and classifying a manifest file once. The whole point
+/// of this struct is so callers (e.g. `main.rs`) can avoid reading and YAML-
+/// parsing the same file two or three times in a row.
+#[derive(Debug, Clone)]
+pub struct ClassifiedManifest {
+    /// Raw file content, ready to forward to the controller or print as-is.
+    pub content: String,
+    /// `kind` field value as written in the manifest (case-preserved), or
+    /// `None` when the manifest has no `kind:` key.
+    pub kind: Option<String>,
+    /// `Some` iff `kind` matches a kind handled locally by `kctl`.
+    pub local: Option<LocalManifestKind>,
+}
+
+/// Read `file`, parse the YAML, and figure out whether the manifest belongs
+/// to the controller or to one of the local bootstrap handlers.
+///
+/// Errors are propagated for both I/O failures (file missing / unreadable)
+/// and YAML parse failures, so users see a real diagnostic instead of a
+/// silent fallback to the controller path that would then fail with a far
+/// less useful message.
+pub fn classify_manifest(file: &str) -> Result<ClassifiedManifest> {
+    let content = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
+    let kind = detect_manifest_kind(&content)
+        .with_context(|| format!("parsing manifest YAML in {file}"))?;
+    let local = kind.as_deref().and_then(local_manifest_kind);
+    Ok(ClassifiedManifest {
+        content,
+        kind,
+        local,
+    })
+}
+
 /// Returns `Ok(true)` if the manifest at `file` has a `kind` that is handled
 /// locally by `kctl` (i.e. without contacting the controller). I/O errors and
 /// YAML parse errors are propagated rather than collapsed to `false`, so
 /// callers can surface real manifest problems instead of silently falling
 /// back to the controller path.
 pub fn is_local_manifest_kind(file: &str) -> Result<bool> {
-    let content = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
-    let Some(kind) = detect_manifest_kind(&content) else {
-        return Ok(false);
-    };
-    Ok(matches!(
-        kind.to_ascii_lowercase().as_str(),
-        "cluster" | "nodeinstall" | "node-install" | "node_install"
-    ))
+    Ok(classify_manifest(file)?.local.is_some())
+}
+
+fn local_manifest_kind(kind: &str) -> Option<LocalManifestKind> {
+    match kind.to_ascii_lowercase().as_str() {
+        "cluster" => Some(LocalManifestKind::Cluster),
+        "nodeinstall" | "node-install" | "node_install" => Some(LocalManifestKind::NodeInstall),
+        _ => None,
+    }
 }
 
 pub async fn apply(info: &ConnectionInfo, file: &str, dry_run: bool) -> Result<()> {
-    let content = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
+    let classified = classify_manifest(file)?;
 
     if dry_run {
         println!("--- dry run ---");
-        print!("{content}");
+        print!("{}", classified.content);
         println!("--- end ---");
         return Ok(());
     }
 
-    if let Some(kind) = detect_manifest_kind(&content) {
+    if let Some(kind) = classified.kind.as_deref() {
         match kind.to_ascii_lowercase().as_str() {
             "securitygroup" => return security_group::apply_from_file(info, file).await,
             "vm" => return vm::create_from_manifest(info, file).await,
@@ -45,7 +89,7 @@ pub async fn apply(info: &ConnectionInfo, file: &str, dry_run: bool) -> Result<(
     let mut client = client::controller_admin_client(info).await?;
     let resp = client
         .apply_nix_config(controller_proto::ApplyNixConfigRequest {
-            configuration_nix: content,
+            configuration_nix: classified.content,
             rebuild: true,
         })
         .await?
@@ -59,19 +103,36 @@ pub async fn apply(info: &ConnectionInfo, file: &str, dry_run: bool) -> Result<(
     }
 }
 
-pub fn detect_manifest_kind(content: &str) -> Option<String> {
-    let doc = serde_yaml::from_str::<serde_yaml::Value>(content).ok()?;
-    let map = doc.as_mapping()?;
+/// Parse `kind:` out of a YAML manifest.
+///
+/// Returns:
+/// - `Ok(Some(kind))` when a non-empty top-level `kind:` is present.
+/// - `Ok(None)` when the YAML parses cleanly but has no `kind:` key (or it
+///   is empty / not a string).
+/// - `Err(_)` when the YAML itself fails to parse — propagated so callers
+///   surface the syntax error instead of silently treating the manifest as
+///   "kind-less".
+pub fn detect_manifest_kind(content: &str) -> Result<Option<String>> {
+    let doc: serde_yaml::Value =
+        serde_yaml::from_str(content).context("invalid YAML in manifest")?;
+    let Some(map) = doc.as_mapping() else {
+        return Ok(None);
+    };
     let key = serde_yaml::Value::String("kind".to_string());
-    map.get(&key)
+    Ok(map
+        .get(&key)
         .and_then(|v| v.as_str())
         .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .filter(|s| !s.is_empty()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn unwrap_kind(content: &str) -> Option<String> {
+        detect_manifest_kind(content).expect("YAML should parse")
+    }
 
     #[test]
     fn detect_manifest_kind_reads_top_level_kind() {
@@ -80,10 +141,7 @@ kind: SecurityGroup
 metadata:
   name: expose-nginx-host
 "#;
-        assert_eq!(
-            detect_manifest_kind(manifest).as_deref(),
-            Some("SecurityGroup")
-        );
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("SecurityGroup"));
     }
 
     #[test]
@@ -92,47 +150,54 @@ metadata:
 metadata:
   name: no-kind
 "#;
-        assert_eq!(detect_manifest_kind(manifest), None);
+        assert_eq!(unwrap_kind(manifest), None);
     }
 
     #[test]
     fn detect_manifest_kind_vm() {
         let manifest = "kind: VM\nmetadata:\n  name: test\n";
-        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("VM"));
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("VM"));
     }
 
     #[test]
     fn detect_manifest_kind_network() {
         let manifest = "kind: Network\nmetadata:\n  name: net1\n";
-        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("Network"));
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("Network"));
     }
 
     #[test]
     fn detect_manifest_kind_sshkey() {
         let manifest = "kind: SshKey\nmetadata:\n  name: k1\n";
-        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("SshKey"));
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("SshKey"));
     }
 
     #[test]
     fn detect_manifest_kind_container() {
         let manifest = "kind: Container\nmetadata:\n  name: c1\n";
-        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("Container"));
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("Container"));
     }
 
     #[test]
     fn detect_manifest_kind_cluster() {
         let manifest =
             "kind: Cluster\nmetadata:\n  name: prod\nspec:\n  controller: 1.2.3.4:9090\n";
-        assert_eq!(detect_manifest_kind(manifest).as_deref(), Some("Cluster"));
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("Cluster"));
     }
 
     #[test]
     fn detect_manifest_kind_nodeinstall() {
         let manifest = "kind: NodeInstall\nmetadata:\n  name: node1\nspec:\n  node: 1.2.3.4:9091\n  osDisk: /dev/sda\n";
-        assert_eq!(
-            detect_manifest_kind(manifest).as_deref(),
-            Some("NodeInstall")
-        );
+        assert_eq!(unwrap_kind(manifest).as_deref(), Some("NodeInstall"));
+    }
+
+    #[test]
+    fn detect_manifest_kind_propagates_yaml_errors() {
+        // Unterminated YAML mapping: the parser must reject this and we must
+        // surface the error instead of silently returning Ok(None).
+        let manifest = "kind: VM\n  bad: : :";
+        let err = detect_manifest_kind(manifest).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("YAML"), "unexpected error: {msg}");
     }
 
     #[test]
@@ -162,5 +227,40 @@ metadata:
         let err = is_local_manifest_kind(path.to_str().unwrap()).unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.contains("reading"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn classify_manifest_marks_cluster_as_local() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cluster.yaml");
+        std::fs::write(
+            &path,
+            "kind: Cluster\nmetadata:\n  name: test\nspec:\n  controller: 1.2.3.4:9090\n",
+        )
+        .unwrap();
+        let classified = classify_manifest(path.to_str().unwrap()).unwrap();
+        assert_eq!(classified.kind.as_deref(), Some("Cluster"));
+        assert_eq!(classified.local, Some(LocalManifestKind::Cluster));
+        assert!(classified.content.contains("Cluster"));
+    }
+
+    #[test]
+    fn classify_manifest_marks_vm_as_remote() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("vm.yaml");
+        std::fs::write(&path, "kind: VM\nmetadata:\n  name: test\n").unwrap();
+        let classified = classify_manifest(path.to_str().unwrap()).unwrap();
+        assert_eq!(classified.kind.as_deref(), Some("VM"));
+        assert_eq!(classified.local, None);
+    }
+
+    #[test]
+    fn classify_manifest_propagates_yaml_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("broken.yaml");
+        std::fs::write(&path, "kind: VM\n  bad: : :").unwrap();
+        let err = classify_manifest(path.to_str().unwrap()).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("parsing manifest"), "unexpected error: {msg}");
     }
 }
