@@ -69,14 +69,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       # Caches ~/.cargo/registry, ~/.cargo/git and ./target so the
-      # `cargo install --locked kani-verifier` inside the Kani action
-      # plus the per-crate `cargo kani` invocations skip the full Rust
-      # build on warm runs.
+      # `cargo install --locked kani-verifier` step plus the per-crate
+      # `cargo kani` invocations skip the full Rust build on warm runs.
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
 
       # Caches the Kani toolchain itself (CBMC + symex binaries +
-      # ~/.kani layout). Cold install of `kani-github-action@v1.1`
+      # ~/.kani layout). Cold install of kani-verifier from crates.io
       # takes ~8 min on a 4-vCPU GHA runner; cached install is ~30 s.
       - name: Cache Kani toolchain
         uses: actions/cache@v4
@@ -85,18 +84,28 @@ jobs:
             ~/.cargo/bin/cargo-kani
             ~/.cargo/bin/kani
             ~/.kani
-          key: kani-${{ runner.os }}-v1.1
+          key: kani-toolchain-${{ runner.os }}-v1
 
       - name: Install protobuf compiler
         run: |
           sudo apt-get update
           sudo apt-get install -y protobuf-compiler
 
-      # Step timeout so a hung `cargo install kani-verifier` fails
-      # fast instead of consuming the full 30-minute job budget.
-      - name: Install Kani
+      # We install Kani directly instead of via
+      # `model-checking/kani-github-action@v1.1` because that composite
+      # action's last step runs `cargo-kani` at the workspace root with
+      # no `-p` flag, which on this multi-crate workspace tries to
+      # verify every member and hangs (cancelled at ~9-10 min, well
+      # before our 15-min step budget). Direct install + explicit
+      # per-crate runs below give us the same outcome with predictable
+      # timing.
+      - name: Install kani-verifier
         timeout-minutes: 15
-        uses: model-checking/kani-github-action@v1.1
+        run: |
+          if ! command -v cargo-kani >/dev/null 2>&1; then
+            cargo install --locked kani-verifier
+          fi
+          cargo-kani setup
 
       - name: Run bounded Kani proofs (controller)
         run: cargo kani -p kcore-controller
