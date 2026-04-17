@@ -28,3 +28,6 @@ tokio-stream = { version = "0.1", features = ["net"] }
 
 [build-dependencies]
 tonic-build = "0.12"
+
+[lints]
+workspace = true

@@ -78,3 +78,66 @@ mod tests {
         assert!(assert_safe_path("file..with..dots", "p").is_ok());
     }
 }
+
+/// Bounded model-checking proofs (Phase 2 — Kani).
+///
+/// Mirror of the controller-side proofs in
+/// `crates/controller/src/path_safety.rs`. Both files implement the
+/// same validators and both must hold the same security invariants.
+///
+/// To run:
+/// ```text
+/// cargo install --locked kani-verifier
+/// cargo kani setup
+/// cargo kani -p kcore-kctl
+/// ```
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    const MAX_INPUT_LEN: usize = 8;
+
+    fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_INPUT_LEN);
+        for slot in buf.iter_mut() {
+            let b: u8 = kani::any();
+            kani::assume(b < 128);
+            *slot = b;
+        }
+        // SAFETY: every byte was constrained to < 128, so the slice is
+        // valid UTF-8.
+        std::str::from_utf8(&buf[..len]).unwrap()
+    }
+
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn dot_dot_check_never_panics() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let _ = path_segments_include_dot_dot(s);
+    }
+
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn assert_safe_path_never_panics() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let _ = assert_safe_path(s, "f");
+    }
+
+    /// **Soundness**: any input `assert_safe_path` accepts is
+    /// non-empty, contains no NUL byte, and contains no `..` segment
+    /// under either separator.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn assert_safe_path_acceptance_implies_safe() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        if assert_safe_path(s, "f").is_ok() {
+            assert!(!s.is_empty());
+            assert!(!s.contains('\0'));
+            assert!(!path_segments_include_dot_dot(s));
+        }
+    }
+}

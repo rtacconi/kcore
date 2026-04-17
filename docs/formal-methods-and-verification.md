@@ -133,49 +133,75 @@ proptest! {
 
 ### Phase 2: Kani harnesses for critical pure functions
 
-**Target:** same `nixgen.rs` functions, plus disk path validation in `admin.rs`.
+**Status:** first cut landed. Bounded model-checking proofs live in:
 
-**Why second:** Kani gives exhaustive guarantees within bounds, upgrading from "probably correct for random inputs" (proptest) to "provably correct for all inputs up to length N". This matters for security-sensitive escaping.
+- `crates/controller/src/nixgen.rs` — `nix_escape` and `sanitize_nix_attr_key`
+- `crates/controller/src/path_safety.rs` — `path_segments_include_dot_dot` and `assert_safe_path`
+- `crates/kctl/src/path_safety.rs` — same path-safety validators on the client side
 
-**Harnesses to write:**
+All harnesses are gated behind `#[cfg(kani)]`, so they are excluded from `cargo build`, `cargo test`, and `cargo clippy` and have **zero impact on the stable rustc toolchain**. They run only when invoked via `cargo kani`.
 
-1. **`nix_escape` does not panic** — for all byte sequences up to length 32, `nix_escape` terminates without panic.
+**Why second:** Kani gives exhaustive guarantees within bounds, upgrading from "probably correct for 2 000 random inputs" (proptest) to "provably correct for **all** ASCII inputs up to `MAX_INPUT_LEN` bytes" (currently 8). This matters for security-sensitive escaping.
 
-2. **`nix_escape` is idempotent on safe strings** — for ASCII alphanumeric input, `nix_escape(s) == s`.
+**Harnesses currently proven:**
 
-3. **`sanitize_nix_attr_key` output length** — output length equals input length (every character maps to exactly one character).
+1. **`nix_escape` never panics** — for all ASCII strings up to 8 bytes.
+2. **`nix_escape` output is always safely escaped** — soundness of the security boundary.
+3. **`sanitize_nix_attr_key` preserves char count** — 1-to-1 mapping property.
+4. **`sanitize_nix_attr_key` charset** — output is in `[A-Za-z0-9_-]`.
+5. **`path_segments_include_dot_dot` never panics** — total function on bounded input.
+6. **`assert_safe_path` never panics** — total function on bounded input.
+7. **`assert_safe_path` acceptance is sound** — accepted inputs are non-empty, NUL-free, and contain no `..` segment under either separator.
 
-**Example (Kani):**
+**Example (Kani — see `crates/controller/src/nixgen.rs` for the full set):**
 
 ```rust
 #[cfg(kani)]
-mod verification {
+mod kani_proofs {
     use super::*;
 
-    #[kani::proof]
-    #[kani::unwind(34)]
-    fn nix_escape_no_panic() {
+    const MAX_INPUT_LEN: usize = 8;
+
+    fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
         let len: usize = kani::any();
-        kani::assume(len <= 32);
-        let bytes: [u8; 32] = kani::any();
-        let s = String::from_utf8_lossy(&bytes[..len]);
-        let _ = nix_escape(&s);
+        kani::assume(len <= MAX_INPUT_LEN);
+        for slot in buf.iter_mut() {
+            let b: u8 = kani::any();
+            kani::assume(b < 128);
+            *slot = b;
+        }
+        std::str::from_utf8(&buf[..len]).unwrap()
     }
 
     #[kani::proof]
-    #[kani::unwind(34)]
-    fn sanitize_preserves_length() {
-        let len: usize = kani::any();
-        kani::assume(len <= 32);
-        let bytes: [u8; 32] = kani::any();
-        let s = String::from_utf8_lossy(&bytes[..len]);
-        let result = sanitize_nix_attr_key(&s);
-        assert!(result.len() == s.len());
+    #[kani::unwind(17)]
+    fn nix_escape_output_is_always_safe() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let escaped = nix_escape(s);
+        assert!(is_safely_escaped(&escaped));
     }
 }
 ```
 
-**Effort estimate:** 1–2 days. Requires `cargo kani` installed (available via `cargo install kani-verifier && cargo kani setup`). Kani harnesses live alongside the source in `nixgen.rs` behind `#[cfg(kani)]`.
+**How to run locally:**
+
+```bash
+cargo install --locked kani-verifier
+cargo kani setup
+make kani                 # runs the controller and kctl proof suites
+# or per crate:
+cargo kani -p kcore-controller
+cargo kani -p kcore-kctl
+```
+
+**CI:** the `kani` job in `.github/workflows/formal-checks.yml` runs the same suite on every pull request via `model-checking/kani-github-action@v1.1`.
+
+**Follow-up work:**
+
+- Raise `MAX_INPUT_LEN` once we've measured the runtime cost on CI.
+- Add a Kani proof for `validate_safe_segment` in `crates/node-agent/src/path_safety.rs` once that file lands (tracked separately by the Phase 1 proptest expansion).
+- Consider adding a Kani proof for `validate_path_under_root`; it walks `Path::components`, which costs more symbolic state, so it may need a smaller bound.
 
 ### Phase 3: property-based testing on database invariants
 

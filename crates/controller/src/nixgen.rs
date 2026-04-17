@@ -837,3 +837,128 @@ mod tests {
         assert!(config.contains("enableDnat = true;"));
     }
 }
+
+/// Bounded model-checking proofs (Phase 2 — Kani).
+///
+/// These harnesses upgrade the security-critical post-conditions on
+/// `nix_escape` and `sanitize_nix_attr_key` from "probably correct on
+/// 2 000 random samples" (proptest) to "provably correct for **all**
+/// ASCII inputs up to `MAX_INPUT_LEN` bytes". A miscompilation here
+/// would let a malicious VM name execute arbitrary Nix code at
+/// evaluation time, so an exhaustive proof — even a bounded one — is
+/// worth significantly more than random sampling.
+///
+/// The module is gated on `#[cfg(kani)]` so it compiles only when
+/// invoked via `cargo kani`. Under stable rustc (`cargo build`,
+/// `cargo test`, `cargo clippy`) it is not part of the build at all.
+///
+/// To run:
+/// ```text
+/// cargo install --locked kani-verifier
+/// cargo kani setup
+/// cargo kani -p kcore-controller
+/// ```
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Maximum input length we exhaustively check. Kani's runtime grows
+    /// quickly with this bound; 8 bytes is enough to cover every
+    /// interesting alignment of the security-relevant tokens (`\`, `"`,
+    /// `${`) while staying tractable. Increase locally to gain
+    /// confidence on larger inputs.
+    const MAX_INPUT_LEN: usize = 8;
+
+    /// Returns true iff `s`, when wrapped in `"…"`, is safe to embed in
+    /// a Nix double-quoted string literal: no unescaped `"`, no
+    /// unescaped `\`, and no unescaped `${` interpolation marker.
+    ///
+    /// Self-contained copy of the proptest oracle so the Kani PR can
+    /// land independently of any proptest work.
+    fn is_safely_escaped(s: &str) -> bool {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' => {
+                    if i + 1 >= bytes.len() {
+                        return false;
+                    }
+                    i += 2;
+                    continue;
+                }
+                b'"' => return false,
+                b'$' if bytes.get(i + 1) == Some(&b'{') => return false,
+                _ => i += 1,
+            }
+        }
+        true
+    }
+
+    /// Produce a non-deterministic ASCII string of length ≤
+    /// `MAX_INPUT_LEN` for use in a Kani proof. Restricting to ASCII
+    /// keeps the model small while still covering every byte that can
+    /// appear in Nix's escape alphabet (`\`, `"`, `$`, `{`); non-ASCII
+    /// bytes go through `_ =>` in `nix_escape` exactly like any
+    /// printable ASCII byte.
+    fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_INPUT_LEN);
+        for slot in buf.iter_mut() {
+            let b: u8 = kani::any();
+            kani::assume(b < 128);
+            *slot = b;
+        }
+        // SAFETY: every byte was constrained to < 128, so the slice is
+        // valid UTF-8.
+        std::str::from_utf8(&buf[..len]).unwrap()
+    }
+
+    /// `nix_escape` never panics for any ASCII input up to
+    /// `MAX_INPUT_LEN` bytes.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn nix_escape_never_panics() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let _ = nix_escape(s);
+    }
+
+    /// **Soundness**: `nix_escape` output is always safe to embed in a
+    /// Nix double-quoted string literal. This is the security-critical
+    /// post-condition the entire Nix-rendering pipeline relies on.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn nix_escape_output_is_always_safe() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let escaped = nix_escape(s);
+        assert!(is_safely_escaped(&escaped));
+    }
+
+    /// `sanitize_nix_attr_key` produces exactly one output character
+    /// per input character (each character is either kept or replaced
+    /// by a single `-`).
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn sanitize_nix_attr_key_preserves_char_count() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let out = sanitize_nix_attr_key(s);
+        assert!(out.chars().count() == s.chars().count());
+    }
+
+    /// `sanitize_nix_attr_key` only ever emits characters in
+    /// `[A-Za-z0-9_-]`. This guarantees the result is a syntactically
+    /// valid Nix attribute key for any input.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn sanitize_nix_attr_key_charset() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let out = sanitize_nix_attr_key(s);
+        for c in out.chars() {
+            assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        }
+    }
+}

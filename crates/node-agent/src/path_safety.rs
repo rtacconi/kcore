@@ -166,3 +166,70 @@ mod tests {
         assert_eq!(p, Path::new("/var/lib/kcore/images/debian.qcow2"));
     }
 }
+
+/// Bounded model-checking proofs (Phase 2 — Kani).
+///
+/// `validate_safe_segment` and `validate_path_under_root` are the
+/// last line of defence between an RPC payload and an actual
+/// filesystem operation on the node. We want exhaustive (within
+/// bounds) guarantees that they never panic and never accept a
+/// segment containing a separator, NUL, or `..`.
+///
+/// To run:
+/// ```text
+/// cargo install --locked kani-verifier
+/// cargo kani setup
+/// cargo kani -p kcore-node-agent
+/// ```
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    /// Maximum input length we exhaustively check. Kept small so each
+    /// proof finishes in seconds; long enough to cover every interesting
+    /// alignment of `/`, `\`, `.`, `\0`, and leading `-`.
+    const MAX_INPUT_LEN: usize = 8;
+
+    fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_INPUT_LEN);
+        for slot in buf.iter_mut() {
+            let b: u8 = kani::any();
+            kani::assume(b < 128);
+            *slot = b;
+        }
+        // SAFETY: every byte was constrained to < 128, so the slice is
+        // valid UTF-8.
+        std::str::from_utf8(&buf[..len]).unwrap()
+    }
+
+    /// `validate_safe_segment` never panics on any ASCII input up to
+    /// `MAX_INPUT_LEN` bytes.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn segment_validation_never_panics() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        let _ = validate_safe_segment(s, "f");
+    }
+
+    /// **Soundness**: any segment `validate_safe_segment` accepts is
+    /// non-empty after trimming, contains no NUL byte, no path
+    /// separator (`/` or `\`), is not `.` or `..`, and does not start
+    /// with `-`.
+    #[kani::proof]
+    #[kani::unwind(17)]
+    fn segment_acceptance_implies_safe() {
+        let mut buf = [0u8; MAX_INPUT_LEN];
+        let s = any_ascii_str(&mut buf);
+        if let Ok(out) = validate_safe_segment(s, "f") {
+            assert!(!out.is_empty());
+            assert!(!out.contains('\0'));
+            assert!(!out.contains('/'));
+            assert!(!out.contains('\\'));
+            assert!(out != "." && out != "..");
+            assert!(!out.starts_with('-'));
+            assert!(out.len() <= MAX_SAFE_SEGMENT_LEN);
+        }
+    }
+}

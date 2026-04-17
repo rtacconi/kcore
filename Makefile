@@ -1,4 +1,4 @@
-.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace test-replication-soak coverage test-controller test-node-agent test-kctl test-rust-filter loc iso iso-remote kctl clean install-hooks help
+.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace test-replication-soak coverage test-controller test-node-agent test-kctl test-rust-filter loc iso iso-remote kctl clean install-hooks kani help
 
 VERSION := $(shell cat VERSION)
 V ?= v$(VERSION)
@@ -51,6 +51,15 @@ test-tla-trace:
 
 test-replication-soak:
 	bash ./scripts/soak-replication.sh
+
+kani:
+	@command -v cargo-kani >/dev/null 2>&1 || { \
+		echo "cargo-kani not installed."; \
+		echo "Install with:  cargo install --locked kani-verifier && cargo kani setup"; \
+		exit 1; \
+	}
+	cargo kani -p kcore-controller
+	cargo kani -p kcore-kctl
 
 coverage:
 	nix develop -c nix shell nixpkgs#cargo-llvm-cov nixpkgs#cargo nixpkgs#rustc nixpkgs#llvmPackages_21.llvm -c sh -lc 'LLVM_COV="$$(which llvm-cov)" LLVM_PROFDATA="$$(which llvm-profdata)" cargo llvm-cov --workspace --summary-only'
@@ -120,6 +129,7 @@ help:
 	@echo "  test-tla    Run bounded TLC model checks in specs/tla"
 	@echo "  test-tla-trace  Run replication trace drift checker"
 	@echo "  test-replication-soak  Run bounded replication resilience soak harness"
+	@echo "  kani        Run Kani bounded model-checking proofs (requires cargo-kani)"
 	@echo "  coverage    Run test coverage via nix develop + cargo-llvm-cov"
 	@echo "  test-controller  Run controller crate tests"
 	@echo "  test-node-agent  Run node-agent crate tests"

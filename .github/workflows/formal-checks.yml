@@ -53,3 +53,27 @@ jobs:
             echo "::error::TLC unavailable and tla2tools.jar could not be downloaded."
             exit 1
           fi
+
+  kani:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install protobuf compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler
+
+      - name: Install Kani
+        uses: model-checking/kani-github-action@v1.1
+
+      - name: Run bounded Kani proofs (controller)
+        run: cargo kani -p kcore-controller
+
+      - name: Run bounded Kani proofs (kctl)
+        run: cargo kani -p kcore-kctl

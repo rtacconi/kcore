@@ -6,3 +6,9 @@ members = [
     "crates/dashboard",
 ]
 resolver = "2"
+
+# Declare `cfg(kani)` so rustc does not emit `unexpected_cfgs` warnings for
+# Kani proof modules (`#[cfg(kani)]`) when building under stable rustc.
+# Kani's own toolchain sets the cfg automatically when running `cargo kani`.
+[workspace.lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
