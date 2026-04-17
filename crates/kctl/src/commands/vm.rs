@@ -962,10 +962,35 @@ fn parse_vm_manifest(path: &str) -> Result<VmManifest> {
         .unwrap_or("unnamed")
         .to_string();
 
-    let cpu = doc["spec"]["cpu"].as_i64().unwrap_or(2) as i32;
+    let cpu_raw = doc["spec"]["cpu"].as_i64().unwrap_or(2);
+    if cpu_raw <= 0 {
+        bail!("spec.cpu must be > 0 (got {cpu_raw})");
+    }
+    if cpu_raw > i32::MAX as i64 {
+        bail!("spec.cpu is too large: {cpu_raw}");
+    }
+    let cpu = cpu_raw as i32;
 
-    let mem_str = doc["spec"]["memoryBytes"].as_str().unwrap_or("2G");
-    let memory_bytes = client::parse_size_bytes(mem_str).map_err(|e| anyhow::anyhow!(e))?;
+    // Accept memoryBytes as either a human-readable string ("2G", "512M")
+    // OR a raw integer count of bytes — Kubernetes-style manifests are
+    // commonly checked into source control as plain integers, and the
+    // previous `as_str().unwrap_or("2G")` silently dropped integer values
+    // and used the 2G default, sizing every VM at 2G regardless of intent.
+    let mem_node = &doc["spec"]["memoryBytes"];
+    let memory_bytes = if let Some(n) = mem_node.as_i64() {
+        n
+    } else if let Some(n) = mem_node.as_u64() {
+        i64::try_from(n).map_err(|_| anyhow::anyhow!("spec.memoryBytes is too large: {n}"))?
+    } else if let Some(s) = mem_node.as_str() {
+        client::parse_size_bytes(s).map_err(|e| anyhow::anyhow!(e))?
+    } else if mem_node.is_null() {
+        client::parse_size_bytes("2G").map_err(|e| anyhow::anyhow!(e))?
+    } else {
+        bail!("spec.memoryBytes must be an integer or a size string (e.g. \"2G\")");
+    };
+    if memory_bytes <= 0 {
+        bail!("spec.memoryBytes must be > 0 (got {memory_bytes})");
+    }
 
     let nics = doc["spec"]["nics"]
         .as_sequence()
@@ -1462,6 +1487,111 @@ spec:
         assert!(
             msg.contains("invalid spec.desiredState"),
             "unexpected error: {msg}"
+        );
+    }
+
+    #[test]
+    fn parse_vm_manifest_accepts_memory_bytes_as_integer() {
+        // Regression: `as_str().unwrap_or("2G")` used to silently drop a
+        // numeric memoryBytes and size every VM at 2G, with no warning.
+        let path = std::env::temp_dir().join("kctl-test-vm-mem-int.yaml");
+        std::fs::write(
+            &path,
+            r#"
+kind: VM
+metadata:
+  name: int-mem
+spec:
+  cpu: 2
+  memoryBytes: 8589934592
+  nics:
+    - network: default
+"#,
+        )
+        .unwrap();
+        let m = parse_vm_manifest(path.to_str().unwrap()).unwrap();
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(
+            m.memory_bytes, 8_589_934_592,
+            "8 GiB integer must round-trip"
+        );
+    }
+
+    #[test]
+    fn parse_vm_manifest_rejects_zero_cpu() {
+        let path = std::env::temp_dir().join("kctl-test-vm-cpu-zero.yaml");
+        std::fs::write(
+            &path,
+            r#"
+kind: VM
+metadata:
+  name: bad
+spec:
+  cpu: 0
+  memoryBytes: "1G"
+"#,
+        )
+        .unwrap();
+        let result = parse_vm_manifest(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("cpu: 0 must be rejected client-side"),
+        };
+        assert!(
+            err.to_string().contains("spec.cpu must be > 0"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_vm_manifest_rejects_zero_memory() {
+        let path = std::env::temp_dir().join("kctl-test-vm-mem-zero.yaml");
+        std::fs::write(
+            &path,
+            r#"
+kind: VM
+metadata:
+  name: bad
+spec:
+  cpu: 1
+  memoryBytes: 0
+"#,
+        )
+        .unwrap();
+        let result = parse_vm_manifest(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        let err = match result {
+            Err(e) => e,
+            Ok(_) => panic!("memoryBytes: 0 must be rejected client-side"),
+        };
+        assert!(
+            err.to_string().contains("spec.memoryBytes must be > 0"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_vm_manifest_rejects_non_scalar_memory() {
+        let path = std::env::temp_dir().join("kctl-test-vm-mem-bad.yaml");
+        std::fs::write(
+            &path,
+            r#"
+kind: VM
+metadata:
+  name: bad
+spec:
+  cpu: 1
+  memoryBytes:
+    nested: 1
+"#,
+        )
+        .unwrap();
+        let result = parse_vm_manifest(path.to_str().unwrap());
+        let _ = std::fs::remove_file(&path);
+        assert!(
+            result.is_err(),
+            "mapping memoryBytes must be rejected, not silently coerced"
         );
     }
 

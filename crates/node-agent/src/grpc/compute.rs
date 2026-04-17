@@ -223,17 +223,23 @@ impl proto::node_compute_server::NodeCompute for ComputeService {
             return Err(Status::invalid_argument("name is required"));
         }
 
+        // Two accepted forms:
+        //   * absolute path that already lives under the image root
+        //     (validated component-by-component to defeat `..` escape), or
+        //   * a single safe filename segment (joined under the image root).
+        // Bare `starts_with` is NOT enough: a relative `name = "../foo"`
+        // resolves to `/var/lib/kcore/images/../foo` which lexically
+        // begins with the root but escapes it on the filesystem.
+        const IMAGE_ROOT: &str = "/var/lib/kcore/images";
+        let root = std::path::Path::new(IMAGE_ROOT);
         let path = if name.starts_with('/') {
-            std::path::PathBuf::from(name)
+            crate::path_safety::validate_path_under_root(name, root, "name")
+                .map_err(Status::invalid_argument)?
         } else {
-            std::path::PathBuf::from("/var/lib/kcore/images").join(name)
+            let safe = crate::path_safety::validate_safe_segment(name, "name")
+                .map_err(Status::invalid_argument)?;
+            root.join(safe)
         };
-
-        if !path.starts_with("/var/lib/kcore/images") {
-            return Err(Status::invalid_argument(
-                "image path must be under /var/lib/kcore/images",
-            ));
-        }
 
         if !path.exists() {
             return Err(Status::not_found(format!(

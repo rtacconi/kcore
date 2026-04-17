@@ -271,7 +271,12 @@ pub fn resolve_controller(
             });
         }
         // Try to resolve certs from config context if available.
-        let config = load_config(config_path).unwrap_or_default();
+        // `unwrap_or_default()` would silently treat a corrupt config as
+        // "no contexts" and then bail with the misleading "no TLS
+        // credentials" error below — operators would think their cluster
+        // was missing certs when really their config file was unreadable.
+        let config = load_config(config_path)
+            .map_err(|e| format!("loading config at {}: {e:#}", config_path.display()))?;
         let ctx = config.current_context().ok();
         let (cert_pem, key_pem, ca_pem, cert, key, ca) = if let Some(ctx) = ctx {
             resolve_tls_fields(ctx)?
@@ -416,7 +421,13 @@ pub fn resolve_node(
         .as_deref()
         .ok_or("--node flag is required for this command")?;
 
-    let cfg = load_config(config_path).unwrap_or_default();
+    // Don't silently fall back to "no contexts" when the file exists but
+    // fails to parse — TLS material from disk would be ignored and the
+    // caller might silently connect insecurely. `load_config` already
+    // returns `Ok(Config::default())` when the file simply does not exist,
+    // so any `Err` here is a real parse / I/O failure worth surfacing.
+    let cfg = load_config(config_path)
+        .map_err(|e| format!("loading config at {}: {e:#}", config_path.display()))?;
     let ctx = cfg.current_context().ok();
 
     let is_insecure = insecure_flag || ctx.map(|c| c.insecure).unwrap_or(false);
@@ -494,6 +505,43 @@ mod tests {
             Ok(_) => panic!("expected missing --node error"),
             Err(err) => assert!(err.contains("--node flag is required")),
         }
+    }
+
+    #[test]
+    fn resolve_node_surfaces_corrupt_config_instead_of_silently_dropping_creds() {
+        // Regression: a corrupt config file used to be flattened to an empty
+        // Config (so TLS material from the file was silently dropped). The
+        // operator would either connect insecurely or get a confusing
+        // "no TLS credentials" error instead of "your config is corrupt".
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        std::fs::write(&config_path, "}{this is not yaml").expect("write broken config");
+
+        let err = resolve_node(
+            &config_path,
+            &Some("10.0.0.21".into()),
+            true, // even with insecure flag, we still must reject a corrupt config
+            None,
+        )
+        .expect_err("must surface parse error");
+        assert!(
+            err.contains("loading config"),
+            "should mention the load failure, got: {err}"
+        );
+    }
+
+    #[test]
+    fn resolve_controller_surfaces_corrupt_config_instead_of_no_tls_message() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        std::fs::write(&config_path, "}{this is not yaml").expect("write broken config");
+
+        let err = resolve_controller(&config_path, &["192.168.1.1".into()], false, None)
+            .expect_err("must surface parse error");
+        assert!(
+            err.contains("loading config"),
+            "should mention the load failure, got: {err}"
+        );
     }
 
     #[test]

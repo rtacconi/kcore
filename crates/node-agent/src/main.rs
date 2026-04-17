@@ -6,6 +6,7 @@ mod auth;
 mod config;
 mod discovery;
 mod grpc;
+mod path_safety;
 mod registration;
 mod runtime;
 mod storage;

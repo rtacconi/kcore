@@ -322,28 +322,50 @@ pub async fn node_container_client(
 }
 
 /// Parse a human-readable size string (e.g. "4G", "8192M", "1T") into bytes.
+///
+/// Only integer quantities are accepted. Decimal values like `"1.5G"` are
+/// rejected with a clear error rather than silently parsed as `1` plus a
+/// nonsense unit (`".5g"`), which is what the previous greedy split did.
 pub fn parse_size_bytes(s: &str) -> Result<i64, String> {
     let s = s.trim();
     if s.is_empty() {
         return Err("empty size string".to_string());
     }
 
-    let (num_part, unit) = s.split_at(s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len()));
+    let split_at = s.find(|c: char| !c.is_ascii_digit()).unwrap_or(s.len());
+    let (num_part, unit) = s.split_at(split_at);
+
+    if num_part.is_empty() {
+        return Err(format!("missing numeric value in {s:?}"));
+    }
+    // Reject decimals up front. The previous split-on-first-non-digit
+    // would silently slice "1.5G" into ("1", ".5g") and then fail with a
+    // confusing "unknown unit: .5g" message that hid the real mistake.
+    if unit.starts_with('.') {
+        return Err(format!(
+            "decimal sizes are not supported (got {s:?}); use an integer in a smaller unit, e.g. 1500M"
+        ));
+    }
 
     let value: i64 = num_part
         .parse()
         .map_err(|_| format!("invalid number: {num_part}"))?;
+    if value < 0 {
+        return Err(format!("size must be non-negative, got {value}"));
+    }
 
-    let multiplier: i64 = match unit.to_lowercase().as_str() {
+    let multiplier: i64 = match unit.trim().to_lowercase().as_str() {
         "" | "b" => 1,
         "k" | "kb" | "kib" => 1024,
         "m" | "mb" | "mib" => 1024 * 1024,
         "g" | "gb" | "gib" => 1024 * 1024 * 1024,
-        "t" | "tb" | "tib" => 1024 * 1024 * 1024 * 1024,
+        "t" | "tb" | "tib" => 1024i64 * 1024 * 1024 * 1024,
         other => return Err(format!("unknown unit: {other}")),
     };
 
-    Ok(value * multiplier)
+    value
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("size {s:?} overflows i64"))
 }
 
 pub fn format_bytes(bytes: i64) -> String {
@@ -360,6 +382,91 @@ pub fn format_bytes(bytes: i64) -> String {
         value /= 1024.0;
     }
     format!("{value:.1} PB")
+}
+
+#[cfg(test)]
+mod size_tests {
+    use super::{format_bytes, parse_size_bytes};
+
+    #[test]
+    fn parse_size_bytes_basic_units() {
+        assert_eq!(parse_size_bytes("0").unwrap(), 0);
+        assert_eq!(parse_size_bytes("0b").unwrap(), 0);
+        assert_eq!(parse_size_bytes("512").unwrap(), 512);
+        assert_eq!(parse_size_bytes("1K").unwrap(), 1024);
+        assert_eq!(parse_size_bytes("1KB").unwrap(), 1024);
+        assert_eq!(parse_size_bytes("1KiB").unwrap(), 1024);
+        assert_eq!(parse_size_bytes("4M").unwrap(), 4 * 1024 * 1024);
+        assert_eq!(parse_size_bytes("8G").unwrap(), 8i64 * 1024 * 1024 * 1024);
+        assert_eq!(
+            parse_size_bytes("1T").unwrap(),
+            1024i64 * 1024 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn parse_size_bytes_is_case_insensitive_and_trims() {
+        assert_eq!(parse_size_bytes(" 4g ").unwrap(), 4i64 * 1024 * 1024 * 1024);
+        assert_eq!(
+            parse_size_bytes("16Gb").unwrap(),
+            16i64 * 1024 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn parse_size_bytes_rejects_decimals_with_clear_message() {
+        // Regression: the old greedy split sliced "1.5G" into ("1", ".5g")
+        // and failed with "unknown unit: .5g" — operators couldn't tell
+        // whether the unit or the number was wrong.
+        let err = parse_size_bytes("1.5G").expect_err("decimals must be rejected");
+        assert!(
+            err.contains("decimal sizes are not supported"),
+            "should explain decimals are not supported, got: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_size_bytes_rejects_unknown_unit() {
+        let err = parse_size_bytes("4Q").expect_err("unknown unit");
+        assert!(err.contains("unknown unit"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_size_bytes_rejects_empty_and_whitespace() {
+        assert!(parse_size_bytes("").is_err());
+        assert!(parse_size_bytes("   ").is_err());
+    }
+
+    #[test]
+    fn parse_size_bytes_rejects_missing_number() {
+        let err = parse_size_bytes("MB").expect_err("number required");
+        assert!(err.contains("missing numeric value"), "got: {err}");
+    }
+
+    #[test]
+    fn parse_size_bytes_rejects_overflow() {
+        // 10 EiB-worth of GiB will overflow i64 multiplication.
+        let err = parse_size_bytes("99999999999G").expect_err("must overflow");
+        assert!(err.contains("overflow"), "got: {err}");
+    }
+
+    #[test]
+    fn format_bytes_renders_human_units() {
+        assert_eq!(format_bytes(0), "0 B");
+        assert_eq!(format_bytes(512), "512 B");
+        assert_eq!(format_bytes(1024), "1 KB");
+        assert_eq!(format_bytes(1536), "1.5 KB");
+        assert_eq!(format_bytes(1024 * 1024), "1 MB");
+        assert_eq!(format_bytes(1024 * 1024 * 1024), "1 GB");
+        assert_eq!(format_bytes(1024i64 * 1024 * 1024 * 1024), "1 TB");
+    }
+
+    #[test]
+    fn format_bytes_falls_through_to_pb() {
+        let pb = 1024i64 * 1024 * 1024 * 1024 * 1024;
+        let s = format_bytes(pb);
+        assert!(s.ends_with("PB"), "expected PB suffix, got {s}");
+    }
 }
 
 #[cfg(test)]

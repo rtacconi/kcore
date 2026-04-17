@@ -500,12 +500,14 @@ fn vms_table(data: VmsPageDto) -> impl IntoView {
 }
 
 fn vm_row(vm: VmRowDto) -> impl IntoView {
-    let badge_class = if vm.state == "Running" {
-        "badge badge-run"
-    } else if vm.state == "Error" {
-        "badge badge-warn"
-    } else {
-        "badge badge-stop"
+    // `Paused` used to fall through to the `badge-stop` arm and look the
+    // same as a halted VM, hiding suspend state. Map it to the "warn"
+    // visual so operators can immediately tell the workload is suspended.
+    let badge_class = match vm.state.as_str() {
+        "Running" => "badge badge-run",
+        "Error" => "badge badge-warn",
+        "Paused" => "badge badge-warn",
+        _ => "badge badge-stop",
     };
     view! {
         <tr>

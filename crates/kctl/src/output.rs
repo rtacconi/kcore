@@ -345,7 +345,11 @@ pub fn print_compliance_report(r: &controller_proto::GetComplianceReportResponse
 
 fn section(title: &str, standards: &[&str]) {
     let tags = format!("[{}]", standards.join(", "));
-    println!("\n--- {title} ---{tags:>width$}", width = 60 - title.len());
+    // `60 - title.len()` underflows (and panics in debug builds) when a
+    // future caller passes a long title; use saturating subtraction so the
+    // formatter just collapses the padding to zero instead.
+    let width = 60usize.saturating_sub(title.len());
+    println!("\n--- {title} ---{tags:>width$}", width = width);
 }
 
 fn field(label: &str, value: &str) {
@@ -415,5 +419,44 @@ fn storage_backend_str(value: i32) -> &'static str {
         controller_proto::StorageBackendType::Lvm => "lvm",
         controller_proto::StorageBackendType::Zfs => "zfs",
         controller_proto::StorageBackendType::Unspecified => "unspecified",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{days_to_ymd, is_leap};
+
+    #[test]
+    fn epoch_is_1970_01_01() {
+        assert_eq!(days_to_ymd(0), (1970, 1, 1));
+    }
+
+    #[test]
+    fn known_dates_round_trip() {
+        // 2000-01-01 is exactly 10957 days after 1970-01-01.
+        assert_eq!(days_to_ymd(10957), (2000, 1, 1));
+        // 2024-02-29 is exactly 19782 days after the epoch.
+        assert_eq!(days_to_ymd(19782), (2024, 2, 29));
+        // 2024-03-01 is the day after.
+        assert_eq!(days_to_ymd(19783), (2024, 3, 1));
+        // 2025-01-01 (the year *after* a leap year).
+        assert_eq!(days_to_ymd(20089), (2025, 1, 1));
+    }
+
+    #[test]
+    fn leap_year_rules() {
+        assert!(is_leap(2000)); // divisible by 400
+        assert!(is_leap(2024)); // divisible by 4, not by 100
+        assert!(!is_leap(1900)); // divisible by 100 but not 400
+        assert!(!is_leap(2023));
+    }
+
+    #[test]
+    fn section_does_not_panic_with_long_title() {
+        // Regression: `60 - title.len()` used to underflow `usize` and
+        // either panic in debug builds or render garbage in release.
+        // We can't capture stdout cheaply here, but invoking the function
+        // is enough — the panic would fail the test.
+        super::section(&"a".repeat(80), &["SOC2", "HIPAA"]);
     }
 }

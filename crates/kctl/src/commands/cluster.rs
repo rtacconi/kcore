@@ -97,7 +97,18 @@ pub fn create(
     let cert_pem = std::fs::read_to_string(&pki_paths.kctl_cert)?;
     let key_pem = std::fs::read_to_string(&pki_paths.kctl_key)?;
 
-    let mut cfg = config::load_config(config_path).unwrap_or_default();
+    // CRITICAL: Never use `unwrap_or_default()` here. `load_config` only
+    // returns `Ok(Config::default())` when the file does not exist; if the
+    // file exists but fails to parse (corrupt YAML, unsupported merge keys,
+    // permission error), an `_or_default()` would silently replace the user's
+    // entire kubeconfig with an empty one and immediately overwrite it on
+    // disk in `save_config()` — wiping every other context.
+    let mut cfg = config::load_config(config_path).with_context(|| {
+        format!(
+            "loading existing config at {} (refusing to overwrite a config that failed to parse)",
+            config_path.display()
+        )
+    })?;
     cfg.contexts.insert(
         context_name.to_string(),
         Context {
@@ -265,6 +276,34 @@ mod tests {
 
         let cfg = config::load_config(&config_path).expect("load config");
         assert!(cfg.contexts.contains_key("testctx"));
+    }
+
+    #[test]
+    fn create_refuses_when_existing_config_is_unparseable() {
+        // Regression: a corrupt config file used to be silently treated as
+        // an empty Config, then overwritten by `save_config` — wiping every
+        // pre-existing context. The fix is to fail loudly so the operator
+        // can repair (or back up) the file before continuing.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let config_path = temp.path().join("config.yaml");
+        let certs_dir = temp.path().join("certs");
+
+        std::fs::write(&config_path, "this: is: not valid: yaml: at all\n  - [\n")
+            .expect("write broken config");
+
+        let err = create(&config_path, "127.0.0.1:9090", &certs_dir, "fresh", true)
+            .expect_err("must refuse to overwrite a corrupt config");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("loading existing config"),
+            "should mention the load failure: {msg}"
+        );
+
+        let on_disk = std::fs::read_to_string(&config_path).expect("file must still exist");
+        assert!(
+            on_disk.contains("not valid"),
+            "the corrupt config must be left untouched, got: {on_disk}"
+        );
     }
 
     #[test]

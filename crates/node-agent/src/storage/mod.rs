@@ -210,11 +210,44 @@ impl StorageAdapter for FilesystemAdapter {
     }
 
     fn delete_volume(&self, backend_handle: &str) -> Result<(), StorageError> {
-        let path = PathBuf::from(backend_handle.trim());
+        // CRITICAL: a bare `Path::starts_with` is purely lexical, so a
+        // handle like "/var/lib/kcore/volumes/filesystem/../../etc/passwd"
+        // would still pass the prefix check while resolving outside the
+        // volume root. Walk components and refuse any ParentDir to defeat
+        // the traversal.
+        let raw = backend_handle.trim();
+        if raw.is_empty() {
+            return Err(StorageError::new(
+                ErrorKind::InvalidArgument,
+                "backend_handle is required",
+            ));
+        }
+        if raw.contains('\0') {
+            return Err(StorageError::new(
+                ErrorKind::InvalidArgument,
+                "backend_handle must not contain NUL bytes",
+            ));
+        }
+        let path = PathBuf::from(raw);
+        if !path.is_absolute() {
+            return Err(StorageError::new(
+                ErrorKind::InvalidArgument,
+                "backend_handle must be an absolute path",
+            ));
+        }
         if !path.starts_with(&self.volume_dir) {
             return Err(StorageError::new(
                 ErrorKind::InvalidArgument,
                 format!("backend_handle must be under {}", self.volume_dir.display()),
+            ));
+        }
+        if path
+            .components()
+            .any(|c| matches!(c, std::path::Component::ParentDir))
+        {
+            return Err(StorageError::new(
+                ErrorKind::InvalidArgument,
+                "backend_handle must not contain '..' segments",
             ));
         }
         std::fs::remove_file(&path).map_err(|e| {
@@ -1069,6 +1102,48 @@ mod tests {
     fn destination_path_must_stay_under_cache_dir() {
         let cache = PathBuf::from("/var/lib/kcore/images");
         let err = validate_destination_path("/tmp/bad.raw", &cache).expect_err("must fail");
+        assert!(matches!(err.kind, ErrorKind::InvalidArgument));
+    }
+
+    #[test]
+    fn filesystem_delete_volume_rejects_dotdot_traversal() {
+        // Regression: a handle whose lexical prefix is `volume_dir` but
+        // contains `..` segments used to pass `Path::starts_with` and
+        // delete files outside the volume root. Confirm we now reject
+        // both relative and traversal handles before touching disk.
+        let temp = tempfile::tempdir().expect("tempdir");
+        let image_dir = temp.path().join("images");
+        let volume_dir = temp.path().join("volumes");
+        std::fs::create_dir_all(&volume_dir).expect("mkdir volumes");
+        let adapter = FilesystemAdapter::new(
+            volume_dir.display().to_string(),
+            image_dir.display().to_string(),
+        );
+
+        let traversal = format!("{}/../etc/passwd", volume_dir.display());
+        let err = adapter
+            .delete_volume(&traversal)
+            .expect_err("traversal must be rejected");
+        assert!(matches!(err.kind, ErrorKind::InvalidArgument));
+        assert!(
+            err.message.contains("..") || err.message.contains("traversal"),
+            "should mention .., got: {}",
+            err.message
+        );
+
+        let err = adapter
+            .delete_volume("relative.raw")
+            .expect_err("relative path must be rejected");
+        assert!(matches!(err.kind, ErrorKind::InvalidArgument));
+
+        let err = adapter
+            .delete_volume("/etc/passwd")
+            .expect_err("path outside volume root must be rejected");
+        assert!(matches!(err.kind, ErrorKind::InvalidArgument));
+
+        let err = adapter
+            .delete_volume("/var/lib/kcore/volumes/with\0nul")
+            .expect_err("NUL must be rejected");
         assert!(matches!(err.kind, ErrorKind::InvalidArgument));
     }
 

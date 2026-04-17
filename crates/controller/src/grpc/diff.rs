@@ -384,11 +384,16 @@ fn rules_match(
     if stored.len() != incoming.len() {
         return false;
     }
+    // Normalize protocol case on BOTH sides. The DB historically stored
+    // whatever case the original CreateSecurityGroup payload used, while
+    // the diff side already lower-cased the incoming spec — so a stored
+    // "TCP" vs incoming "tcp" used to look like a real change and trigger
+    // a spurious reconcile on every re-apply.
     let mut stored_keys: Vec<(String, i32, i32, String, String, bool)> = stored
         .iter()
         .map(|r| {
             (
-                r.protocol.clone(),
+                r.protocol.to_ascii_lowercase(),
                 r.host_port,
                 r.target_port,
                 r.source_cidr.clone(),
@@ -856,5 +861,30 @@ mod tests {
         };
         let diff = diff_security_group(&row, &rules, &apply);
         assert!(diff.mutable.contains(&"rules".to_string()));
+    }
+
+    #[test]
+    fn sg_rules_protocol_case_is_normalized_on_both_sides() {
+        // Regression: the diff used to lowercase the *incoming* protocol
+        // but compare it against the raw (possibly upper-case) stored
+        // protocol. Re-applying a manifest with `protocol: tcp` against
+        // a row that historically stored `TCP` reported a spurious
+        // `rules` mutation on every apply.
+        let row = sample_sg_row();
+        let mut stored = sample_sg_rule();
+        stored.protocol = "TCP".into();
+        let rules = vec![stored];
+        let mut incoming = sample_sg_proto_rule();
+        incoming.protocol = "tcp".into();
+        let incoming_rules = vec![incoming];
+        let apply = SecurityGroupApply {
+            description: "allow http",
+            rules: &incoming_rules,
+        };
+        let diff = diff_security_group(&row, &rules, &apply);
+        assert!(
+            diff.is_unchanged(),
+            "TCP vs tcp must compare equal, got {diff:?}"
+        );
     }
 }

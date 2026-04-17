@@ -70,7 +70,11 @@ impl<T> PageView<T> {
     }
 
     pub fn has_next(&self) -> bool {
-        (self.page as usize) * self.page_size < self.total
+        // Use saturating multiplication: a hostile/garbage `page` query
+        // string (large `u32`) used to overflow `usize` on 32-bit targets
+        // and panic in debug builds. Saturating to `usize::MAX` produces
+        // the correct answer ("no further page") for any pathological page.
+        (self.page as usize).saturating_mul(self.page_size) < self.total
     }
 }
 
@@ -154,5 +158,53 @@ mod tests {
         let p = paginate_by_name(items, |n| n.to_string(), 99, 10);
         assert!(p.items.is_empty());
         assert_eq!(p.total, 2);
+    }
+
+    #[test]
+    fn has_next_does_not_overflow_with_huge_page_query() {
+        // Regression: `page * page_size` used to overflow `usize` for large
+        // `page` values that come straight from the `?page=` query string.
+        let view: PageView<i32> = PageView {
+            items: vec![],
+            page: u32::MAX,
+            page_size: 10,
+            total: 100,
+        };
+        assert!(
+            !view.has_next(),
+            "no next page when we are far past the end"
+        );
+    }
+
+    #[test]
+    fn vm_state_paused_label() {
+        // Regression: state code 3 (Paused) used to be rendered with the
+        // same UI affordance as Stopped, which hid the fact that the VM
+        // was suspended rather than halted.
+        assert_eq!(vm_state_label(3), "Paused");
+    }
+
+    #[test]
+    fn bytes_human_tier_boundaries() {
+        // 0 / negative renders as "0".
+        assert_eq!(bytes_human(0), "0");
+        assert_eq!(bytes_human(-1), "0");
+        // KiB tier.
+        assert_eq!(bytes_human(1024), "1 KiB");
+        assert_eq!(bytes_human(1024 * 1023), "1023 KiB");
+        // MiB tier (>= 1 MiB).
+        assert_eq!(bytes_human(1024 * 1024), "1 MiB");
+        assert_eq!(bytes_human(8 * 1024 * 1024), "8 MiB");
+        // GiB tier (>= 1 GiB).
+        assert_eq!(bytes_human(1024i64 * 1024 * 1024), "1.0 GiB");
+        // TiB tier.
+        assert_eq!(bytes_human(1024i64 * 1024 * 1024 * 1024), "1.0 TiB");
+    }
+
+    #[test]
+    fn memory_mebibytes_handles_zero_and_negative() {
+        assert_eq!(memory_mebibytes(0), "0 MiB");
+        assert_eq!(memory_mebibytes(-1), "0 MiB");
+        assert!(memory_mebibytes(2 * 1024 * 1024).contains("2 MiB"));
     }
 }

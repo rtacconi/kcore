@@ -63,7 +63,35 @@ fn prepare_storage_mount(
             )))
         }
     };
-    let host_path = format!("{base}/{container_name}");
+    // CRITICAL: `container_name` is forwarded by the controller from the
+    // user manifest. Without sanitization a name like `../../etc` would
+    // make `create_dir_all` traverse out of the volumes root and create
+    // (or reuse!) directories anywhere on the host. Container names are
+    // single-segment identifiers, so reject anything with a separator.
+    let safe_name = crate::path_safety::validate_safe_segment(container_name, "container name")
+        .map_err(Status::invalid_argument)?;
+    let host_path = format!("{base}/{safe_name}");
+
+    // Validate the operator-supplied mount target inside the *container*:
+    // it must be an absolute path (containerd/runc rejects relative
+    // mount targets) and must not contain `\0`.
+    let target = if mount_target.trim().is_empty() {
+        "/data".to_string()
+    } else {
+        let t = mount_target.trim();
+        if t.contains('\0') {
+            return Err(Status::invalid_argument(
+                "mount_target must not contain NUL bytes",
+            ));
+        }
+        if !t.starts_with('/') {
+            return Err(Status::invalid_argument(
+                "mount_target must be an absolute path inside the container",
+            ));
+        }
+        t.to_string()
+    };
+
     std::fs::create_dir_all(&host_path).map_err(|e| {
         Status::internal(format!(
             "creating storage path for backend '{backend}' at {host_path}: {e}"
@@ -79,11 +107,6 @@ fn prepare_storage_mount(
         })?;
     }
 
-    let target = if mount_target.trim().is_empty() {
-        "/data".to_string()
-    } else {
-        mount_target.trim().to_string()
-    };
     Ok(Some((host_path, target)))
 }
 
@@ -313,5 +336,45 @@ mod tests {
         assert_eq!(parsed.name, "nginx-demo");
         assert_eq!(parsed.image, "nginx:alpine");
         assert_eq!(parsed.state, proto::ContainerState::Running as i32);
+    }
+
+    #[test]
+    fn prepare_storage_mount_rejects_path_traversal_in_container_name() {
+        // Regression: an attacker-controlled `container_name` like `../etc`
+        // used to be joined under /var/lib/kcore/volumes/<backend>/ as a
+        // raw string, so `create_dir_all` happily traversed out of the
+        // volumes root.
+        let err = prepare_storage_mount("../etc", "filesystem", 0, "")
+            .expect_err("must reject traversal");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let err = prepare_storage_mount("foo/bar", "filesystem", 0, "")
+            .expect_err("must reject path separator");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let err = prepare_storage_mount("", "filesystem", 0, "").expect_err("must reject empty");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+        let err =
+            prepare_storage_mount("foo\0bar", "filesystem", 0, "").expect_err("must reject NUL");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn prepare_storage_mount_rejects_relative_mount_target() {
+        let err = prepare_storage_mount("web", "filesystem", 0, "data")
+            .expect_err("relative mount target must be rejected");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[test]
+    fn prepare_storage_mount_returns_none_when_backend_empty() {
+        // Empty backend short-circuits before any filesystem work, so this
+        // is safe to run without a writable host root.
+        assert!(prepare_storage_mount("web", "", 0, "").unwrap().is_none());
+    }
+
+    #[test]
+    fn prepare_storage_mount_rejects_unknown_backend() {
+        let err = prepare_storage_mount("web", "btrfs", 0, "")
+            .expect_err("unknown backend must be rejected");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
     }
 }
