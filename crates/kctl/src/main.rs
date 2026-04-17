@@ -1418,32 +1418,47 @@ async fn main() {
         }
 
         Command::Apply { file, dry_run } => {
-            let local = if *dry_run {
-                false
-            } else {
-                commands::apply::is_local_manifest_kind(file)
-                    .unwrap_or_else(|e| fatal(&format!("{e:#}")))
-            };
-            if local {
-                let content =
-                    std::fs::read_to_string(file).unwrap_or_else(|e| fatal(&format!("{e}")));
-                let kind = commands::apply::detect_manifest_kind(&content)
-                    .unwrap_or_default()
-                    .to_ascii_lowercase();
-                let config_path = cli
-                    .config
-                    .clone()
-                    .unwrap_or_else(config::default_config_path);
-                match kind.as_str() {
-                    "cluster" => commands::cluster::create_from_manifest(file, &config_path),
-                    "nodeinstall" | "node-install" | "node_install" => {
+            // Read + parse the manifest exactly once, then dispatch on the
+            // classified kind. Cluster / NodeInstall manifests are bootstrap
+            // resources and must NEVER be routed through the controller path
+            // — including in `--dry-run`, where resolving a controller would
+            // fail spuriously even though the local handler is what we want
+            // to invoke.
+            let classified = commands::apply::classify_manifest(file)
+                .unwrap_or_else(|e| fatal(&format!("{e:#}")));
+            match classified.local {
+                Some(commands::apply::LocalManifestKind::Cluster) => {
+                    if *dry_run {
+                        println!("--- dry run ---");
+                        print!("{}", classified.content);
+                        println!("--- end ---");
+                        Ok(())
+                    } else {
+                        let config_path = cli
+                            .config
+                            .clone()
+                            .unwrap_or_else(config::default_config_path);
+                        commands::cluster::create_from_manifest(file, &config_path)
+                    }
+                }
+                Some(commands::apply::LocalManifestKind::NodeInstall) => {
+                    if *dry_run {
+                        println!("--- dry run ---");
+                        print!("{}", classified.content);
+                        println!("--- end ---");
+                        Ok(())
+                    } else {
+                        let config_path = cli
+                            .config
+                            .clone()
+                            .unwrap_or_else(config::default_config_path);
                         commands::node::install_from_manifest(file, &config_path).await
                     }
-                    other => fatal(&format!("unsupported local manifest kind: '{other}'")),
                 }
-            } else {
-                let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
-                commands::apply::apply(&info, file, *dry_run).await
+                None => {
+                    let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+                    commands::apply::apply(&info, file, *dry_run).await
+                }
             }
         }
 

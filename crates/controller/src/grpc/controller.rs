@@ -583,19 +583,24 @@ impl ControllerService {
         auto_start: bool,
     ) -> Result<i32, Status> {
         let node = self.resolve_node_for_vm(vm_id, target_node)?;
-        let vm_name = self
+        // Capture the original auto_start value so we can roll the DB back if
+        // the node-side push fails. Without this, an idempotent CreateVm/
+        // SetDesiredState that races with a node outage leaves the stored VM
+        // matching the manifest while the node never reconciled — the next
+        // apply returns UNCHANGED and silently swallows the failure.
+        let stored_vm = self
             .db
             .get_vm(vm_id)
             .map_err(|e| Status::internal(format!("fetching vm: {e}")))?
-            .map(|vm| vm.name)
             .or_else(|| {
                 self.db
                     .list_vms_for_node(&node.id)
                     .ok()
                     .and_then(|rows| rows.into_iter().find(|vm| vm.name == vm_id))
-                    .map(|vm| vm.name)
             })
             .ok_or_else(|| Status::not_found(format!("VM {vm_id} not found")))?;
+        let vm_name = stored_vm.name.clone();
+        let original_auto_start = stored_vm.auto_start;
         let updated = self
             .db
             .set_vm_auto_start(vm_id, auto_start)
@@ -603,7 +608,21 @@ impl ControllerService {
         if !updated {
             return Err(Status::not_found(format!("VM {vm_id} not found")));
         }
-        self.push_config_to_node(&node).await?;
+        if let Err(e) = self.push_config_to_node(&node).await {
+            // Roll back the desired_state mutation so retries see the stale
+            // spec and re-trigger the reconcile on the next CreateVm/Apply.
+            if original_auto_start != auto_start {
+                if let Err(rb) = self.db.set_vm_auto_start(vm_id, original_auto_start) {
+                    warn!(
+                        vm_id = %vm_id,
+                        node_id = %node.id,
+                        error = %rb,
+                        "failed to roll back vm auto_start after node push failure; DB may be inconsistent"
+                    );
+                }
+            }
+            return Err(e);
+        }
         let desired_state = if auto_start {
             node_proto::VmDesiredState::Running as i32
         } else {
@@ -669,6 +688,23 @@ impl ControllerService {
         let image_path_trim = req.image_path.trim();
         let cloud_init_trim = req.cloud_init_user_data.trim();
 
+        // Resolve incoming `target_node` (which may be a node id OR an
+        // address like "host:port") to its canonical node id before diffing.
+        // Without this, every re-apply that uses an address would trip the
+        // immutable check ("target_node": "host:port" != "node-abc"), even
+        // when the VM is sitting on exactly that node.
+        let target_node_trim = req.target_node.trim();
+        let resolved_target_node = if target_node_trim.is_empty() {
+            String::new()
+        } else {
+            self.db
+                .get_node_by_address(target_node_trim)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .or_else(|| self.db.get_node(target_node_trim).ok().flatten())
+                .map(|n| n.id)
+                .unwrap_or_else(|| target_node_trim.to_string())
+        };
+
         let apply = crate::grpc::diff::VmApply {
             spec: &spec,
             image_url: image_url_trim,
@@ -678,7 +714,7 @@ impl ControllerService {
             ssh_key_names: &req.ssh_key_names,
             storage_backend: &storage_backend_str,
             storage_size_bytes: req.storage_size_bytes,
-            target_node: req.target_node.trim(),
+            target_node: &resolved_target_node,
             target_dc: req.target_dc.trim(),
         };
         let diff = crate::grpc::diff::diff_vm(&stored, &stored_ssh, &apply);
@@ -6092,5 +6128,129 @@ mod tests {
             .expect_err("should reject empty cert");
 
         assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    /// Regression: a failing `push_config_to_node` during a desired-state
+    /// flip MUST roll the DB back to the original `auto_start`. Without
+    /// this, the next idempotent `CreateVm`/`SetDesiredState` would diff
+    /// against the already-flipped row, return UNCHANGED, and silently
+    /// swallow the unreconciled state.
+    #[tokio::test]
+    async fn set_vm_desired_state_rolls_back_db_when_push_fails() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+        let mut vm = test_vm(&node.id);
+        vm.auto_start = true;
+        db.insert_vm(&vm).expect("insert vm");
+
+        let push_count = Arc::new(AtomicUsize::new(0));
+        let count_clone = Arc::clone(&push_count);
+        let hook: PushHook = Arc::new(move |_n: &NodeRow| {
+            count_clone.fetch_add(1, Ordering::SeqCst);
+            Err(Status::internal("simulated push failure"))
+        });
+
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+
+        let req = controller_proto::SetVmDesiredStateRequest {
+            vm_id: "vm-1".to_string(),
+            desired_state: controller_proto::VmDesiredState::Stopped as i32,
+            target_node: node.id.clone(),
+        };
+
+        let err =
+            <ControllerService as controller_proto::controller_server::Controller>::set_vm_desired_state(
+                &svc,
+                Request::new(req),
+            )
+            .await
+            .expect_err("push failure must surface to caller");
+        assert_eq!(err.code(), tonic::Code::Internal);
+        assert_eq!(push_count.load(Ordering::SeqCst), 1);
+
+        let after = db.get_vm("vm-1").expect("get vm").expect("vm exists");
+        assert!(
+            after.auto_start,
+            "auto_start must roll back to original (true) when node push fails"
+        );
+    }
+
+    /// Regression: an idempotent `CreateVm` whose `target_node` was the
+    /// node *address* (e.g. `127.0.0.1:9091`) used to trip the immutable
+    /// "target_node" diff because the stored row holds the canonical
+    /// node id. Re-applying the same manifest must return UNCHANGED.
+    #[tokio::test]
+    async fn create_vm_upsert_resolves_target_node_address_to_canonical_id() {
+        let db = Database::open(":memory:").expect("open db");
+        let node = test_node();
+        db.upsert_node(&node).expect("insert node");
+
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+
+        let make_req = |target_node: String| controller_proto::CreateVmRequest {
+            target_node,
+            spec: Some(controller_proto::VmSpec {
+                id: String::new(),
+                name: "vm-addr".to_string(),
+                cpu: 1,
+                memory_bytes: 512 * 1024 * 1024,
+                disks: vec![],
+                nics: vec![],
+                storage_backend: String::new(),
+                storage_size_bytes: 0,
+                desired_state: controller_proto::VmDesiredState::Unspecified as i32,
+            }),
+            image_url: "https://example.com/debian.raw".to_string(),
+            image_sha256: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                .to_string(),
+            cloud_init_user_data: String::new(),
+            image_path: String::new(),
+            image_format: String::new(),
+            ssh_key_names: vec![],
+            storage_backend: controller_proto::StorageBackendType::Filesystem as i32,
+            storage_size_bytes: 8 * 1024 * 1024 * 1024,
+            target_dc: String::new(),
+        };
+
+        let first =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(make_req(node.id.clone())),
+            )
+            .await
+            .expect("first create succeeds")
+            .into_inner();
+        assert_eq!(first.action, controller_proto::ApplyAction::Created as i32);
+
+        // Re-apply the SAME spec, but address the node by its host:port
+        // instead of its node id. Before the fix this returned
+        // InvalidArgument for an "immutable target_node" change.
+        let second =
+            <ControllerService as controller_proto::controller_server::Controller>::create_vm(
+                &svc,
+                Request::new(make_req(node.address.clone())),
+            )
+            .await
+            .expect("re-apply by address must be UNCHANGED, not rejected")
+            .into_inner();
+        assert_eq!(
+            second.action,
+            controller_proto::ApplyAction::Unchanged as i32
+        );
+        assert!(second.changed_fields.is_empty());
     }
 }

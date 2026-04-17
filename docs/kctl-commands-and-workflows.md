@@ -233,7 +233,7 @@ unchanged VM 'web-01'
 
 | Kind              | Mutable                                   | Immutable (rejects with `InvalidArgument`)                                                                                 |
 | ----------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| **VM**            | `cpu`, `memoryBytes`, `desiredState`      | `disks`, `nics`, `storageBackend`, `storageSizeBytes`, `targetNode`, `targetDc`, `sshKeys`, `cloudInitUserData`, `image_*` |
+| **VM**            | `cpu`, `memoryBytes`, `desiredState`      | `disks`, `nics`, `storageBackend`, `storageSizeBytes`, `targetNode`, `sshKeys`, `cloudInitUserData`, `image_*`             |
 | **Container**     | `desiredState`                            | `image`, `command`, `network`, `env`, `ports`, `storageBackend`, `storageSizeBytes`, `mountTarget`                         |
 | **Network**       | — (all immutable in v1)                   | all fields                                                                                                                 |
 | **SshKey**        | — (public key immutable)                  | `publicKey`                                                                                                                |
@@ -243,6 +243,11 @@ Rationale: v1 rejects any change that would require rebuilding or recreating
 the resource, so reconciliation stays predictable and safe. Future versions can
 promote more fields to mutable as controlled rebuild paths are added. Today the
 remediation for an immutable change is always `kctl delete … && kctl create -f`.
+
+> Note: `targetDc` is **not** rejected by the diff today (the controller has
+> no per-VM DC field to compare against); placement is enforced once at
+> create time via the placement preflight. Treat changes to `targetDc` on
+> an existing VM as a no-op: the VM stays where it was originally placed.
 
 For **SecurityGroup** specifically, attachments are reconciled as a set:
 attachments listed in the manifest are added if missing, and attachments
