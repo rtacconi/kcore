@@ -20,19 +20,17 @@
 /// interpolation marker.
 pub fn nix_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'\\' => out.push_str("\\\\"),
-            b'"' => out.push_str("\\\""),
-            b'$' if bytes.get(i + 1) == Some(&b'{') => {
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '$' if chars.peek() == Some(&'{') => {
                 out.push_str("\\${");
-                i += 1;
+                chars.next();
             }
-            _ => out.push(bytes[i] as char),
+            _ => out.push(c),
         }
-        i += 1;
     }
     out
 }
@@ -208,6 +206,24 @@ mod tests {
         assert_eq!(nix_escape(r"a\b"), r"a\\b");
         assert_eq!(nix_escape("a${b}"), "a\\${b}");
         assert_eq!(nix_escape("plain"), "plain");
+    }
+
+    /// Regression: previously `nix_escape` iterated over `&[u8]` and
+    /// reconstructed each byte with `bytes[i] as char`, which corrupts
+    /// every multi-byte UTF-8 scalar (e.g. "café" → "cafÃ©", "🦀" →
+    /// four mojibake control bytes). Operator-supplied identifiers
+    /// (VM names, security-group names, datacentre labels) are valid
+    /// `&str` so they may legitimately contain non-ASCII; the Kani
+    /// proofs only feed ASCII input via `any_ascii_str`, so this case
+    /// must be covered by an explicit unit test.
+    #[test]
+    fn nix_escape_preserves_non_ascii_utf8() {
+        assert_eq!(nix_escape("café"), "café");
+        assert_eq!(nix_escape("naïve"), "naïve");
+        assert_eq!(nix_escape("café${x}"), "café\\${x}");
+        assert_eq!(nix_escape("🦀"), "🦀");
+        assert_eq!(nix_escape("🦀${rust}"), "🦀\\${rust}");
+        assert_eq!(nix_escape("日本語"), "日本語");
     }
 
     // ---- sanitize_nix_attr_key ----

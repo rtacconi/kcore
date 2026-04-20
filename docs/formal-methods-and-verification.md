@@ -272,6 +272,6 @@ All four phases are now landed. Each one is wired into CI (`make test`, `make ka
 **Next-iteration follow-ups (not blockers):**
 
 - Raise the Kani `MAX_INPUT_LEN` bound once we've measured CI runtime cost.
-- Add Kani harnesses for `validate_safe_segment` / `validate_path_under_root` once `crates/node-agent/src/path_safety.rs` lands.
+- Add a Kani harness for `validate_path_under_root` (its sibling `validate_safe_segment` is already proved in `crates/kcore-sanitize/src/lib.rs::kani_proofs`).
 - Extend Phase 3 proptests to cover replication outbox CRUD and security-group rule round-trips.
 - Add TLA+ invariants for the new compensation executor and replication reservations.
