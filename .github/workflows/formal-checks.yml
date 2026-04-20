@@ -58,9 +58,45 @@ jobs:
             exit 1
           fi
 
-  kani:
+  # Each harness in `crates/kcore-sanitize/src/lib.rs` is independent
+  # and runs as its own matrix shard on a dedicated runner. This:
+  #
+  #   - parallelises wall-clock across GHA runners (~9× speed-up vs
+  #     a single job running all harnesses sequentially);
+  #
+  #   - eliminates the OOM risk from `cargo kani --jobs N` (each
+  #     runner verifies one harness, so the 16 GB / 4 vCPU runner
+  #     never sees more than one CBMC process at a time);
+  #
+  #   - bounds the blast radius: a regression in one harness fails
+  #     just that shard rather than masking later harnesses behind
+  #     the failed one.
+  #
+  # All shards share the same Kani toolchain cache key (the
+  # toolchain is identical), so the first shard to finish install
+  # warms the cache for all the others on subsequent runs.
+  kani-shard:
+    name: kani-shard / ${{ matrix.harness }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    strategy:
+      # `fail-fast: false` lets all 9 harnesses report results even
+      # if one regresses; otherwise GHA cancels the rest and we lose
+      # signal on the others.
+      fail-fast: false
+      matrix:
+        # Fully-qualified harness paths from
+        # `crates/kcore-sanitize/src/lib.rs::kani_proofs`.
+        harness:
+          - kani_proofs::nix_escape_never_panics
+          - kani_proofs::nix_escape_output_is_always_safe
+          - kani_proofs::sanitize_nix_attr_key_preserves_char_count
+          - kani_proofs::sanitize_nix_attr_key_charset
+          - kani_proofs::dot_dot_check_never_panics
+          - kani_proofs::assert_safe_path_never_panics
+          - kani_proofs::assert_safe_path_acceptance_implies_safe
+          - kani_proofs::segment_validation_never_panics
+          - kani_proofs::segment_acceptance_implies_safe
     # Pinned kani-verifier version. Bumping this single env var
     # (here AND in the cache key below) is the only change needed
     # to roll forward; the install step honours it and the cache
@@ -83,8 +119,13 @@ jobs:
       # Caches ~/.cargo/registry, ~/.cargo/git and ./target so the
       # `cargo install --locked kani-verifier` step plus the per-crate
       # `cargo kani` invocations skip the full Rust build on warm runs.
+      # Sharded by matrix entry so each shard's `target/` cache stays
+      # independent (different harness names produce different build
+      # plans for `cargo kani`).
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: kani-${{ matrix.harness }}
 
       # Caches the Kani toolchain itself (CBMC + symex binaries +
       # ~/.kani layout). Cold install of kani-verifier from crates.io
@@ -94,13 +135,16 @@ jobs:
       #
       # IMPORTANT: we split the cache into separate `restore` and
       # `save` steps so the cache is written **even when the job
-      # fails** (`save` runs with `if: always()`). With the default
-      # combined `actions/cache@v4`, the cache is only persisted on
-      # job success — so a single failing proof or a timed-out step
-      # would force every retry to pay the full cold install cost
-      # again. With save-on-failure, the second iteration on the
-      # same `KANI_VERSION` hits the cache regardless of whether the
-      # previous run passed.
+      # fails**. With the default combined `actions/cache@v4`, the
+      # cache is only persisted on job success — so a single failing
+      # proof or a timed-out step would force every retry to pay the
+      # full cold install cost again.
+      #
+      # Cache key is intentionally SHARED across all matrix shards
+      # (it does NOT depend on `matrix.harness`): the Kani toolchain
+      # is identical for every harness, so the first shard to finish
+      # `cargo-kani setup` warms the cache for every other shard on
+      # the next run.
       - name: Restore Kani toolchain cache
         id: kani-cache
         uses: actions/cache/restore@v4
@@ -119,18 +163,17 @@ jobs:
       # no `-p` flag, which on this multi-crate workspace tries to
       # verify every member and hangs (cancelled at ~9-10 min, well
       # before our 15-min step budget). Direct install + explicit
-      # `-p kcore-sanitize` below gives predictable timing.
+      # `-p kcore-sanitize --harness` below gives predictable timing.
       #
       # No protobuf compiler is needed: `kcore-sanitize` is a leaf
       # crate with zero non-std dependencies.
       #
       # `cargo-kani setup` is only run when the cache did not already
-      # restore `~/.kani`, since `setup` re-downloads the CBMC + Kyanite
-      # payload (~1 min) every time it runs even when the layout is
-      # already in place.
+      # restore `~/.kani`, since `setup` re-downloads the CBMC payload
+      # every time it runs even when the layout is already in place.
       - name: Install kani-verifier
         id: kani-install
-        timeout-minutes: 15
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           if ! command -v cargo-kani >/dev/null 2>&1; then
@@ -153,27 +196,19 @@ jobs:
       # Save the Kani toolchain cache **immediately after install**,
       # before the proof step (which can fail, time out, OOM, or be
       # cancelled by the user). This is the only reliable way to
-      # warm the cache for subsequent runs:
+      # warm the cache for subsequent runs.
       #
-      #   - GitHub Actions does NOT execute steps after a job-level
-      #     cancellation, even those guarded with `if: always()`.
-      #     A trailing "save on always" step is therefore useless
-      #     when the user clicks Cancel or when the runner OOM-
-      #     kills the job (both of which we have hit on this PR).
+      # On a cold cache, all 9 matrix shards race to install and
+      # then race to save under the same key. GitHub Actions
+      # serialises the saves: the first one wins and the others
+      # log a no-op warning ("Cache already exists"). That is fine
+      # — the toolchain is identical so any winner is correct.
       #
-      #   - Saving here means: the moment kani-verifier is installed
-      #     and ~/.kani is populated, the cache is uploaded. Any
-      #     future run on the same `KANI_VERSION` skips install
-      #     entirely (~30 s instead of ~5-10 min), regardless of
-      #     whether earlier attempts at the proof step succeeded,
-      #     failed, or were cancelled.
-      #
-      # Skipped when we already restored a cache hit (the same key
-      # is already present, and `actions/cache/save` would otherwise
-      # log an error trying to overwrite it).
+      # Skipped when we already restored a cache hit.
       - name: Save Kani toolchain cache (post-install)
         if: steps.kani-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
+        continue-on-error: true
         with:
           path: |
             ~/.cargo/bin/cargo-kani
@@ -187,34 +222,38 @@ jobs:
       # graph (rusqlite-bundled SQLite, rcgen+aws-lc-rs, tonic, ...
       # which takes >20 min on a 4-vCPU GHA runner).
       #
-      # The 11 #[kani::proof] harnesses in `crates/kcore-sanitize/
-      # src/lib.rs` are independent. We deliberately run with
-      # `--jobs 2` (NOT `$(nproc)`):
-      #
-      #   - `ubuntu-latest` is 4 vCPU / 16 GB. Each CBMC instance
-      #     can peak at multiple GB during SAT solving on the
-      #     larger harnesses, so 4 parallel CBMC processes have
-      #     repeatedly exceeded the runner's memory budget on this
-      #     PR, leading to job-level OOM cancellation that GHA
-      #     reports as "The operation was canceled."
-      #
-      #   - `--jobs 2` keeps peak memory comfortably under the 16
-      #     GB ceiling. Wall-clock for 11 harnesses is ~5-6 min
-      #     instead of ~3 min, which is fine: the step has a
-      #     25-min timeout.
-      #
-      # Two argv requirements that bit earlier attempts:
-      #   1. `--jobs` was stabilised in kani-verifier 0.63 (we pin
-      #      0.67.0), so it does NOT need `-Z unstable-options`.
-      #   2. `--jobs N` with N>1 is rejected at argument validation
-      #      unless `--output-format=terse` is also supplied. See
-      #      kani-driver/src/args/mod.rs::VerificationArgs::validate
-      #      in kani-0.67.0.
-      - name: Run bounded Kani proofs
-        timeout-minutes: 25
+      # `--harness` is a substring match; we anchor with the full
+      # `kani_proofs::` module path so a future harness with a
+      # name collision in another crate cannot silently steal the
+      # match. `--exact` would be stricter but does not exist in
+      # kani-verifier 0.67.0.
+      - name: Run bounded Kani proof
+        timeout-minutes: 8
         run: |
           set -euo pipefail
           cargo-kani --version
           cargo kani -p kcore-sanitize \
-            --jobs 2 \
+            --harness '${{ matrix.harness }}' \
             --output-format terse
+
+  # Single aggregator job that branch-protection / required-status-
+  # checks can require by the stable name "formal-checks / kani".
+  # Without this, switching the per-harness matrix would force every
+  # PR reviewer to update the required-checks list (and would break
+  # `main` until they did).
+  kani:
+    name: kani
+    needs: [kani-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Verify all kani shards passed
+        run: |
+          set -euo pipefail
+          result='${{ needs.kani-shard.result }}'
+          if [[ "${result}" != "success" ]]; then
+            echo "::error::One or more kani shards did not succeed (aggregate result=${result})"
+            exit 1
+          fi
+          echo "All kani matrix shards passed."

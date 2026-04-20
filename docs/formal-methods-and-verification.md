@@ -166,15 +166,22 @@ make kani                 # cargo kani -p kcore-sanitize --jobs 2 --output-forma
 # locally, override parallelism with KANI_JOBS=4 make kani if you have memory headroom
 ```
 
-**CI:** the `kani` job in `.github/workflows/formal-checks.yml` pins `kani-verifier` to a known version (`KANI_VERSION` env var, currently `0.67.0`) and runs the proofs with `cargo kani -p kcore-sanitize --jobs 2 --output-format terse`. On a standard 4-vCPU / 16 GB `ubuntu-latest` runner this is ~5–6 min for all 11 harnesses, well under the step's 25-min budget.
+**CI:** the `kani-shard` matrix job in `.github/workflows/formal-checks.yml` pins `kani-verifier` to a known version (`KANI_VERSION` env var, currently `0.67.0`) and fans the 9 `#[kani::proof]` harnesses out across one runner per harness. The aggregator job `kani` (`needs: [kani-shard]`) keeps the stable `formal-checks / kani` status check green for branch-protection.
 
-Three non-obvious CI requirements, each of which has bitten this gate at least once:
+Why per-harness sharding rather than a single job with `--jobs N`:
 
-1. `--jobs` was stabilised in `kani-verifier` 0.63, so it no longer needs (and on newer Kani it actively rejects) `-Z unstable-options`.
-2. `--jobs N` with `N > 1` is rejected at argument validation unless `--output-format terse` is also supplied (`Conflicting options: --jobs requires '--output-format=terse'`). Without `terse`, the proof step fails within seconds of starting.
-3. `--jobs $(nproc)` (i.e. 4 on `ubuntu-latest`) has repeatedly OOM-killed the runner because each CBMC instance peaks at multiple GB on the larger harnesses. We cap at `--jobs 2` to stay safely under the 16 GB ceiling. GHA reports OOM cancellation as the unhelpful "The operation was canceled" — if that resurfaces, lower to `--jobs 1`.
+1. Wall-clock parallelism is much higher (~9× vs sequential), so even the slowest harness no longer gates the rest.
+2. Each runner verifies exactly one harness, so the 4 vCPU / 16 GB `ubuntu-latest` budget is never threatened by multiple in-flight CBMC processes (peak RAM is the single harness's footprint, typically <4 GB).
+3. A regression in one harness fails just that shard rather than masking later harnesses behind it.
 
-**Cache strategy:** the toolchain cache (`~/.cargo/bin/cargo-kani`, `~/.cargo/bin/kani`, `~/.kani/`) is saved **immediately after install completes**, before the proof step runs. GitHub Actions does not execute steps after a job-level cancellation (manual Cancel, OOM, or hard timeout) even when guarded with `if: always()`, so a trailing save step is unreliable. Saving post-install means every subsequent run on the same `KANI_VERSION` skips install entirely (~30 s vs ~5–10 min) regardless of whether prior proof attempts passed, failed, or were cancelled.
+Two non-obvious CI requirements that bit earlier single-job attempts:
+
+1. `--jobs` was stabilised in `kani-verifier` 0.63, so it no longer needs (and on newer Kani it actively rejects) `-Z unstable-options`. With per-harness sharding we no longer use `--jobs` in CI at all.
+2. `--jobs N` with `N > 1` previously needed `--output-format terse` (`Conflicting options: --jobs requires '--output-format=terse'`). We keep `--output-format terse` in the matrix step anyway because it produces parseable, line-oriented logs.
+
+**Cache strategy:** the toolchain cache (`~/.cargo/bin/cargo-kani`, `~/.cargo/bin/kani`, `~/.kani/`) is keyed only on `KANI_VERSION` (NOT on `matrix.harness`) so all 9 shards share the same cache slot. The cache is saved **immediately after install completes**, before the proof step runs, because GitHub Actions does not execute steps after a job-level cancellation (manual Cancel, OOM, or hard timeout) even when guarded with `if: always()`. On a cold cache, the 9 shards race to install and then race to save under the same key; GHA serialises the saves and the first one wins (the others log a no-op warning, masked with `continue-on-error`). Every subsequent run on the same `KANI_VERSION` skips install entirely (~30 s vs ~5–10 min).
+
+**Per-harness performance:** the slowest harness historically was `dot_dot_check_never_panics` (~9 min CBMC time) because `path_segments_include_dot_dot` used `path.split([…]).any(…)`, which forced Kani to symbolically execute Rust's `core::str::pattern` machinery. It was rewritten as a flat byte loop (functionally equivalent for the ASCII separators `/` and `\\`), bringing the harness back into the seconds range and making the matrix wall-clock budget realistic.
 
 **Follow-up work:**
 
