@@ -58,7 +58,7 @@ kani:
 		echo "Install with:  cargo install --locked kani-verifier && cargo kani setup"; \
 		exit 1; \
 	}
-	cargo kani -p kcore-sanitize
+	cargo kani -p kcore-sanitize -Z unstable-options --jobs "$$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
 coverage:
 	nix develop -c nix shell nixpkgs#cargo-llvm-cov nixpkgs#cargo nixpkgs#rustc nixpkgs#llvmPackages_21.llvm -c sh -lc 'LLVM_COV="$$(which llvm-cov)" LLVM_PROFDATA="$$(which llvm-profdata)" cargo llvm-cov --workspace --summary-only'

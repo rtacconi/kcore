@@ -60,7 +60,7 @@ jobs:
 
   kani:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -77,14 +77,20 @@ jobs:
       # Caches the Kani toolchain itself (CBMC + symex binaries +
       # ~/.kani layout). Cold install of kani-verifier from crates.io
       # takes ~8 min on a 4-vCPU GHA runner; cached install is ~30 s.
+      # `restore-keys` lets a future key bump (`-v2`, `-v3`, …) fall
+      # back to the previous cache instead of paying a full cold
+      # install on the first run after the bump.
       - name: Cache Kani toolchain
+        id: kani-cache
         uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/bin/cargo-kani
             ~/.cargo/bin/kani
             ~/.kani
-          key: kani-toolchain-${{ runner.os }}-v1
+          key: kani-toolchain-${{ runner.os }}-v2
+          restore-keys: |
+            kani-toolchain-${{ runner.os }}-
 
       # We install Kani directly instead of via
       # `model-checking/kani-github-action@v1.1` because that composite
@@ -96,19 +102,41 @@ jobs:
       #
       # No protobuf compiler is needed: `kcore-sanitize` is a leaf
       # crate with zero non-std dependencies.
+      #
+      # `cargo-kani setup` is only run when the cache did not already
+      # restore `~/.kani`, since `setup` re-downloads the CBMC + Kyanite
+      # payload (~1 min) every time it runs even when the layout is
+      # already in place.
       - name: Install kani-verifier
         timeout-minutes: 15
         run: |
+          set -euo pipefail
           if ! command -v cargo-kani >/dev/null 2>&1; then
             cargo install --locked kani-verifier
           fi
-          cargo-kani setup
+          if [ ! -d "$HOME/.kani" ] || [ -z "$(ls -A "$HOME/.kani" 2>/dev/null)" ]; then
+            cargo-kani setup
+          else
+            echo "kani toolchain restored from cache, skipping cargo-kani setup"
+          fi
 
       # All proofs live in `kcore-sanitize`, a leaf crate with **no
       # non-std dependencies**, so Kani only has to compile that one
       # crate (a few seconds) instead of the full controller dep
       # graph (rusqlite-bundled SQLite, rcgen+aws-lc-rs, tonic, ...
       # which takes >20 min on a 4-vCPU GHA runner).
+      #
+      # The 11 #[kani::proof] harnesses in `crates/kcore-sanitize/src/
+      # lib.rs` are independent (each takes ~30-60s on a 4-vCPU runner
+      # in CBMC), so we run them in parallel with `--jobs $(nproc)`.
+      # Sequential runtime was ~10-12 min — over the previous 10-min
+      # step budget; parallel runtime is ~3-4 min on the standard 4-
+      # vCPU `ubuntu-latest` runner.
+      #
+      # `--jobs` currently requires `-Z unstable-options` (Kani
+      # stabilization in progress as of mid-2025). The 25-min step
+      # timeout leaves plenty of headroom for cold runs and a future
+      # increase in proof count or `MAX_INPUT_LEN` bound.
       - name: Run bounded Kani proofs
-        timeout-minutes: 10
-        run: cargo kani -p kcore-sanitize
+        timeout-minutes: 25
+        run: cargo kani -p kcore-sanitize -Z unstable-options --jobs "$(nproc)"

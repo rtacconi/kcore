@@ -162,10 +162,10 @@ proptest! {
 ```bash
 cargo install --locked kani-verifier
 cargo kani setup
-make kani                 # equivalent to: cargo kani -p kcore-sanitize
+make kani                 # cargo kani -p kcore-sanitize -Z unstable-options --jobs $(nproc)
 ```
 
-**CI:** the `kani` job in `.github/workflows/formal-checks.yml` installs `kani-verifier` directly (with toolchain caching) and runs `cargo kani -p kcore-sanitize` on every pull request.
+**CI:** the `kani` job in `.github/workflows/formal-checks.yml` installs `kani-verifier` directly (with toolchain + `~/.kani` caching) and runs the proofs in parallel with `--jobs $(nproc)`. The 11 harnesses are independent, so on the standard 4-vCPU `ubuntu-latest` runner this brings wall-clock from ~10–12 min (sequential) down to ~3–4 min, well under the step's 25-min budget.
 
 **Follow-up work:**
 
