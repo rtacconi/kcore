@@ -657,3 +657,81 @@ mod tests {
         assert_eq!(dtos[0].reason, "concurrent create");
     }
 }
+
+/// Property-based tests (Phase 2) — pure DTO classifiers.
+#[cfg(test)]
+mod proptests {
+    use super::{classify_interface, disk_role_hint};
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `classify_interface` never panics, and always returns one of
+        /// the documented kind labels.
+        #[test]
+        fn classify_interface_known_set(name in ".{0,32}") {
+            let kind = classify_interface(&name);
+            prop_assert!(matches!(
+                kind,
+                "loopback"
+                    | "bridge"
+                    | "tap"
+                    | "vlan"
+                    | "vxlan"
+                    | "physical"
+                    | "bond"
+                    | "container"
+                    | "other"
+            ));
+        }
+
+        /// Specific prefix-matching contracts encoded as properties so
+        /// future refactors of `classify_interface` cannot silently
+        /// reclassify production interfaces.
+        #[test]
+        fn classify_interface_prefix_contracts(suffix in "[a-z0-9_-]{0,8}") {
+            prop_assert_eq!(classify_interface(&format!("kbr-{suffix}")), "bridge");
+            prop_assert_eq!(classify_interface(&format!("br-{suffix}")), "bridge");
+            prop_assert_eq!(classify_interface(&format!("tap-{suffix}")), "tap");
+            prop_assert_eq!(classify_interface(&format!("eno{suffix}")), "physical");
+            prop_assert_eq!(classify_interface(&format!("vxlan{suffix}")), "vxlan");
+            prop_assert_eq!(classify_interface("lo"), "loopback");
+        }
+
+        /// `disk_role_hint` never panics on arbitrary input.
+        #[test]
+        fn disk_role_hint_never_panics(mp in ".{0,32}", fs in ".{0,16}") {
+            let _ = disk_role_hint(&mp, &fs);
+        }
+
+        /// **Priority ordering**: a `/` mountpoint always wins, even
+        /// when `fstype` would otherwise classify the disk.
+        #[test]
+        fn disk_role_hint_root_mountpoint_wins(fs in ".{0,16}") {
+            prop_assert_eq!(disk_role_hint("/", &fs), "OS (root)");
+        }
+
+        /// `/boot*` mountpoints always classify as boot.
+        #[test]
+        fn disk_role_hint_boot_mountpoint(suffix in "[a-z0-9/_-]{0,16}", fs in ".{0,16}") {
+            let mp = format!("/boot{suffix}");
+            prop_assert_eq!(disk_role_hint(&mp, &fs), "OS (boot)");
+        }
+
+        /// Any mountpoint containing `kcore` classifies as data.
+        #[test]
+        fn disk_role_hint_kcore_data(prefix in "[/a-z0-9_-]{0,16}", suffix in "[a-z0-9_/-]{0,8}", fs in ".{0,16}") {
+            let mp = format!("{prefix}kcore{suffix}");
+            // Skip if the prefix happens to be exactly `/` or starts with `/boot` /
+            // `/nix` — those branches fire first.
+            prop_assume!(mp != "/");
+            prop_assume!(!mp.starts_with("/boot"));
+            prop_assume!(!mp.starts_with("/nix"));
+            prop_assert_eq!(disk_role_hint(&mp, &fs), "Data (kcore)");
+        }
+    }
+}

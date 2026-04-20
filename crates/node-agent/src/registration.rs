@@ -663,3 +663,82 @@ mod tests {
         let _ = collect_local_workload_runtime();
     }
 }
+
+/// Property-based tests (Phase 2) — text parsers for `ip route` /
+/// `ip addr` output and endpoint URLs.
+#[cfg(test)]
+mod proptests {
+    use super::{endpoint_host, parse_default_route_dev, parse_first_ipv4_addr};
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// All three pure parsers must terminate without panic on
+        /// arbitrary input.
+        #[test]
+        fn parsers_never_panic(s in ".{0,128}") {
+            let _ = parse_default_route_dev(&s);
+            let _ = parse_first_ipv4_addr(&s);
+            let _ = endpoint_host(&s);
+        }
+
+        /// `parse_default_route_dev` returns `Some(token)` whenever some
+        /// whitespace-delimited token is preceded by `dev`. Conversely,
+        /// if no token is preceded by `dev`, returns `None`.
+        #[test]
+        fn parse_default_route_dev_finds_token_after_dev(
+            iface in "[a-z][a-z0-9]{0,7}",
+            ip in "[0-9.]{7,15}",
+        ) {
+            let line = format!("default via {ip} dev {iface} proto dhcp src {ip}");
+            prop_assert_eq!(parse_default_route_dev(&line), Some(iface.as_str()));
+        }
+
+        /// `parse_default_route_dev` returns `None` when input lacks
+        /// the literal `dev` token.
+        #[test]
+        fn parse_default_route_dev_returns_none_without_dev(
+            iface in "[a-z][a-z0-9]{0,7}",
+        ) {
+            // Avoid generating something that ends with " dev <X>".
+            let line = format!("interface {iface}");
+            prop_assert_eq!(parse_default_route_dev(&line), None);
+        }
+
+        /// `parse_first_ipv4_addr` strips the `/prefix` suffix and
+        /// returns the bare IP for any valid `inet` line.
+        #[test]
+        fn parse_first_ipv4_addr_strips_cidr(
+            a in 0u8..=255, b in 0u8..=255, c in 0u8..=255, d in 0u8..=255,
+            prefix in 0u8..=32,
+        ) {
+            let stdout = format!("4: eno1    inet {a}.{b}.{c}.{d}/{prefix} brd ... scope global ...");
+            let got = parse_first_ipv4_addr(&stdout);
+            prop_assert_eq!(got, Some(format!("{a}.{b}.{c}.{d}")));
+        }
+
+        /// `endpoint_host` strips `http(s)://` schemes and returns the
+        /// host part. For bracketed IPv6 it returns the inner address.
+        #[test]
+        fn endpoint_host_strips_scheme_and_port(
+            scheme in prop::sample::select(vec!["http", "https"]),
+            host in "[a-z][a-z0-9.-]{0,16}",
+            port in 1u16..=65_535,
+        ) {
+            let url = format!("{scheme}://{host}:{port}");
+            prop_assert_eq!(endpoint_host(&url), Some(host.as_str()));
+        }
+
+        /// Bracketed IPv6 endpoints return the inner address without
+        /// brackets.
+        #[test]
+        fn endpoint_host_returns_inner_ipv6(_seed in any::<u8>()) {
+            prop_assert_eq!(endpoint_host("https://[2001:db8::10]:9090"), Some("2001:db8::10"));
+            prop_assert_eq!(endpoint_host("[fe80::1]:8080"), Some("fe80::1"));
+        }
+    }
+}

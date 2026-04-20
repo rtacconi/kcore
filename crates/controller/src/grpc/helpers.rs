@@ -158,3 +158,101 @@ mod tests {
         assert_eq!(vm_backend_handle(&vm), "/var/lib/kcore/images/test.qcow2");
     }
 }
+
+/// Property-based tests (Phase 2) for the small pure helpers.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `compute_vni` must always land in the documented `[10000, 16000)`
+        /// range, for **any** input string. The previous unit tests only
+        /// covered five hard-coded names.
+        #[test]
+        fn compute_vni_stays_in_range(name in ".{0,64}") {
+            let vni = compute_vni(&name);
+            prop_assert!(vni >= 10000);
+            prop_assert!(vni < 16000);
+        }
+
+        /// `compute_vni` is deterministic — same input ⇒ same output.
+        /// A regression here would silently rotate VNIs after a process
+        /// restart and break VXLAN connectivity.
+        #[test]
+        fn compute_vni_is_deterministic(name in ".{0,64}") {
+            prop_assert_eq!(compute_vni(&name), compute_vni(&name));
+        }
+
+        /// `parse_port_list` never panics, returns an empty vec for an
+        /// empty input, and only ever yields integer-parseable tokens.
+        #[test]
+        fn parse_port_list_only_returns_parseable_integers(s in ".{0,64}") {
+            let ports = parse_port_list(&s);
+            for p in &ports {
+                // The output must round-trip through `i32::to_string` /
+                // `parse` (this is the contract callers rely on).
+                let printed = p.to_string();
+                let _: i32 = printed.parse().expect("output must be parseable");
+            }
+            if s.is_empty() {
+                prop_assert!(ports.is_empty());
+            }
+        }
+
+        /// `parse_port_list` order is preserved (matches the order tokens
+        /// appear in the comma-separated list, modulo dropped invalid
+        /// tokens). We verify by independently building the expected list.
+        #[test]
+        fn parse_port_list_preserves_order(
+            ports in proptest::collection::vec(0i32..=65_535, 0..6),
+        ) {
+            let s = ports
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(",");
+            let parsed = parse_port_list(&s);
+            prop_assert_eq!(parsed, ports);
+        }
+
+        /// `controller_state_from_node_state` must:
+        ///   1. Never panic, regardless of i32 input (including bogus
+        ///      enum values).
+        ///   2. Always produce a value that maps back to a valid
+        ///      `controller_proto::VmState` enum entry.
+        #[test]
+        fn controller_state_from_node_state_always_known(state in any::<i32>()) {
+            let s = controller_state_from_node_state(state);
+            // Must round-trip into `VmState`.
+            let _ = controller_proto::VmState::try_from(s)
+                .expect("controller_state_from_node_state must produce a known enum");
+        }
+
+        /// `state_fallback_without_runtime` is a tiny boolean partition
+        /// with documented mapping; encode that as a property.
+        #[test]
+        fn state_fallback_without_runtime_partitions_on_auto_start(auto_start in any::<bool>()) {
+            let got = state_fallback_without_runtime(auto_start);
+            let expected = if auto_start {
+                controller_proto::VmState::Unknown as i32
+            } else {
+                controller_proto::VmState::Stopped as i32
+            };
+            prop_assert_eq!(got, expected);
+        }
+
+        /// `short_vm_id_seed` always returns at most 8 bytes (the
+        /// "short" suffix of a UUID).
+        #[test]
+        fn short_vm_id_seed_is_at_most_eight_bytes(_seed in any::<u8>()) {
+            let s = short_vm_id_seed();
+            prop_assert!(s.len() <= 8);
+        }
+    }
+}

@@ -837,3 +837,133 @@ mod tests {
         assert!(config.contains("enableDnat = true;"));
     }
 }
+
+/// Property-based tests (Phase 2) — Nix string escaping and sanitization.
+///
+/// `nix_escape` is the trust boundary for embedding controller-stored
+/// strings (VM names, descriptions, etc.) into rendered Nix
+/// configuration. A bug here could let a malicious VM name execute
+/// arbitrary Nix code at evaluation time, so we want strong
+/// post-condition guarantees against ALL inputs, not just the handful
+/// covered by example tests.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    /// Returns true iff `s`, when wrapped in `"…"`, is safe to embed
+    /// in a Nix double-quoted string literal: no unescaped `"`, no
+    /// unescaped `\`, and no unescaped `${` interpolation marker.
+    fn is_safely_escaped(s: &str) -> bool {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                // A backslash MUST be followed by another byte (escape pair).
+                b'\\' => {
+                    if i + 1 >= bytes.len() {
+                        return false;
+                    }
+                    i += 2;
+                    continue;
+                }
+                // A bare `"` is never allowed.
+                b'"' => return false,
+                // A bare `${` is never allowed.
+                b'$' if bytes.get(i + 1) == Some(&b'{') => return false,
+                _ => i += 1,
+            }
+        }
+        true
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `nix_escape` never panics for any UTF-8 input.
+        #[test]
+        fn nix_escape_never_panics(s in ".{0,128}") {
+            let _ = nix_escape(&s);
+        }
+
+        /// **Soundness**: the output of `nix_escape` is always safe to
+        /// embed inside a Nix double-quoted string literal. This is the
+        /// security-critical post-condition every caller relies on.
+        #[test]
+        fn nix_escape_output_is_always_safe(s in ".{0,128}") {
+            let escaped = nix_escape(&s);
+            prop_assert!(
+                is_safely_escaped(&escaped),
+                "nix_escape({s:?}) = {escaped:?} is not safely escaped"
+            );
+        }
+
+        /// **Idempotence on safe input**: a string that contains no
+        /// `\`, `"`, or `${` is left unchanged.
+        #[test]
+        fn nix_escape_is_identity_on_safe_input(s in "[a-zA-Z0-9 _\\-./]{0,32}") {
+            prop_assert_eq!(nix_escape(&s), s);
+        }
+
+        /// `nix_escape` is **idempotent**: escaping an already-escaped
+        /// string and then escaping again is the same as escaping the
+        /// already-escaped string only once. (Necessary for any future
+        /// pipeline that may re-process strings.)
+        ///
+        /// Note: this property is intentionally weaker than
+        /// `nix_escape(nix_escape(s)) == nix_escape(s)`, which does NOT
+        /// hold (because escaping `\` produces `\\`, which itself
+        /// contains `\`). The realistic invariant is that two passes
+        /// are equivalent to one pass on the once-escaped output —
+        /// which is trivially true. We assert the safe-output post-
+        /// condition recursively instead.
+        #[test]
+        fn nix_escape_repeated_application_stays_safe(s in ".{0,64}") {
+            let once = nix_escape(&s);
+            let twice = nix_escape(&once);
+            prop_assert!(is_safely_escaped(&once));
+            prop_assert!(is_safely_escaped(&twice));
+        }
+
+        /// `sanitize_nix_attr_key` always returns a string of the same
+        /// `chars().count()` whose every character is in
+        /// `[A-Za-z0-9_-]`.
+        #[test]
+        fn sanitize_nix_attr_key_charset(s in ".{0,32}") {
+            let out = sanitize_nix_attr_key(&s);
+            prop_assert_eq!(out.chars().count(), s.chars().count());
+            for c in out.chars() {
+                prop_assert!(
+                    c.is_ascii_alphanumeric() || c == '-' || c == '_',
+                    "sanitize_nix_attr_key produced unsafe char {c:?}"
+                );
+            }
+        }
+
+        /// `netmask_to_cidr` for any well-formed IPv4 dotted netmask
+        /// returns the popcount of the underlying 32-bit value, so it
+        /// is always in `[0, 32]`.
+        #[test]
+        fn netmask_to_cidr_is_in_range(
+            a in 0u8..=255, b in 0u8..=255, c in 0u8..=255, d in 0u8..=255,
+        ) {
+            let s = format!("{a}.{b}.{c}.{d}");
+            let n = netmask_to_cidr(&s);
+            prop_assert!(n <= 32, "netmask_to_cidr({s:?}) = {n} > 32");
+            // Must also equal sum of octet popcounts.
+            let expected = (a.count_ones() + b.count_ones() + c.count_ones() + d.count_ones()) as u8;
+            prop_assert_eq!(n, expected);
+        }
+
+        /// `netmask_to_cidr` on garbage input never panics; it just
+        /// drops un-parseable octets and returns the popcount of the
+        /// remainder.
+        #[test]
+        fn netmask_to_cidr_never_panics_on_garbage(s in ".{0,32}") {
+            let _ = netmask_to_cidr(&s);
+        }
+    }
+}

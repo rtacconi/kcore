@@ -151,3 +151,130 @@ mod tests {
         assert_eq!(picked.id, "n2");
     }
 }
+
+/// Property-based tests (Phase 2) — node placement.
+///
+/// `select_node_for_vm` is invoked on every VM create/migrate; the
+/// strongest guarantees we want are: (a) it never picks an ineligible
+/// node (wrong status / approval / DC, insufficient capacity), and (b)
+/// the picked node is **maximal** w.r.t. the documented `(free_mem,
+/// free_cpu)` ordering among the eligible set.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    fn arb_node() -> impl Strategy<Value = NodeRow> {
+        (
+            "[a-z][a-z0-9-]{0,7}", // id
+            1i32..=64,             // cpu_cores
+            (1i64..=(1i64 << 38)), // memory_bytes
+            0i32..=64,             // cpu_used (clamped below)
+            0i64..=(1i64 << 38),   // memory_used (clamped below)
+            prop::sample::select(vec!["ready", "unknown", "draining"]),
+            prop::sample::select(vec!["approved", "pending", "rejected"]),
+            prop::sample::select(vec!["DC1", "DC2", "DC3"]),
+        )
+            .prop_map(
+                |(id, cpu, mem, cpu_used, mem_used, status, approval, dc)| NodeRow {
+                    id: id.clone(),
+                    hostname: id.clone(),
+                    address: format!("{id}:9091"),
+                    cpu_cores: cpu,
+                    memory_bytes: mem,
+                    status: status.into(),
+                    last_heartbeat: String::new(),
+                    gateway_interface: String::new(),
+                    cpu_used: cpu_used.min(cpu),
+                    memory_used: mem_used.min(mem),
+                    storage_backend: "filesystem".into(),
+                    disable_vxlan: false,
+                    approval_status: approval.into(),
+                    cert_expiry_days: -1,
+                    luks_method: String::new(),
+                    dc_id: dc.into(),
+                },
+            )
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 1_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `select_node` only ever returns `ready` + `approved` nodes.
+        #[test]
+        fn select_node_only_returns_eligible_nodes(
+            nodes in proptest::collection::vec(arb_node(), 0..10),
+        ) {
+            if let Some(picked) = select_node(&nodes) {
+                prop_assert_eq!(picked.status.as_str(), "ready");
+                prop_assert_eq!(picked.approval_status.as_str(), "approved");
+            }
+        }
+
+        /// `select_node_for_vm` never returns a node whose remaining
+        /// capacity is less than what was requested.
+        #[test]
+        fn select_node_for_vm_respects_capacity(
+            nodes in proptest::collection::vec(arb_node(), 0..10),
+            requested_cpu in 1i32..=32,
+            requested_mem in 1i64..=(1i64 << 36),
+        ) {
+            if let Some(picked) = select_node_for_vm(&nodes, requested_cpu, requested_mem) {
+                prop_assert!(picked.status == "ready");
+                prop_assert!(picked.approval_status == "approved");
+                prop_assert!((picked.cpu_cores - picked.cpu_used) >= requested_cpu);
+                prop_assert!((picked.memory_bytes - picked.memory_used) >= requested_mem);
+            }
+        }
+
+        /// **Maximality**: the picked node has the largest `(free_mem,
+        /// free_cpu)` tuple among eligible nodes. No eligible node may
+        /// have a strictly larger tuple than the winner.
+        #[test]
+        fn select_node_for_vm_picks_max_remaining_capacity(
+            nodes in proptest::collection::vec(arb_node(), 0..10),
+            requested_cpu in 1i32..=8,
+            requested_mem in 1i64..=(1i64 << 32),
+        ) {
+            let picked = select_node_for_vm(&nodes, requested_cpu, requested_mem);
+            let eligible: Vec<&NodeRow> = nodes
+                .iter()
+                .filter(|n| {
+                    n.status == "ready"
+                        && n.approval_status == "approved"
+                        && (n.cpu_cores - n.cpu_used) >= requested_cpu
+                        && (n.memory_bytes - n.memory_used) >= requested_mem
+                })
+                .collect();
+            prop_assert_eq!(picked.is_some(), !eligible.is_empty());
+            if let Some(p) = picked {
+                let p_key = (p.memory_bytes - p.memory_used, (p.cpu_cores - p.cpu_used) as i64);
+                for n in &eligible {
+                    let k = (n.memory_bytes - n.memory_used, (n.cpu_cores - n.cpu_used) as i64);
+                    prop_assert!(k <= p_key, "eligible node {} has larger key {:?} than winner {:?}", n.id, k, p_key);
+                }
+            }
+        }
+
+        /// `select_node_for_vm_in_dc` is `select_node_for_vm` after
+        /// filtering by `dc_id`. We assert the filter equivalence.
+        #[test]
+        fn select_node_for_vm_in_dc_equivalent_to_dc_prefilter(
+            nodes in proptest::collection::vec(arb_node(), 0..10),
+            requested_cpu in 1i32..=8,
+            requested_mem in 1i64..=(1i64 << 32),
+            dc in prop::sample::select(vec!["DC1", "DC2", "DC3"]),
+        ) {
+            let dc_only: Vec<NodeRow> =
+                nodes.iter().filter(|n| n.dc_id == dc).cloned().collect();
+            let from_helper =
+                select_node_for_vm_in_dc(&nodes, requested_cpu, requested_mem, dc).map(|n| n.id.clone());
+            let from_prefilter = select_node_for_vm(&dc_only, requested_cpu, requested_mem)
+                .map(|n| n.id.clone());
+            prop_assert_eq!(from_helper, from_prefilter);
+        }
+    }
+}

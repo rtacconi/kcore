@@ -2069,3 +2069,150 @@ mod tests {
         );
     }
 }
+
+/// Property-based tests (Phase 2).
+#[cfg(test)]
+mod proptests {
+    use super::{
+        normalize_endpoint, parse_lease_entry, parse_neigh_line, parse_stopped_vms_from_nix,
+        vm_unit_is_fatal, VmUnitState,
+    };
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// Parsers must never panic on arbitrary input. (Both consume
+        /// untrusted-ish text from `dnsmasq` lease files and `ip neigh`
+        /// output respectively.)
+        #[test]
+        fn lease_and_neigh_parsers_never_panic(line in ".{0,128}") {
+            let _ = parse_lease_entry(&line);
+            let _ = parse_neigh_line(&line);
+        }
+
+        /// `parse_lease_entry` returns `Some` iff the line has at least
+        /// 4 whitespace-delimited tokens.
+        #[test]
+        fn lease_entry_some_iff_four_fields(line in ".{0,128}") {
+            let n = line.split_whitespace().count();
+            prop_assert_eq!(parse_lease_entry(&line).is_some(), n >= 4);
+        }
+
+        /// On a well-formed lease line, the (mac, ip, hostname) tokens
+        /// match field positions 1, 2, 3 (0-indexed).
+        #[test]
+        fn lease_entry_returns_correct_positions(
+            ts in 100u32..=999,
+            mac in "[0-9a-f:]{17}",
+            ip in "[0-9.]{7,15}",
+            hostname in "[a-z0-9-]{1,16}",
+            client_id in "[a-z0-9*]{1,8}",
+        ) {
+            let line = format!("{ts} {mac} {ip} {hostname} {client_id}");
+            let parsed = parse_lease_entry(&line).expect("must parse");
+            prop_assert_eq!(parsed.0, mac.as_str());
+            prop_assert_eq!(parsed.1, ip.as_str());
+            prop_assert_eq!(parsed.2, hostname.as_str());
+        }
+
+        /// `parse_neigh_line` returns `None` for any line shorter than
+        /// 5 fields, and any line missing the `lladdr` token.
+        #[test]
+        fn neigh_line_returns_none_when_lladdr_missing(line in "[a-z0-9. ]{0,64}") {
+            let fields: Vec<&str> = line.split_whitespace().collect();
+            if fields.len() < 5 || !fields.contains(&"lladdr") {
+                prop_assert!(parse_neigh_line(&line).is_none());
+            }
+        }
+
+        /// `parse_neigh_line` returns the IP and the token immediately
+        /// after `lladdr` for well-formed lines.
+        #[test]
+        fn neigh_line_returns_ip_and_mac(
+            ip in "[0-9.]{7,15}",
+            mac in "[0-9a-f:]{17}",
+        ) {
+            let line = format!("{ip} dev br0 lladdr {mac} REACHABLE");
+            let parsed = parse_neigh_line(&line).expect("well-formed");
+            prop_assert_eq!(parsed.0, ip.as_str());
+            prop_assert_eq!(parsed.1, mac.as_str());
+        }
+
+        /// `vm_unit_is_fatal` is **monotone** in `n_restarts` for the
+        /// flapping branch: if a state is fatal at N restarts, it is
+        /// fatal at N+k restarts (everything else equal).
+        #[test]
+        fn vm_unit_is_fatal_is_monotone_in_restarts(
+            active in prop::sample::select(vec!["active", "activating", "failed", "inactive"]),
+            sub in prop::sample::select(vec!["running", "auto-restart", "dead"]),
+            result in prop::sample::select(vec!["exit-code", "success", "signal"]),
+            n in 0u32..=10,
+            extra in 1u32..=10,
+        ) {
+            let lo = VmUnitState {
+                active_state: active.into(),
+                sub_state: sub.into(),
+                result: result.into(),
+                n_restarts: n,
+            };
+            let hi = VmUnitState {
+                active_state: lo.active_state.clone(),
+                sub_state: lo.sub_state.clone(),
+                result: lo.result.clone(),
+                n_restarts: n.saturating_add(extra),
+            };
+            if vm_unit_is_fatal(&lo) {
+                prop_assert!(vm_unit_is_fatal(&hi));
+            }
+        }
+
+        /// `failed` active state is **always** fatal regardless of
+        /// other fields.
+        #[test]
+        fn vm_unit_is_fatal_failed_is_always_fatal(
+            sub in "[a-z-]{0,16}",
+            result in "[a-z-]{0,16}",
+            n in any::<u32>(),
+        ) {
+            let s = VmUnitState {
+                active_state: "failed".into(),
+                sub_state: sub,
+                result,
+                n_restarts: n,
+            };
+            prop_assert!(vm_unit_is_fatal(&s));
+        }
+
+        /// `normalize_endpoint` never panics on arbitrary input.
+        #[test]
+        fn normalize_endpoint_never_panics(s in ".{0,64}") {
+            let _ = normalize_endpoint(&s, 9091);
+        }
+
+        /// `normalize_endpoint` is idempotent on inputs that already
+        /// parse as `SocketAddr` (it should hand them straight back).
+        #[test]
+        fn normalize_endpoint_idempotent_on_socket_addr(
+            a in 0u8..=255, b in 0u8..=255, c in 0u8..=255, d in 0u8..=255,
+            port in 1u16..=65_535,
+        ) {
+            let addr = format!("{a}.{b}.{c}.{d}:{port}");
+            prop_assert_eq!(normalize_endpoint(&addr, 9091), addr);
+        }
+
+        /// `parse_stopped_vms_from_nix` always returns a sorted,
+        /// de-duplicated list.
+        #[test]
+        fn parse_stopped_vms_from_nix_is_sorted_and_deduped(s in ".{0,256}") {
+            let out = parse_stopped_vms_from_nix(&s);
+            let mut sorted = out.clone();
+            sorted.sort();
+            sorted.dedup();
+            prop_assert_eq!(out, sorted);
+        }
+    }
+}

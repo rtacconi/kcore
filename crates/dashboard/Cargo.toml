@@ -33,6 +33,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [dev-dependencies]
 tokio-stream = { version = "0.1", features = ["net"] }
+proptest = "1.11"
 
 [build-dependencies]
 tonic-build = "0.12"

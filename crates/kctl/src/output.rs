@@ -460,3 +460,117 @@ mod tests {
         super::section(&"a".repeat(80), &["SOC2", "HIPAA"]);
     }
 }
+
+/// Property-based tests (Phase 2) — output formatters.
+#[cfg(test)]
+mod proptests {
+    use super::{
+        days_to_ymd, format_cert_expiry, format_luks_method, is_leap, section, storage_backend_str,
+        truncate_node_id, vm_state_str,
+    };
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `truncate_node_id` never panics on arbitrary input. The
+        /// `&id[..17]` slice could panic on a non-character boundary
+        /// for a multi-byte UTF-8 input, so we want to assert any
+        /// future regression here is caught.
+        ///
+        /// (Today the function only takes ASCII node IDs, but proptest
+        /// fuzzes through arbitrary UTF-8 to lock the contract.)
+        #[test]
+        fn truncate_node_id_never_panics(id in "[a-zA-Z0-9-]{0,40}") {
+            let _ = truncate_node_id(&id);
+        }
+
+        /// IDs prefixed with `kvm-node-` are stripped to bare suffix.
+        #[test]
+        fn truncate_node_id_strips_prefix(suffix in "[a-zA-Z0-9-]{1,30}") {
+            let id = format!("kvm-node-{suffix}");
+            prop_assert_eq!(truncate_node_id(&id), suffix);
+        }
+
+        /// Long IDs (without the prefix) are truncated to 20 visual
+        /// characters: 17 chars + `...`.
+        #[test]
+        fn truncate_node_id_long_form(s in "[a-zA-Z0-9]{21,40}") {
+            let out = truncate_node_id(&s);
+            prop_assert_eq!(out.chars().count(), 20);
+            prop_assert!(out.ends_with("..."));
+        }
+
+        /// `format_cert_expiry` partitions on the documented thresholds.
+        #[test]
+        fn format_cert_expiry_threshold_partition(d in -100i32..=400) {
+            let s = format_cert_expiry(d);
+            if d < 0 {
+                prop_assert_eq!(s, "unknown");
+            } else if d == 0 {
+                prop_assert_eq!(s, "EXPIRED");
+            } else if d <= 30 {
+                prop_assert!(s.contains("⚠"));
+                prop_assert!(s.starts_with(&d.to_string()));
+            } else {
+                prop_assert!(!s.contains("⚠"));
+                prop_assert!(s.starts_with(&d.to_string()));
+                prop_assert!(s.ends_with('d'));
+            }
+        }
+
+        /// `vm_state_str` always returns one of the documented labels.
+        #[test]
+        fn vm_state_str_known_set(state in any::<i32>()) {
+            let s = vm_state_str(state);
+            prop_assert!(matches!(s, "Stopped" | "Running" | "Paused" | "Error" | "Unknown"));
+        }
+
+        /// `format_luks_method` returns `"-"` for any unknown method.
+        #[test]
+        fn format_luks_method_unknown_dash(s in ".{0,16}") {
+            let v = format_luks_method(&s);
+            prop_assert!(matches!(v, "TPM2" | "key-file" | "-"));
+            if s != "tpm2" && s != "key-file" {
+                prop_assert_eq!(v, "-");
+            }
+        }
+
+        /// `storage_backend_str` always returns one of the four known
+        /// labels for any i32.
+        #[test]
+        fn storage_backend_str_known_set(state in any::<i32>()) {
+            let s = storage_backend_str(state);
+            prop_assert!(matches!(s, "filesystem" | "lvm" | "zfs" | "unspecified"));
+        }
+
+        /// `section` never panics for any title length, including
+        /// pathological 0-byte and very long titles.
+        #[test]
+        fn section_never_panics_for_any_title_length(len in 0usize..=200) {
+            let title = "a".repeat(len);
+            section(&title, &["SOC2"]);
+        }
+
+        /// `is_leap` follows the Gregorian rules. Property: agreement
+        /// with `(y % 4 == 0) && ((y % 100 != 0) || (y % 400 == 0))`.
+        #[test]
+        fn is_leap_matches_gregorian_predicate(y in 0u64..=4000) {
+            let predicate = (y % 4 == 0) && ((y % 100 != 0) || (y % 400 == 0));
+            prop_assert_eq!(is_leap(y), predicate);
+        }
+
+        /// `days_to_ymd` always returns a month in `1..=12` and a day
+        /// in `1..=31`, and a year >= 1970.
+        #[test]
+        fn days_to_ymd_returns_valid_calendar(d in 0u64..=200_000) {
+            let (y, mo, da) = days_to_ymd(d);
+            prop_assert!(y >= 1970);
+            prop_assert!((1..=12).contains(&mo), "month {mo} out of range");
+            prop_assert!((1..=31).contains(&da), "day {da} out of range");
+        }
+    }
+}

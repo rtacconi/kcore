@@ -1259,3 +1259,102 @@ mod tests {
         assert_eq!(after_contents, original_contents);
     }
 }
+
+/// Property-based tests (Phase 2) — name & SHA sanitizers.
+#[cfg(test)]
+mod proptests {
+    use super::{
+        sanitize_image_name, sanitize_volume_name, validate_destination_path,
+        validate_image_sha256, validate_image_url,
+    };
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `sanitize_volume_name` is total (no panic), produces only
+        /// chars in `[A-Za-z0-9_-]`, and falls back to `"volume"` when
+        /// the input would otherwise sanitize to an empty string.
+        #[test]
+        fn sanitize_volume_name_charset(s in ".{0,32}") {
+            let out = sanitize_volume_name(&s);
+            prop_assert!(!out.is_empty());
+            for c in out.chars() {
+                prop_assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
+            }
+            // If the input is empty OR contains only characters that
+            // would all be replaced with `-`, the implementation falls
+            // back to `"volume"` only when input was empty (per code).
+            if s.is_empty() {
+                prop_assert_eq!(out, "volume");
+            }
+        }
+
+        /// `sanitize_volume_name` is **idempotent**: applying it twice
+        /// is the same as applying it once.
+        #[test]
+        fn sanitize_volume_name_is_idempotent(s in ".{0,32}") {
+            let once = sanitize_volume_name(&s);
+            let twice = sanitize_volume_name(&once);
+            prop_assert_eq!(once, twice);
+        }
+
+        /// `sanitize_image_name` always produces a name that ends with
+        /// `.{format}` (lowercased compared) and contains only safe
+        /// chars. Critical because the result becomes a host path.
+        #[test]
+        fn sanitize_image_name_ends_with_format(
+            name in ".{0,32}",
+            format in prop::sample::select(vec!["raw", "qcow2"]),
+        ) {
+            let out = sanitize_image_name(&name, format);
+            prop_assert!(!out.is_empty());
+            prop_assert!(
+                out.to_ascii_lowercase().ends_with(&format!(".{format}")),
+                "name {out:?} does not end with .{format}"
+            );
+            for c in out.chars() {
+                prop_assert!(
+                    c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_',
+                    "unsafe char {c:?} in {out:?}"
+                );
+            }
+        }
+
+        /// `validate_image_sha256`: same predicate as the controller's
+        /// version (length-64 lowercased hex).
+        #[test]
+        fn validate_image_sha256_acceptance_matches_predicate(s in ".{0,80}") {
+            let normalized = s.trim().to_ascii_lowercase();
+            let predicate = normalized.len() == 64
+                && normalized.chars().all(|c| c.is_ascii_hexdigit());
+            let result = validate_image_sha256(&s);
+            prop_assert_eq!(result.is_ok(), predicate);
+        }
+
+        /// `validate_image_url`: accepts iff trimmed and starts with
+        /// `https://`.
+        #[test]
+        fn validate_image_url_requires_https(s in ".{0,64}") {
+            let trimmed = s.trim();
+            let predicate = !trimmed.is_empty() && trimmed.starts_with("https://");
+            prop_assert_eq!(validate_image_url(&s).is_ok(), predicate);
+        }
+
+        /// `validate_destination_path`: any accepted path is absolute,
+        /// under `image_cache_dir`, and contains no `..` traversal.
+        /// This is the security-critical post-condition.
+        #[test]
+        fn validate_destination_path_acceptance_implies_safety(s in ".{0,128}") {
+            let root = std::path::Path::new("/var/lib/kcore/images");
+            if let Ok(p) = validate_destination_path(&s, root) {
+                prop_assert!(p.is_absolute());
+                prop_assert!(p.starts_with(root));
+                prop_assert!(!p.to_string_lossy().contains(".."));
+            }
+        }
+    }
+}

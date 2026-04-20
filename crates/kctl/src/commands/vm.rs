@@ -1616,3 +1616,160 @@ spec:
         assert_eq!(m.desired_state, proto::VmDesiredState::Stopped);
     }
 }
+
+/// Property-based tests (Phase 2) — VM CLI helpers.
+#[cfg(test)]
+mod proptests {
+    use super::{
+        infer_format_from_path, normalize_image_format, normalize_storage_backend_arg,
+        select_image_mode, storage_backend_to_proto, yaml_escape_double_quoted,
+    };
+    use crate::client::controller_proto as proto;
+    use proptest::prelude::*;
+
+    /// Local re-implementation of the YAML safety predicate: any
+    /// double-quote and any backslash must be escaped, and there must
+    /// be no dangling backslash at end of string.
+    fn is_safely_yaml_double_quoted(s: &str) -> bool {
+        let bytes = s.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'\\' => {
+                    if i + 1 >= bytes.len() {
+                        return false;
+                    }
+                    i += 2;
+                }
+                b'"' => return false,
+                _ => i += 1,
+            }
+        }
+        true
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `yaml_escape_double_quoted` must produce a string that is
+        /// safe to embed inside a YAML double-quoted scalar.
+        #[test]
+        fn yaml_escape_double_quoted_is_safe(s in ".{0,64}") {
+            let escaped = yaml_escape_double_quoted(&s);
+            prop_assert!(
+                is_safely_yaml_double_quoted(&escaped),
+                "{escaped:?} is not YAML-safe"
+            );
+        }
+
+        /// Strings without `\` or `"` are returned unchanged.
+        #[test]
+        fn yaml_escape_identity_on_safe_input(s in "[a-zA-Z0-9 _\\-./:]{0,32}") {
+            prop_assert_eq!(yaml_escape_double_quoted(&s), s);
+        }
+
+        /// `infer_format_from_path` is case-insensitive on the suffix
+        /// and only ever returns `raw` or `qcow2`.
+        #[test]
+        fn infer_format_from_path_known_set(s in ".{0,64}") {
+            let f = infer_format_from_path(&s);
+            prop_assert!(f == "raw" || f == "qcow2");
+        }
+
+        /// `infer_format_from_path` returns `qcow2` iff the lowercased
+        /// path ends with `.qcow2` or `.qcow`.
+        #[test]
+        fn infer_format_from_path_matches_predicate(
+            stem in "[a-z0-9_-]{1,16}",
+            ext in prop::sample::select(vec![".qcow", ".qcow2", ".raw", ".img", ""]),
+            uppercase in any::<bool>(),
+        ) {
+            let mut s = format!("{stem}{ext}");
+            if uppercase {
+                s = s.to_uppercase();
+            }
+            let lower = s.to_ascii_lowercase();
+            let expected = if lower.ends_with(".qcow2") || lower.ends_with(".qcow") {
+                "qcow2"
+            } else {
+                "raw"
+            };
+            prop_assert_eq!(infer_format_from_path(&s), expected);
+        }
+
+        /// `normalize_image_format` accepts iff trimmed-lowercased value
+        /// is `raw` or `qcow2`. Output is idempotent.
+        #[test]
+        fn normalize_image_format_acceptance(s in ".{0,16}") {
+            let normalized = s.trim().to_ascii_lowercase();
+            let predicate = normalized == "raw" || normalized == "qcow2";
+            let result = normalize_image_format(&s);
+            prop_assert_eq!(result.is_ok(), predicate);
+            if let Ok(v) = result {
+                prop_assert_eq!(normalize_image_format(&v).unwrap(), v);
+            }
+        }
+
+        /// `normalize_storage_backend_arg` accepts iff trimmed-lowercased
+        /// value is in `{filesystem, lvm, zfs}`.
+        #[test]
+        fn normalize_storage_backend_arg_acceptance(s in ".{0,16}") {
+            let normalized = s.trim().to_ascii_lowercase();
+            let predicate = matches!(normalized.as_str(), "filesystem" | "lvm" | "zfs");
+            prop_assert_eq!(normalize_storage_backend_arg(&s).is_ok(), predicate);
+        }
+
+        /// **Round-trip**: `normalize_storage_backend_arg` followed by
+        /// `storage_backend_to_proto` always produces a non-`Unspecified`
+        /// proto value.
+        #[test]
+        fn storage_backend_round_trip(s in prop::sample::select(vec![
+            "filesystem", "lvm", "zfs", "FILESYSTEM", "LVM", "ZFS", " lvm  ",
+        ])) {
+            let normalized = normalize_storage_backend_arg(s).expect("known backend");
+            let p = storage_backend_to_proto(&normalized);
+            prop_assert!(p != proto::StorageBackendType::Unspecified as i32);
+        }
+
+        /// `storage_backend_to_proto` returns one of the four known
+        /// enum values for any input and never panics.
+        #[test]
+        fn storage_backend_to_proto_never_panics(s in ".{0,16}") {
+            let v = storage_backend_to_proto(&s);
+            prop_assert!(
+                v == proto::StorageBackendType::Filesystem as i32
+                    || v == proto::StorageBackendType::Lvm as i32
+                    || v == proto::StorageBackendType::Zfs as i32
+                    || v == proto::StorageBackendType::Unspecified as i32
+            );
+        }
+
+        /// `select_image_mode` rejects when both CLI URL AND CLI path
+        /// are set.
+        #[test]
+        fn select_image_mode_rejects_cli_conflict(
+            cli_image in "[a-z]{1,8}",
+            cli_path in "[/a-z]{1,8}",
+        ) {
+            let result = select_image_mode(
+                Some(&cli_image),
+                Some(&cli_path),
+                None,
+                None,
+            );
+            prop_assert!(result.is_err());
+        }
+
+        /// `select_image_mode` returns `"url"` for any non-empty CLI
+        /// `--image` (alone) regardless of whether it looks like a URL
+        /// (the URL-format check happens later in `resolve_create_image_source`).
+        #[test]
+        fn select_image_mode_cli_image_wins(cli_image in "[a-z]{1,16}") {
+            let result = select_image_mode(Some(&cli_image), None, None, None);
+            prop_assert_eq!(result.unwrap(), "url");
+        }
+    }
+}

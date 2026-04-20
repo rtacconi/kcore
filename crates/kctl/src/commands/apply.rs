@@ -273,3 +273,62 @@ metadata:
         assert!(msg.contains("parsing manifest"), "unexpected error: {msg}");
     }
 }
+
+/// Property-based tests (Phase 2) — manifest classification.
+#[cfg(test)]
+mod proptests {
+    use super::{detect_manifest_kind, local_manifest_kind, LocalManifestKind};
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `local_manifest_kind` is **case-insensitive** on its input
+        /// and recognises all three documented `nodeinstall` aliases.
+        #[test]
+        fn local_manifest_kind_aliases(
+            base in prop::sample::select(vec![
+                "cluster", "nodeinstall", "node-install", "node_install",
+            ]),
+            uppercase in any::<bool>(),
+        ) {
+            let s = if uppercase { base.to_uppercase() } else { base.to_string() };
+            let expected = match base {
+                "cluster" => Some(LocalManifestKind::Cluster),
+                _ => Some(LocalManifestKind::NodeInstall),
+            };
+            prop_assert_eq!(local_manifest_kind(&s), expected);
+        }
+
+        /// Anything outside the alias set returns `None`.
+        #[test]
+        fn local_manifest_kind_none_for_unknown(s in "[a-zA-Z0-9_-]{1,16}") {
+            let lower = s.to_ascii_lowercase();
+            if !matches!(lower.as_str(), "cluster" | "nodeinstall" | "node-install" | "node_install") {
+                prop_assert_eq!(local_manifest_kind(&s), None);
+            }
+        }
+
+        /// `detect_manifest_kind` returns `Ok(Some(kind))` when given a
+        /// well-formed YAML map with a `kind:` string entry.
+        #[test]
+        fn detect_manifest_kind_extracts_top_level_key(
+            kind in "[a-zA-Z][a-zA-Z0-9]{0,16}",
+            name in "[a-z][a-z0-9-]{0,16}",
+        ) {
+            let yaml = format!("kind: {kind}\nmetadata:\n  name: {name}\n");
+            let got = detect_manifest_kind(&yaml).expect("YAML parses");
+            prop_assert_eq!(got, Some(kind));
+        }
+
+        /// Empty `kind:` is treated as missing (`Ok(None)`).
+        #[test]
+        fn detect_manifest_kind_empty_kind_is_none(_seed in any::<u8>()) {
+            let yaml = "kind: \"\"\nmetadata:\n  name: x\n";
+            prop_assert_eq!(detect_manifest_kind(yaml).expect("parses"), None);
+        }
+    }
+}

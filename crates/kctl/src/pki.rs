@@ -630,3 +630,59 @@ mod tests {
         assert_eq!(extract_cn(&cert_pem), "kcore-controller-10.0.0.99");
     }
 }
+
+/// Property-based tests (Phase 2) — `host_from_address`.
+#[cfg(test)]
+mod proptests {
+    use super::host_from_address;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// Never panics on arbitrary input.
+        #[test]
+        fn host_from_address_never_panics(s in ".{0,64}") {
+            let _ = host_from_address(&s);
+        }
+
+        /// `host:port` with IPv4 host extracts the host part.
+        #[test]
+        fn host_from_address_extracts_host_from_ipv4_with_port(
+            a in 0u8..=255, b in 0u8..=255, c in 0u8..=255, d in 0u8..=255,
+            port in 1u16..=65_535,
+        ) {
+            let s = format!("{a}.{b}.{c}.{d}:{port}");
+            // Bare IP first wins, but `IpAddr::parse(...)` will reject the
+            // whole `host:port`, so we fall through to the rsplit branch.
+            prop_assert_eq!(host_from_address(&s).unwrap(), format!("{a}.{b}.{c}.{d}"));
+        }
+
+        /// Bare IPv4 (no port) returns the address verbatim.
+        #[test]
+        fn host_from_address_returns_bare_ipv4(
+            a in 0u8..=255, b in 0u8..=255, c in 0u8..=255, d in 0u8..=255,
+        ) {
+            let s = format!("{a}.{b}.{c}.{d}");
+            prop_assert_eq!(host_from_address(&s).unwrap(), s);
+        }
+
+        /// Bracketed IPv6 returns the inner address without brackets.
+        #[test]
+        fn host_from_address_strips_ipv6_brackets(_seed in any::<u8>()) {
+            prop_assert_eq!(host_from_address("[2001:db8::10]:9090").unwrap(), "2001:db8::10");
+            prop_assert_eq!(host_from_address("[fe80::1]").unwrap(), "fe80::1");
+        }
+
+        /// The empty input is the only error case (per implementation).
+        #[test]
+        fn host_from_address_only_empty_is_error(s in "[a-zA-Z0-9.:_-]{1,32}") {
+            // Skip strings with stray brackets which require well-formed `]`.
+            prop_assume!(!s.contains('[') || s.contains(']'));
+            prop_assert!(host_from_address(&s).is_ok());
+        }
+    }
+}

@@ -208,3 +208,149 @@ mod tests {
         assert!(memory_mebibytes(2 * 1024 * 1024).contains("2 MiB"));
     }
 }
+
+/// Property-based tests (Phase 1): generate millions of random `(page, page_size,
+/// total)` triples to lock down the pagination invariants. Example-based tests
+/// caught the `u32::MAX` overflow case only because we thought to write it; these
+/// properties would catch any future arithmetic regression on any input.
+#[cfg(test)]
+mod proptests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `PageView` accessors must never panic for any plausible
+        /// `(page, page_size, total)` triple. `page` is `u32` so we exercise
+        /// the full range, including the `u32::MAX` boundary that previously
+        /// overflowed `(page as usize) * page_size`.
+        #[test]
+        fn page_view_accessors_never_panic(
+            page in any::<u32>(),
+            page_size in 1usize..=10_000,
+            total in 0usize..=1_000_000,
+        ) {
+            let view: PageView<()> = PageView {
+                items: vec![],
+                page,
+                page_size,
+                total,
+            };
+            // Just calling these is the property — `unwrap_or` style panics
+            // would surface as test failures.
+            let _ = view.has_next();
+            let _ = view.has_prev();
+            let _ = view.total_pages();
+        }
+
+        /// Algebraic relationships between accessors:
+        /// * `total_pages` is always >= 1 (we never render "Page 1 of 0").
+        /// * `has_prev` ⇔ `page > 1` for any normalized 1-based page.
+        /// * `has_next` is monotone w.r.t. `total`: if there is a next page
+        ///   for `total`, there is also one for `total + k`.
+        #[test]
+        fn page_view_invariants_hold(
+            page in 1u32..=1000,
+            page_size in 1usize..=1000,
+            total in 0usize..=100_000,
+        ) {
+            let view: PageView<()> = PageView {
+                items: vec![],
+                page,
+                page_size,
+                total,
+            };
+            prop_assert!(view.total_pages() >= 1);
+            prop_assert_eq!(view.has_prev(), page > 1);
+
+            // Monotonicity: more rows can only ever add a "next" page,
+            // never remove one.
+            let larger: PageView<()> = PageView {
+                items: vec![],
+                page,
+                page_size,
+                total: total.saturating_add(page_size),
+            };
+            if view.has_next() {
+                prop_assert!(larger.has_next());
+            }
+        }
+
+        /// `paginate_by_name` round-trip property: concatenating every page in
+        /// order reconstructs the (sorted) input. This catches any future
+        /// off-by-one in start/end slice math, including the `start >= len`
+        /// fast path.
+        #[test]
+        fn paginate_by_name_covers_all_items(
+            items in proptest::collection::vec("[a-z]{1,8}", 0..50),
+            page_size in 1usize..=10,
+        ) {
+            let mut sorted = items.clone();
+            sorted.sort();
+
+            let total = items.len();
+            let pages = if total == 0 { 1 } else { total.div_ceil(page_size) };
+
+            let mut collected: Vec<String> = Vec::new();
+            for page_idx in 1..=pages {
+                let view = paginate_by_name(items.clone(), |s: &String| s.clone(),
+                                            page_idx as u32, page_size);
+                prop_assert_eq!(view.total, total);
+                prop_assert!(view.items.len() <= page_size);
+                collected.extend(view.items);
+            }
+            prop_assert_eq!(collected, sorted);
+        }
+
+        /// `memory_mebibytes` and `bytes_human` never panic for any
+        /// i64 input (including negatives).
+        #[test]
+        fn byte_formatters_never_panic(n in any::<i64>()) {
+            let _ = memory_mebibytes(n);
+            let _ = bytes_human(n);
+        }
+
+        /// `memory_mebibytes` always ends with `" MiB"`.
+        #[test]
+        fn memory_mebibytes_unit_label(n in any::<i64>()) {
+            prop_assert!(memory_mebibytes(n).ends_with(" MiB"));
+        }
+
+        /// `memory_mebibytes` returns `"0 MiB"` for any non-positive
+        /// input (encodes the documented zero-clamp).
+        #[test]
+        fn memory_mebibytes_clamps_non_positive(n in i64::MIN..=0) {
+            prop_assert_eq!(memory_mebibytes(n), "0 MiB");
+        }
+
+        /// `bytes_human`'s unit always corresponds to the magnitude.
+        /// We assert the suffix matches one of the four documented
+        /// labels.
+        #[test]
+        fn bytes_human_unit_in_known_set(n in any::<i64>()) {
+            let s = bytes_human(n);
+            prop_assert!(
+                s == "0"
+                    || s.ends_with(" KiB")
+                    || s.ends_with(" MiB")
+                    || s.ends_with(" GiB")
+                    || s.ends_with(" TiB"),
+                "unexpected unit in {s:?}"
+            );
+        }
+
+        /// `vm_state_label` and `storage_backend_label` always return
+        /// one of the documented strings, for any i32.
+        #[test]
+        fn enum_labels_known_set(state in any::<i32>(), backend in any::<i32>()) {
+            let v = vm_state_label(state);
+            prop_assert!(matches!(v, "Stopped" | "Running" | "Paused" | "Error" | "Unknown"));
+            let s = storage_backend_label(backend);
+            prop_assert!(matches!(s, "Filesystem" | "LVM" | "ZFS" | "Unspecified"));
+        }
+    }
+}

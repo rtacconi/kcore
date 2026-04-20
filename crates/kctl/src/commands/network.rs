@@ -361,3 +361,68 @@ fn ipv4_subnet_from_gateway_mask(gateway_ip: &str, netmask: &str) -> Option<Stri
         network[0], network[1], network[2], network[3], prefix
     ))
 }
+
+/// Property-based tests (Phase 2) — local network helpers.
+#[cfg(test)]
+mod proptests {
+    use super::{compute_bridge_name, ipv4_subnet_from_gateway_mask};
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `compute_bridge_name` always produces a name <= 15 bytes
+        /// (the Linux IFNAMSIZ - 1 limit) and is **deterministic**
+        /// for the same input.
+        #[test]
+        fn compute_bridge_name_is_short_and_deterministic(name in ".{0,64}") {
+            let a = compute_bridge_name(&name);
+            let b = compute_bridge_name(&name);
+            prop_assert_eq!(&a, &b);
+            prop_assert!(a.len() <= 15, "bridge name {a:?} ({} bytes) > 15", a.len());
+        }
+
+        /// Short names retain the `kbr-` prefix; long names use the
+        /// hashed `kb-` prefix.
+        #[test]
+        fn compute_bridge_name_uses_correct_prefix(name in "[a-z0-9]{0,32}") {
+            let bridge = compute_bridge_name(&name);
+            let full = format!("kbr-{name}");
+            if full.len() <= 15 {
+                prop_assert_eq!(bridge, full);
+            } else {
+                prop_assert!(bridge.starts_with("kb-"));
+                prop_assert_eq!(bridge.len(), 11);
+            }
+        }
+
+        /// `ipv4_subnet_from_gateway_mask` returns `None` for
+        /// non-parseable inputs and never panics.
+        #[test]
+        fn ipv4_subnet_never_panics(g in ".{0,32}", m in ".{0,32}") {
+            let _ = ipv4_subnet_from_gateway_mask(&g, &m);
+        }
+
+        /// **Soundness**: when both are valid IPv4 quads, the prefix
+        /// length is in `[0, 32]` and the network address equals
+        /// `gateway AND mask` byte-wise.
+        #[test]
+        fn ipv4_subnet_prefix_in_range_and_network_correct(
+            ga in 0u8..=255, gb in 0u8..=255, gc in 0u8..=255, gd in 0u8..=255,
+            ma in 0u8..=255, mb in 0u8..=255, mc in 0u8..=255, md in 0u8..=255,
+        ) {
+            let g = format!("{ga}.{gb}.{gc}.{gd}");
+            let m = format!("{ma}.{mb}.{mc}.{md}");
+            let result = ipv4_subnet_from_gateway_mask(&g, &m).expect("valid quads parse");
+            // result is "<a>.<b>.<c>.<d>/<p>"
+            let (net, prefix) = result.split_once('/').expect("has prefix");
+            let p: u8 = prefix.parse().expect("prefix is integer");
+            prop_assert!(p <= 32, "prefix {p} > 32");
+            let expected_net = format!("{}.{}.{}.{}", ga & ma, gb & mb, gc & mc, gd & md);
+            prop_assert_eq!(net, expected_net);
+        }
+    }
+}

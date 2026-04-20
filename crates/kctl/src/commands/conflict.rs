@@ -156,3 +156,58 @@ mod tests {
         assert_eq!(v.chars().count(), 8);
     }
 }
+
+/// Property-based tests (Phase 2) — `truncate`.
+#[cfg(test)]
+mod proptests {
+    use super::truncate;
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// `truncate` never panics on arbitrary input.
+        #[test]
+        fn truncate_never_panics(s in ".{0,64}", max in 0usize..=64) {
+            let _ = truncate(&s, max);
+        }
+
+        /// `truncate(s, max)`'s `chars().count()` is always at most
+        /// `max(input_chars, max)` — i.e. it never exceeds either the
+        /// input length or the requested cap.
+        #[test]
+        fn truncate_respects_max(s in ".{0,64}", max in 0usize..=64) {
+            let out = truncate(&s, max);
+            let out_chars = out.chars().count();
+            let in_chars = s.chars().count();
+            // If input fits, output equals input.
+            if in_chars <= max {
+                prop_assert_eq!(out, s);
+            } else {
+                // Otherwise the output is `keep + "..."` where
+                // `keep = max - 3` (saturating), so `out_chars == max`
+                // for `max >= 3`. For `max < 3` the implementation
+                // produces just `"..."` of length 3.
+                prop_assert!(out.ends_with("..."));
+                if max >= 3 {
+                    prop_assert_eq!(out_chars, max);
+                } else {
+                    prop_assert_eq!(out_chars, 3);
+                }
+            }
+        }
+
+        /// `truncate` is **idempotent** when the second pass uses a
+        /// `max` >= the previous output's char count.
+        #[test]
+        fn truncate_idempotent_at_or_above_output_length(s in ".{0,64}", max in 0usize..=64) {
+            let once = truncate(&s, max);
+            let len = once.chars().count();
+            let twice = truncate(&once, len);
+            prop_assert_eq!(once, twice);
+        }
+    }
+}

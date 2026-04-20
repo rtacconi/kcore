@@ -73,3 +73,56 @@ mod tests {
         );
     }
 }
+
+/// Property-based tests (Phase 2) — `render_apply_summary`.
+#[cfg(test)]
+mod proptests {
+    use super::{render_apply_summary, ApplyAction};
+    use proptest::prelude::*;
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 2_000,
+            .. ProptestConfig::default()
+        })]
+
+        /// Output never panics and always **contains** the
+        /// `kind_and_name` substring (so the operator can grep the
+        /// log for the resource).
+        #[test]
+        fn always_contains_kind_and_name(
+            action in any::<i32>(),
+            fields in proptest::collection::vec("[a-z_]{1,10}", 0..5),
+            kind_and_name in "[a-zA-Z][a-zA-Z 0-9'-]{0,32}",
+        ) {
+            let out = render_apply_summary(action, &fields, &kind_and_name);
+            prop_assert!(out.contains(&kind_and_name), "{out:?} missing {kind_and_name:?}");
+        }
+
+        /// Output is always one of the four documented action prefixes.
+        #[test]
+        fn output_starts_with_known_verb(
+            action in any::<i32>(),
+            fields in proptest::collection::vec("[a-z_]{1,10}", 0..3),
+        ) {
+            let out = render_apply_summary(action, &fields, "X");
+            let known = out.starts_with("created ")
+                || out.starts_with("updated ")
+                || out.starts_with("unchanged ")
+                || out.starts_with("applied ");
+            prop_assert!(known, "unknown verb in {out:?}");
+        }
+
+        /// `Updated` action with fields always includes the
+        /// comma-joined field list.
+        #[test]
+        fn updated_includes_fields(
+            fields in proptest::collection::vec("[a-z_]{1,10}", 1..5),
+        ) {
+            let out = render_apply_summary(ApplyAction::Updated as i32, &fields, "X");
+            for f in &fields {
+                prop_assert!(out.contains(f.as_str()), "{out:?} missing field {f:?}");
+            }
+        }
+    }
+}
