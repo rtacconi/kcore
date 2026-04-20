@@ -58,8 +58,31 @@ pub fn sanitize_nix_attr_key(s: &str) -> String {
 /// Rejects `..` in both `/` and `\` splits so strings like
 /// `file:../../x` cannot bypass `std::path::Path` component parsing
 /// (which treats those as a single path segment).
+///
+/// Implemented as a flat byte loop rather than `path.split([...])
+/// .any(...)`. Functionally equivalent (the separator chars `/` and
+/// `\` are single-byte ASCII, so byte-level splitting matches
+/// `str::split` over a UTF-8 string), but the byte loop generates a
+/// dramatically smaller symbolic formula for Kani: the iterator-
+/// over-`Pattern` machinery in `core::str::pattern` produced ~9 min
+/// CBMC runs on a 4-byte input, while this loop completes the same
+/// harness in seconds.
 pub fn path_segments_include_dot_dot(path: &str) -> bool {
-    path.split(['/', '\\']).any(|segment| segment == "..")
+    let bytes = path.as_bytes();
+    let mut start = 0usize;
+    let mut i = 0usize;
+    let n = bytes.len();
+    while i <= n {
+        let at_boundary = i == n || bytes[i] == b'/' || bytes[i] == b'\\';
+        if at_boundary {
+            if i - start == 2 && bytes[start] == b'.' && bytes[start + 1] == b'.' {
+                return true;
+            }
+            start = i + 1;
+        }
+        i += 1;
+    }
+    false
 }
 
 /// Reasons `assert_safe_path` may reject a string. The caller is
@@ -499,9 +522,16 @@ mod kani_proofs {
     }
 
     // ---- path_segments_include_dot_dot / assert_safe_path ----
+    //
+    // These three harnesses exercise the byte-loop path scanner.
+    // With `MAX_INPUT_LEN = 4` the scanning loop iterates at most 5
+    // times (one extra for the trailing `i == n` boundary case),
+    // so `unwind(6)` is sufficient. CBMC will still hard-fail with
+    // an unwinding-assertion violation if a future bound increase
+    // outgrows this, so this is safe to tighten.
 
     #[kani::proof]
-    #[kani::unwind(9)]
+    #[kani::unwind(6)]
     fn dot_dot_check_never_panics() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
@@ -509,7 +539,7 @@ mod kani_proofs {
     }
 
     #[kani::proof]
-    #[kani::unwind(9)]
+    #[kani::unwind(6)]
     fn assert_safe_path_never_panics() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
@@ -520,7 +550,7 @@ mod kani_proofs {
     /// non-empty, contains no NUL byte, and contains no `..`
     /// segment under either separator.
     #[kani::proof]
-    #[kani::unwind(9)]
+    #[kani::unwind(6)]
     fn assert_safe_path_acceptance_implies_safe() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
