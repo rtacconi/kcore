@@ -681,28 +681,41 @@ pub async fn apply_nix(info: &ConnectionInfo, file: &str, rebuild: bool) -> Resu
     }
 }
 
-pub async fn apply_disko_layout(
+pub async fn apply_disk_layout(
     info: &ConnectionInfo,
     file: &str,
     apply: bool,
     timeout_seconds: i32,
+    rebuild: bool,
 ) -> Result<()> {
     let content = std::fs::read_to_string(file).with_context(|| format!("reading {file}"))?;
     let mut client = client::node_admin_client(info).await?;
     let resp = client
-        .apply_disko_layout(node_proto::ApplyDiskoLayoutRequest {
-            disko_nix: content,
+        .apply_disk_layout(node_proto::ApplyDiskLayoutRequest {
+            disk_layout_nix: content,
             apply,
             timeout_seconds,
+            rebuild,
         })
         .await?
         .into_inner();
     if resp.success {
         println!("{}", resp.message);
-        println!("disko mode: {}", resp.mode);
+        println!("disk management mode: {}", resp.mode);
         Ok(())
+    } else if !resp.refusal_reason.is_empty() {
+        anyhow::bail!(
+            "disk layout apply refused (mode={}, reason={}): {}",
+            resp.mode,
+            resp.refusal_reason,
+            resp.message
+        )
     } else {
-        anyhow::bail!("disko apply failed (mode={}): {}", resp.mode, resp.message)
+        anyhow::bail!(
+            "disk layout apply failed (mode={}): {}",
+            resp.mode,
+            resp.message
+        )
     }
 }
 

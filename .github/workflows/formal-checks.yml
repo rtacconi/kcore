@@ -76,27 +76,51 @@ jobs:
   # toolchain is identical), so the first shard to finish install
   # warms the cache for all the others on subsequent runs.
   kani-shard:
-    name: kani-shard / ${{ matrix.harness }}
+    name: kani-shard / ${{ matrix.crate }} :: ${{ matrix.harness }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     strategy:
-      # `fail-fast: false` lets all 9 harnesses report results even
+      # `fail-fast: false` lets all harnesses report results even
       # if one regresses; otherwise GHA cancels the rest and we lose
       # signal on the others.
       fail-fast: false
       matrix:
-        # Fully-qualified harness paths from
-        # `crates/kcore-sanitize/src/lib.rs::kani_proofs`.
-        harness:
-          - kani_proofs::nix_escape_never_panics
-          - kani_proofs::nix_escape_output_is_always_safe
-          - kani_proofs::sanitize_nix_attr_key_preserves_char_count
-          - kani_proofs::sanitize_nix_attr_key_charset
-          - kani_proofs::dot_dot_check_never_panics
-          - kani_proofs::assert_safe_path_never_panics
-          - kani_proofs::assert_safe_path_acceptance_implies_safe
-          - kani_proofs::segment_validation_never_panics
-          - kani_proofs::segment_acceptance_implies_safe
+        # Fully-qualified harness paths from each crate's
+        # `kani_proofs` module. `crate` selects which workspace
+        # member `cargo kani -p` operates on.
+        include:
+          - crate: kcore-sanitize
+            harness: kani_proofs::nix_escape_never_panics
+          - crate: kcore-sanitize
+            harness: kani_proofs::nix_escape_output_is_always_safe
+          - crate: kcore-sanitize
+            harness: kani_proofs::sanitize_nix_attr_key_preserves_char_count
+          - crate: kcore-sanitize
+            harness: kani_proofs::sanitize_nix_attr_key_charset
+          - crate: kcore-sanitize
+            harness: kani_proofs::dot_dot_check_never_panics
+          - crate: kcore-sanitize
+            harness: kani_proofs::assert_safe_path_never_panics
+          - crate: kcore-sanitize
+            harness: kani_proofs::assert_safe_path_acceptance_implies_safe
+          - crate: kcore-sanitize
+            harness: kani_proofs::segment_validation_never_panics
+          - crate: kcore-sanitize
+            harness: kani_proofs::segment_acceptance_implies_safe
+          # `kcore-disko-types` is the shared, std-only crate used by
+          # both the controller pre-flight classifier and the node-
+          # agent authoritative classifier. The harnesses below cover
+          # the layout-diff parser (`extract_target_devices` +
+          # `strip_nix_comments`) — its post-conditions are what
+          # downstream classifier safety arguments rest on.
+          - crate: kcore-disko-types
+            harness: kani_proofs::extract_target_devices_never_panics
+          - crate: kcore-disko-types
+            harness: kani_proofs::strip_nix_comments_preserves_length
+          - crate: kcore-disko-types
+            harness: kani_proofs::extract_target_devices_outputs_dev_prefixed_paths
+          - crate: kcore-disko-types
+            harness: kani_proofs::extract_target_devices_is_deterministic
     # Pinned kani-verifier version. Bumping this single env var
     # (here AND in the cache key below) is the only change needed
     # to roll forward; the install step honours it and the cache
@@ -125,7 +149,7 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: kani-${{ matrix.harness }}
+          shared-key: kani-${{ matrix.crate }}-${{ matrix.harness }}
 
       # Caches the Kani toolchain itself (CBMC + symex binaries +
       # ~/.kani layout). Cold install of kani-verifier from crates.io
@@ -216,11 +240,12 @@ jobs:
             ~/.kani
           key: ${{ steps.kani-cache.outputs.cache-primary-key }}
 
-      # All proofs live in `kcore-sanitize`, a leaf crate with **no
-      # non-std dependencies**, so Kani only has to compile that one
-      # crate (a few seconds) instead of the full controller dep
-      # graph (rusqlite-bundled SQLite, rcgen+aws-lc-rs, tonic, ...
-      # which takes >20 min on a 4-vCPU GHA runner).
+      # Each proof lives in a leaf crate with **no non-std
+      # dependencies** (`kcore-sanitize`, `kcore-disko-types`), so
+      # Kani only has to compile that one crate (a few seconds)
+      # instead of the full controller dep graph (rusqlite-bundled
+      # SQLite, rcgen+aws-lc-rs, tonic, ... which takes >20 min on
+      # a 4-vCPU GHA runner).
       #
       # `--harness` is a substring match; we anchor with the full
       # `kani_proofs::` module path so a future harness with a
@@ -232,7 +257,7 @@ jobs:
         run: |
           set -euo pipefail
           cargo-kani --version
-          cargo kani -p kcore-sanitize \
+          cargo kani -p '${{ matrix.crate }}' \
             --harness '${{ matrix.harness }}' \
             --output-format terse
 

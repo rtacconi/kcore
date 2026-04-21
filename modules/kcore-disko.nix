@@ -128,6 +128,15 @@ let
   ) cfg.controllerFragments;
 
   mergedControllerDevices = foldl' recursiveUpdate { } (map (f: f.devices) sortedFragments);
+
+  # The node-agent atomically writes the most-recent applied DiskLayout to
+  # cfg.persistedLayoutPath. When the file exists and the node is in
+  # controller-managed mode, we pull its `disko.devices` attrset into the
+  # final layout so nixos-rebuild and disko agree on the realised shape.
+  persistedAvailable =
+    cfg.managementMode == "controller-managed" && builtins.pathExists cfg.persistedLayoutPath;
+  persistedImport = if persistedAvailable then import cfg.persistedLayoutPath else { };
+  persistedDevices = persistedImport.disko.devices or { };
 in
 {
   options.kcore.disko = {
@@ -169,6 +178,17 @@ in
       ];
       default = "installer-only";
       description = "Ownership mode for disko changes.";
+    };
+
+    persistedLayoutPath = mkOption {
+      type = types.path;
+      default = /etc/kcore/disk/current.nix;
+      description = ''
+        Filesystem path of the most-recent DiskLayout the node-agent applied.
+        When present and managementMode = "controller-managed", its
+        `disko.devices` attrset is merged over the declared base layout so
+        NixOS and disko observe the same realised shape.
+      '';
     };
 
     controllerFragments = mkOption {
@@ -223,9 +243,13 @@ in
       ];
     }
     {
-      disko.devices = recursiveUpdate baseDevices (
-        if cfg.managementMode == "controller-managed" then mergedControllerDevices else { }
-      );
+      disko.devices =
+        let
+          withFragments = recursiveUpdate baseDevices (
+            if cfg.managementMode == "controller-managed" then mergedControllerDevices else { }
+          );
+        in
+        recursiveUpdate withFragments persistedDevices;
     }
   ]);
 }

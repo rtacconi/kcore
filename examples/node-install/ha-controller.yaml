@@ -1,0 +1,12 @@
+kind: NodeInstall
+metadata:
+  name: kvm-node-105
+spec:
+  node: 192.168.40.105:9091
+  osDisk: /dev/sda
+  runController: true
+  joinControllers:
+    - 192.168.40.107:9090
+  storageBackend: lvm
+  dcId: DC1
+  insecure: true

@@ -55,9 +55,16 @@ service NodeAdmin {
   // provided content and (optionally) triggers a nixos-rebuild.
   rpc ApplyNixConfig(ApplyNixConfigRequest) returns (ApplyNixConfigResponse);
 
-  // ApplyDiskoLayout validates/applies a disko layout for day-2 disk operations.
-  // Apply mode is only allowed when node disko management mode is controller-managed.
-  rpc ApplyDiskoLayout(ApplyDiskoLayoutRequest) returns (ApplyDiskoLayoutResponse);
+  // ApplyDiskLayout validates/applies a disk layout (implemented via disko)
+  // for day-2 disk operations. Apply mode is only allowed when node disk
+  // management mode is controller-managed.
+  rpc ApplyDiskLayout(ApplyDiskLayoutRequest) returns (ApplyDiskLayoutResponse);
+
+  // DEPRECATED: forwarding shim for the old name; will be removed one release
+  // after ApplyDiskLayout has shipped. Use ApplyDiskLayout instead.
+  rpc ApplyDiskoLayout(ApplyDiskoLayoutRequest) returns (ApplyDiskoLayoutResponse) {
+    option deprecated = true;
+  }
 
   // EnsureImage verifies/downloads an image file at destination_path and
   // enforces SHA256 integrity before VM activation.
@@ -429,19 +436,47 @@ message ApplyNixConfigResponse {
   string message = 2;
 }
 
-message ApplyDiskoLayoutRequest {
-  // Full Nix expression containing disko.devices definition.
-  string disko_nix = 1;
+message ApplyDiskLayoutRequest {
+  // Full Nix expression containing the layout (a `disko.devices` attribute set
+  // under the hood). Disko is still the tool that performs the partitioning;
+  // the operator surface uses the plain word "disk".
+  string disk_layout_nix = 1;
   // When true, run disko --mode format,mount. When false, syntax/eval validation only.
   bool apply = 2;
   // Maximum allowed runtime for command execution.
   int32 timeout_seconds = 3;
+  // When true (the default) and the layout applies successfully, chain
+  // nixos-rebuild test followed by nixos-rebuild switch so the persisted
+  // layout is evaluated by NixOS. When false, skip the rebuild (validation
+  // or local-only apply flows).
+  bool rebuild = 4;
 }
 
-message ApplyDiskoLayoutResponse {
+message ApplyDiskLayoutResponse {
   bool success = 1;
   string message = 2;
   string mode = 3; // installer-only or controller-managed
+  // When the request was refused by the classifier, this is a stable machine
+  // readable reason. Empty on success or non-classifier failures.
+  string refusal_reason = 4;
+}
+
+// DEPRECATED: renamed to ApplyDiskLayoutRequest. Keeps `disko_nix` field
+// for wire compatibility with clients on the previous release. New clients
+// MUST use ApplyDiskLayoutRequest.
+message ApplyDiskoLayoutRequest {
+  option deprecated = true;
+  string disko_nix = 1;
+  bool apply = 2;
+  int32 timeout_seconds = 3;
+}
+
+// DEPRECATED: renamed to ApplyDiskLayoutResponse.
+message ApplyDiskoLayoutResponse {
+  option deprecated = true;
+  bool success = 1;
+  string message = 2;
+  string mode = 3;
 }
 
 message EnsureImageRequest {

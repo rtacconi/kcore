@@ -1,0 +1,9 @@
+kind: NodeInstall
+metadata:
+  name: kvm-node-107
+spec:
+  node: 192.168.40.107:9091
+  osDisk: /dev/sda
+  runController: true
+  dcId: DC1
+  insecure: true

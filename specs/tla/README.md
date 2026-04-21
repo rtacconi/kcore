@@ -23,6 +23,16 @@ The intent is to check protocol-level safety/liveness properties with TLC.
   - Separates intra-DC and cross-DC anti-entropy actions.
   - Checks no-double-apply plus eventual cross-DC convergence after work is applied.
 
+- `DiskLayoutReconcile.tla` + `DiskLayoutReconcile.cfg`
+  - Per-resource state machine for the controller-orchestrated `DiskLayout`.
+  - Models `Generation` (controller-owned), `Observed` + `Phase` (node-owned),
+    and the node-agent classifier verdict `Safe`.
+  - Central safety invariant `Safety_AppliedImpliesSafe`: no resource ever
+    enters phase `Applied` without the node-agent classifier currently
+    declaring the proposed layout safe.
+  - Auxiliary invariants check that `Observed <= Generation` and that
+    terminal phases (`Applied`/`Failed`) imply the reconciler caught up.
+
 ## Running locally
 
 Preferred:

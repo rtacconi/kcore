@@ -146,6 +146,14 @@ enum Command {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Show a controller-side pre-flight diff/safety report for a manifest.
+    /// Currently supports `kind: DiskLayout` manifests; other kinds will be
+    /// added as their classifiers land.
+    Diff {
+        /// Path to the manifest file
+        #[arg(short = 'f', long = "filename")]
+        file: String,
+    },
     /// Show version
     Version,
     /// Unified workload operations via controller API
@@ -355,6 +363,12 @@ enum DeleteResource {
         #[arg(long)]
         force: bool,
     },
+    /// Delete a DiskLayout (controller-side; does not touch the node)
+    #[command(name = "disk-layout", alias = "disklayout")]
+    DiskLayout {
+        /// DiskLayout name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -482,6 +496,13 @@ enum GetResource {
         #[arg(long)]
         require_healthy: bool,
     },
+    /// List DiskLayout resources
+    #[command(name = "disk-layouts", alias = "disk-layout", alias = "disklayout")]
+    DiskLayouts {
+        /// Optional node filter (only show layouts targeted at this node)
+        #[arg(long = "target-node")]
+        target_node: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -525,6 +546,12 @@ enum DescribeResource {
     /// Describe cluster compliance report
     #[command(name = "compliance-report", alias = "compliance")]
     ComplianceReport,
+    /// Describe a DiskLayout (current generation, observed status, body)
+    #[command(name = "disk-layout", alias = "disklayout")]
+    DiskLayout {
+        /// DiskLayout name
+        name: String,
+    },
 }
 
 #[derive(Subcommand)]
@@ -597,9 +624,10 @@ enum NodeAction {
         #[arg(long)]
         no_rebuild: bool,
     },
-    /// Validate/apply a day-2 disko layout on a node
-    ApplyDisko {
-        /// Path to disko Nix expression file
+    /// Validate/apply a day-2 disk layout on a node (built on disko)
+    #[command(visible_alias = "apply-disko")]
+    ApplyDisk {
+        /// Path to the disk-layout Nix expression file
         #[arg(short = 'f', long = "filename")]
         file: String,
         /// Apply partitioning/mount changes (default validates only)
@@ -608,6 +636,9 @@ enum NodeAction {
         /// Command timeout in seconds
         #[arg(long = "timeout-seconds", default_value_t = 300)]
         timeout_seconds: i32,
+        /// Skip the automatic nixos-rebuild test+switch after apply
+        #[arg(long)]
+        no_rebuild: bool,
     },
     /// Upload a local image file to a node image cache
     UploadImage {
@@ -1024,6 +1055,12 @@ async fn main() {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
             commands::container::delete(&info, name, *force).await
         }
+        Command::Delete {
+            resource: DeleteResource::DiskLayout { name },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::disk_layout::delete(&info, name).await
+        }
 
         Command::Start {
             resource: StartResource::Vm { vm_id, target_node },
@@ -1151,6 +1188,12 @@ async fn main() {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::conflict::status(&info, *require_healthy).await
         }
+        Command::Get {
+            resource: GetResource::DiskLayouts { target_node },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::disk_layout::list(&info, target_node.as_deref()).await
+        }
 
         Command::Describe {
             resource: DescribeResource::Vm { name, target_node },
@@ -1187,6 +1230,12 @@ async fn main() {
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::compliance::report(&info).await
+        }
+        Command::Describe {
+            resource: DescribeResource::DiskLayout { name },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            commands::disk_layout::get(&info, name).await
         }
 
         Command::Node {
@@ -1286,14 +1335,16 @@ async fn main() {
         }
         Command::Node {
             action:
-                NodeAction::ApplyDisko {
+                NodeAction::ApplyDisk {
                     file,
                     apply,
                     timeout_seconds,
+                    no_rebuild,
                 },
         } => {
             let info = resolve_node(&cli).unwrap_or_else(|e| fatal(&e));
-            commands::node::apply_disko_layout(&info, file, *apply, *timeout_seconds).await
+            commands::node::apply_disk_layout(&info, file, *apply, *timeout_seconds, !no_rebuild)
+                .await
         }
         Command::Node {
             action:
@@ -1468,6 +1519,23 @@ async fn main() {
                         commands::apply::apply(&info, file, false).await
                     }
                 }
+            }
+        }
+
+        Command::Diff { file } => {
+            let classified = commands::apply::classify_manifest(file)
+                .unwrap_or_else(|e| fatal(&format!("{e:#}")));
+            match classified.kind.as_deref().map(str::to_ascii_lowercase) {
+                Some(ref k)
+                    if matches!(k.as_str(), "disklayout" | "disk-layout" | "disk_layout") =>
+                {
+                    let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+                    commands::disk_layout::diff_from_file(&info, file).await
+                }
+                Some(other) => fatal(&format!(
+                    "kctl diff currently only supports kind: DiskLayout (got {other})"
+                )),
+                None => fatal("manifest has no kind: field"),
             }
         }
 

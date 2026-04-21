@@ -92,7 +92,7 @@ iso:
 	@echo ""
 	@ls -lh result-iso/iso/*.iso
 	@echo ""
-	@echo "ISO built: result-iso/iso/nixos-kcore-$(VERSION)-x86_64-linux.iso"
+	@echo "ISO built: result-iso/iso/kcoreos-$(VERSION)-x86_64-linux.iso"
 
 iso-remote:
 	@echo "Building kcore ISO $(V) on remote Linux server..."

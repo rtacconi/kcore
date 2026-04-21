@@ -1,0 +1,16 @@
+[package]
+name = "kcore-disko-types"
+version = "0.1.0"
+edition = "2021"
+description = "Shared, pure types for DiskLayout resources: target-device extractor, live state snapshot, and safe/dangerous classifier. std-only to keep Kani build time cheap."
+
+# Keep this crate dependency-free (std only). The node-agent and controller
+# both depend on it and we want the Kani harness (phase4-kani) to compile in
+# seconds.
+[dependencies]
+
+[dev-dependencies]
+proptest = "1.11"
+
+[lints]
+workspace = true

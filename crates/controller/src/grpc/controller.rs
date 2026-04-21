@@ -9,7 +9,8 @@ use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL, CN_NODE_PREFIX};
 use crate::config::{NetworkConfig, ReplicationConfig};
 use crate::controller_proto;
 use crate::db::{
-    Database, NetworkRow, NodeRow, SecurityGroupRow, SecurityGroupRuleRow, VmRow, WorkloadRow,
+    Database, DiskLayoutRow, DiskLayoutStatusRow, NetworkRow, NodeRow, SecurityGroupRow,
+    SecurityGroupRuleRow, VmRow, WorkloadRow,
 };
 use crate::node_proto;
 use crate::{nixgen, node_client::NodeClients, scheduler};
@@ -47,6 +48,8 @@ const EVT_SECURITY_GROUP_DETACH: &str = "security_group.detach";
 const EVT_NODE_DRAIN: &str = "node.drain";
 const EVT_SSH_KEY_CREATE: &str = "ssh_key.create";
 const EVT_SSH_KEY_DELETE: &str = "ssh_key.delete";
+const EVT_DISK_LAYOUT_CREATE: &str = "disk_layout.create";
+const EVT_DISK_LAYOUT_DELETE: &str = "disk_layout.delete";
 
 fn normalize_sg_protocol(protocol: &str) -> Result<String, Status> {
     let p = protocol.trim().to_ascii_lowercase();
@@ -1004,6 +1007,305 @@ impl ControllerService {
             .append_replication_outbox(event_type, resource_key, &payload)
             .map_err(|e| Status::internal(format!("append replication outbox row: {e}")))?;
         Ok(())
+    }
+
+    // -- DiskLayout handlers ------------------------------------------------
+
+    async fn create_disk_layout_impl(
+        &self,
+        req: controller_proto::CreateDiskLayoutRequest,
+    ) -> Result<Response<controller_proto::CreateDiskLayoutResponse>, Status> {
+        let incoming = req
+            .disk_layout
+            .ok_or_else(|| Status::invalid_argument("disk_layout is required"))?;
+        let name = validate_network_name(&incoming.name)?;
+        let node_id = incoming.node_id.trim().to_string();
+        if node_id.is_empty() {
+            return Err(Status::invalid_argument("disk_layout.node_id is required"));
+        }
+        // Node must exist; DiskLayouts target exactly one registered node.
+        if self
+            .db
+            .get_node(&node_id)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .is_none()
+        {
+            return Err(Status::not_found(format!(
+                "node '{node_id}' is not registered"
+            )));
+        }
+        let layout_nix = incoming.layout_nix.trim().to_string();
+        if layout_nix.is_empty() {
+            return Err(Status::invalid_argument(
+                "disk_layout.layout_nix cannot be empty",
+            ));
+        }
+        // Minimal structural check: the DiskLayout still lowers to disko.
+        if !layout_nix.contains("disko.devices") {
+            return Err(Status::invalid_argument(
+                "disk_layout.layout_nix must define disko.devices",
+            ));
+        }
+
+        let existing = self
+            .db
+            .get_disk_layout(&name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let (action, changed_fields, generation) = if let Some(existing) = existing.as_ref() {
+            if existing.node_id != node_id {
+                return Err(Status::invalid_argument(format!(
+                    "cannot change immutable field(s) on disk layout '{name}': node_id \
+                     (delete the disk layout and recreate)"
+                )));
+            }
+            if existing.layout_nix == layout_nix {
+                (
+                    controller_proto::ApplyAction::Unchanged as i32,
+                    Vec::<String>::new(),
+                    existing.generation,
+                )
+            } else {
+                (
+                    controller_proto::ApplyAction::Updated as i32,
+                    vec!["layout_nix".to_string()],
+                    existing.generation.saturating_add(1),
+                )
+            }
+        } else {
+            (
+                controller_proto::ApplyAction::Created as i32,
+                Vec::<String>::new(),
+                1,
+            )
+        };
+
+        if action == controller_proto::ApplyAction::Unchanged as i32 {
+            let existing = existing.expect("unchanged implies existing");
+            let status = self
+                .db
+                .get_disk_layout_status(&name)
+                .map_err(|e| Status::internal(e.to_string()))?;
+            let proto_layout = disk_layout_to_proto(&existing);
+            let _ = status; // status not returned on Create; Get exposes it
+            return Ok(Response::new(controller_proto::CreateDiskLayoutResponse {
+                success: true,
+                disk_layout: Some(proto_layout),
+                action,
+                changed_fields,
+            }));
+        }
+
+        let row = DiskLayoutRow {
+            name: name.clone(),
+            node_id: node_id.clone(),
+            generation,
+            layout_nix: layout_nix.clone(),
+            created_at: String::new(),
+            updated_at: String::new(),
+        };
+        let stored = self
+            .db
+            .upsert_disk_layout(&row)
+            .map_err(|e| Status::internal(format!("upserting disk layout: {e}")))?;
+
+        // Reset status to Pending on any content change so the reconciler
+        // picks it up and the node-agent re-observes the new generation.
+        self.db
+            .upsert_disk_layout_status(&DiskLayoutStatusRow {
+                name: name.clone(),
+                observed_generation: 0,
+                phase: "pending".to_string(),
+                refusal_reason: String::new(),
+                message: String::new(),
+                last_transition_at: String::new(),
+            })
+            .map_err(|e| Status::internal(format!("resetting disk layout status: {e}")))?;
+
+        self.log_replication_event(
+            EVT_DISK_LAYOUT_CREATE,
+            &format!("disk-layout/{name}"),
+            serde_json::json!({
+                "name": name,
+                "nodeId": node_id,
+                "generation": generation,
+                "layoutNix": layout_nix,
+                "action": match action {
+                    x if x == controller_proto::ApplyAction::Created as i32 => "created",
+                    x if x == controller_proto::ApplyAction::Updated as i32 => "updated",
+                    _ => "unchanged",
+                },
+                "changedFields": changed_fields,
+            }),
+        );
+
+        Ok(Response::new(controller_proto::CreateDiskLayoutResponse {
+            success: true,
+            disk_layout: Some(disk_layout_to_proto(&stored)),
+            action,
+            changed_fields,
+        }))
+    }
+
+    async fn get_disk_layout_impl(
+        &self,
+        req: controller_proto::GetDiskLayoutRequest,
+    ) -> Result<Response<controller_proto::GetDiskLayoutResponse>, Status> {
+        let name = req.name.trim();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let row = self
+            .db
+            .get_disk_layout(name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("disk layout '{name}' not found")))?;
+        let status = self
+            .db
+            .get_disk_layout_status(name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok(Response::new(controller_proto::GetDiskLayoutResponse {
+            disk_layout: Some(disk_layout_to_proto(&row)),
+            status: status.map(|s| disk_layout_status_to_proto(&s)),
+        }))
+    }
+
+    async fn list_disk_layouts_impl(
+        &self,
+        req: controller_proto::ListDiskLayoutsRequest,
+    ) -> Result<Response<controller_proto::ListDiskLayoutsResponse>, Status> {
+        let filter = req.node_id.trim();
+        let rows = self
+            .db
+            .list_disk_layouts(if filter.is_empty() {
+                None
+            } else {
+                Some(filter)
+            })
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let statuses = self
+            .db
+            .list_disk_layout_statuses()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let status_by_name: HashMap<String, DiskLayoutStatusRow> =
+            statuses.into_iter().map(|s| (s.name.clone(), s)).collect();
+        let summaries = rows
+            .iter()
+            .map(|r| controller_proto::DiskLayoutSummary {
+                disk_layout: Some(disk_layout_to_proto(r)),
+                status: status_by_name.get(&r.name).map(disk_layout_status_to_proto),
+            })
+            .collect();
+        Ok(Response::new(controller_proto::ListDiskLayoutsResponse {
+            disk_layouts: summaries,
+        }))
+    }
+
+    async fn delete_disk_layout_impl(
+        &self,
+        req: controller_proto::DeleteDiskLayoutRequest,
+    ) -> Result<Response<controller_proto::DeleteDiskLayoutResponse>, Status> {
+        let name = req.name.trim().to_string();
+        if name.is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let existed = self
+            .db
+            .delete_disk_layout(&name)
+            .map_err(|e| Status::internal(format!("deleting disk layout: {e}")))?;
+        if existed {
+            self.log_replication_event(
+                EVT_DISK_LAYOUT_DELETE,
+                &format!("disk-layout/{name}"),
+                serde_json::json!({"name": name}),
+            );
+        }
+        Ok(Response::new(controller_proto::DeleteDiskLayoutResponse {
+            success: existed,
+        }))
+    }
+
+    async fn classify_disk_layout_impl(
+        &self,
+        req: controller_proto::ClassifyDiskLayoutRequest,
+    ) -> Result<Response<controller_proto::ClassifyDiskLayoutResponse>, Status> {
+        // Controller-side pre-flight: cheap structural checks + target-device
+        // extraction. The authoritative verdict still comes from the
+        // node-agent classifier, which uses live lsblk state.
+        let layout = req
+            .disk_layout
+            .ok_or_else(|| Status::invalid_argument("disk_layout is required"))?;
+        let layout_nix = layout.layout_nix.trim();
+        if layout_nix.is_empty() {
+            return Err(Status::invalid_argument(
+                "disk_layout.layout_nix cannot be empty",
+            ));
+        }
+        if !layout_nix.contains("disko.devices") {
+            return Ok(Response::new(
+                controller_proto::ClassifyDiskLayoutResponse {
+                    safe: false,
+                    refusal_reason: "invalid_layout".to_string(),
+                    detail: "layout_nix must define disko.devices".to_string(),
+                    target_devices: Vec::new(),
+                },
+            ));
+        }
+        let target_devices = kcore_disko_types::extract_target_devices(layout_nix);
+        if target_devices.is_empty() {
+            return Ok(Response::new(
+                controller_proto::ClassifyDiskLayoutResponse {
+                    safe: false,
+                    refusal_reason: kcore_disko_types::refusal::NO_TARGET_DEVICES.to_string(),
+                    detail: "layout did not declare any /dev/* target devices".to_string(),
+                    target_devices,
+                },
+            ));
+        }
+        // Controller does not yet maintain a replicated block-device inventory
+        // or a volume->device mapping table. Once those land (Phase 2 follow-up
+        // work) we will build an `LsblkSnapshot` here and call
+        // `kcore_disko_types::classify_disk_layout`. Until then, the
+        // controller's role is strictly structural: validate the manifest,
+        // surface the target devices for the operator to review, and let the
+        // node-agent have the last word.
+        Ok(Response::new(
+            controller_proto::ClassifyDiskLayoutResponse {
+                safe: true,
+                refusal_reason: String::new(),
+                detail: "controller pre-flight accepted; authoritative check runs on the node"
+                    .to_string(),
+                target_devices,
+            },
+        ))
+    }
+}
+
+fn disk_layout_to_proto(row: &DiskLayoutRow) -> controller_proto::DiskLayout {
+    controller_proto::DiskLayout {
+        name: row.name.clone(),
+        node_id: row.node_id.clone(),
+        generation: row.generation,
+        layout_nix: row.layout_nix.clone(),
+        created_at: parse_datetime_to_timestamp(&row.created_at),
+        updated_at: parse_datetime_to_timestamp(&row.updated_at),
+    }
+}
+
+fn disk_layout_status_to_proto(row: &DiskLayoutStatusRow) -> controller_proto::DiskLayoutStatus {
+    let phase = match row.phase.as_str() {
+        "pending" => controller_proto::DiskLayoutPhase::Pending as i32,
+        "applied" => controller_proto::DiskLayoutPhase::Applied as i32,
+        "refused" => controller_proto::DiskLayoutPhase::Refused as i32,
+        "failed" => controller_proto::DiskLayoutPhase::Failed as i32,
+        _ => controller_proto::DiskLayoutPhase::Unspecified as i32,
+    };
+    controller_proto::DiskLayoutStatus {
+        observed_generation: row.observed_generation,
+        phase,
+        refusal_reason: row.refusal_reason.clone(),
+        message: row.message.clone(),
+        last_transition_at: parse_datetime_to_timestamp(&row.last_transition_at),
     }
 }
 
@@ -4652,6 +4954,46 @@ impl controller_proto::controller_server::Controller for ControllerService {
                 nodes_luks_unknown: luks_unknown,
             },
         ))
+    }
+
+    async fn create_disk_layout(
+        &self,
+        request: Request<controller_proto::CreateDiskLayoutRequest>,
+    ) -> Result<Response<controller_proto::CreateDiskLayoutResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        self.create_disk_layout_impl(request.into_inner()).await
+    }
+
+    async fn get_disk_layout(
+        &self,
+        request: Request<controller_proto::GetDiskLayoutRequest>,
+    ) -> Result<Response<controller_proto::GetDiskLayoutResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        self.get_disk_layout_impl(request.into_inner()).await
+    }
+
+    async fn list_disk_layouts(
+        &self,
+        request: Request<controller_proto::ListDiskLayoutsRequest>,
+    ) -> Result<Response<controller_proto::ListDiskLayoutsResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        self.list_disk_layouts_impl(request.into_inner()).await
+    }
+
+    async fn delete_disk_layout(
+        &self,
+        request: Request<controller_proto::DeleteDiskLayoutRequest>,
+    ) -> Result<Response<controller_proto::DeleteDiskLayoutResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        self.delete_disk_layout_impl(request.into_inner()).await
+    }
+
+    async fn classify_disk_layout(
+        &self,
+        request: Request<controller_proto::ClassifyDiskLayoutRequest>,
+    ) -> Result<Response<controller_proto::ClassifyDiskLayoutResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        self.classify_disk_layout_impl(request.into_inner()).await
     }
 }
 

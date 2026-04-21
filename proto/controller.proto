@@ -70,6 +70,21 @@ service Controller {
 
   // Volume inventory: list all provisioned VM volumes across the cluster.
   rpc ListVolumes(ListVolumesRequest) returns (ListVolumesResponse);
+
+  // DiskLayout resource — per-node declarative disk layout. Implemented on the
+  // node via disko; the operator surface uses the plain word "disk". Each
+  // DiskLayout targets exactly one node; dangerous requests (those that would
+  // touch a device currently backing an active workload) are refused by both
+  // the controller pre-flight and the authoritative node-agent re-classifier.
+  rpc CreateDiskLayout(CreateDiskLayoutRequest) returns (CreateDiskLayoutResponse);
+  rpc GetDiskLayout(GetDiskLayoutRequest) returns (GetDiskLayoutResponse);
+  rpc ListDiskLayouts(ListDiskLayoutsRequest) returns (ListDiskLayoutsResponse);
+  rpc DeleteDiskLayout(DeleteDiskLayoutRequest) returns (DeleteDiskLayoutResponse);
+
+  // Read-only pre-flight that runs the controller-side classifier without
+  // persisting or dispatching to the node. Used by `kctl diff disklayout` so
+  // operators can see SAFE/DANGEROUS before applying.
+  rpc ClassifyDiskLayout(ClassifyDiskLayoutRequest) returns (ClassifyDiskLayoutResponse);
 }
 
 message RegisterNodeRequest {
@@ -975,4 +990,103 @@ message VolumeInfo {
   string backend_handle = 6;     // Actual path: /dev/vg_kcore/kcore-<vm> or /var/lib/...
   string image_format = 7;       // raw, qcow2
   VmState vm_state = 8;
+}
+
+// DiskLayout resource ---------------------------------------------------
+
+// Lifecycle phase of a DiskLayout. Pending until the reconciler has
+// dispatched the node-agent RPC, then Applied / Refused / Failed based on the
+// authoritative response.
+enum DiskLayoutPhase {
+  DISK_LAYOUT_PHASE_UNSPECIFIED = 0;
+  DISK_LAYOUT_PHASE_PENDING = 1;
+  DISK_LAYOUT_PHASE_APPLIED = 2;
+  DISK_LAYOUT_PHASE_REFUSED = 3;
+  DISK_LAYOUT_PHASE_FAILED = 4;
+}
+
+message DiskLayout {
+  // Stable operator-facing name (metadata.name in the manifest).
+  string name = 1;
+  // Target node; every DiskLayout applies to exactly one node.
+  string node_id = 2;
+  // Monotonically-increasing generation, bumped on every accepted Create
+  // (upsert) that produces a content change.
+  int64 generation = 3;
+  // Full Nix expression (a `disko.devices` attrset under the hood).
+  string layout_nix = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+message DiskLayoutStatus {
+  int64 observed_generation = 1;
+  DiskLayoutPhase phase = 2;
+  // Stable refusal code when phase = REFUSED (mirrors
+  // ApplyDiskLayoutResponse.refusal_reason).
+  string refusal_reason = 3;
+  // Human-readable detail from the last reconcile.
+  string message = 4;
+  // Wall-clock of the last observed status transition on the node.
+  google.protobuf.Timestamp last_transition_at = 5;
+}
+
+message CreateDiskLayoutRequest {
+  DiskLayout disk_layout = 1;
+}
+
+message CreateDiskLayoutResponse {
+  bool success = 1;
+  DiskLayout disk_layout = 2;
+  ApplyAction action = 3;              // upsert outcome: created|updated|unchanged
+  repeated string changed_fields = 4;  // names of mutated fields when action == UPDATED
+}
+
+message GetDiskLayoutRequest {
+  string name = 1;
+}
+
+message GetDiskLayoutResponse {
+  DiskLayout disk_layout = 1;
+  DiskLayoutStatus status = 2;
+}
+
+message ListDiskLayoutsRequest {
+  // Optional filter: when non-empty, only layouts for this node are returned.
+  string node_id = 1;
+}
+
+message DiskLayoutSummary {
+  DiskLayout disk_layout = 1;
+  DiskLayoutStatus status = 2;
+}
+
+message ListDiskLayoutsResponse {
+  repeated DiskLayoutSummary disk_layouts = 1;
+}
+
+message DeleteDiskLayoutRequest {
+  string name = 1;
+}
+
+message DeleteDiskLayoutResponse {
+  bool success = 1;
+}
+
+message ClassifyDiskLayoutRequest {
+  // The same payload the operator would send to CreateDiskLayout.
+  DiskLayout disk_layout = 1;
+}
+
+message ClassifyDiskLayoutResponse {
+  // When true, the controller pre-flight classifier has no objection. The
+  // authoritative node-agent classifier will re-check before apply.
+  bool safe = 1;
+  // Stable refusal code when safe = false (matches
+  // ApplyDiskLayoutResponse.refusal_reason).
+  string refusal_reason = 2;
+  // Human-readable explanation for the operator.
+  string detail = 3;
+  // Target block-device paths the controller extracted from layout_nix.
+  repeated string target_devices = 4;
 }

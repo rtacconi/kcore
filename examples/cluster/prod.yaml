@@ -1,0 +1,5 @@
+kind: Cluster
+metadata:
+  name: prod
+spec:
+  controller: 192.168.40.107:9090

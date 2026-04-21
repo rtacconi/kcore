@@ -4,6 +4,7 @@ pub mod cluster;
 pub mod compliance;
 pub mod conflict;
 pub mod container;
+pub mod disk_layout;
 pub mod image;
 pub mod network;
 pub mod node;

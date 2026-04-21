@@ -444,6 +444,41 @@ impl Controller for MockController {
     ) -> Result<Response<ListVolumesResponse>, Status> {
         Err(unimp("list_volumes"))
     }
+
+    async fn create_disk_layout(
+        &self,
+        _: Request<CreateDiskLayoutRequest>,
+    ) -> Result<Response<CreateDiskLayoutResponse>, Status> {
+        Err(unimp("create_disk_layout"))
+    }
+
+    async fn get_disk_layout(
+        &self,
+        _: Request<GetDiskLayoutRequest>,
+    ) -> Result<Response<GetDiskLayoutResponse>, Status> {
+        Err(unimp("get_disk_layout"))
+    }
+
+    async fn list_disk_layouts(
+        &self,
+        _: Request<ListDiskLayoutsRequest>,
+    ) -> Result<Response<ListDiskLayoutsResponse>, Status> {
+        Err(unimp("list_disk_layouts"))
+    }
+
+    async fn delete_disk_layout(
+        &self,
+        _: Request<DeleteDiskLayoutRequest>,
+    ) -> Result<Response<DeleteDiskLayoutResponse>, Status> {
+        Err(unimp("delete_disk_layout"))
+    }
+
+    async fn classify_disk_layout(
+        &self,
+        _: Request<ClassifyDiskLayoutRequest>,
+    ) -> Result<Response<ClassifyDiskLayoutResponse>, Status> {
+        Err(unimp("classify_disk_layout"))
+    }
 }
 
 #[tonic::async_trait]

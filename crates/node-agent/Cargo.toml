@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4", features = ["derive"] }
 kcore-sanitize = { path = "../kcore-sanitize" }
+kcore-disko-types = { path = "../kcore-disko-types" }
 hostname = "0.4"
 hyper = { version = "1", features = ["client", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio", "client-legacy"] }

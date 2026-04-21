@@ -111,16 +111,23 @@ For day-2 additions of new data disks, the `disko` CLI is available on installed
 
 For kcore, the backing VG or pool is created by disko at install time. VM **volumes** are then created at runtime by the node agent (`lvcreate`, `zfs create -V`, etc.) against the VG or pool named in `node-agent.yaml`.
 
+## Disk management modes (safe installer/controller split)
+
+> Naming note. The user-facing surface is **disk** (`DiskLayout`,
+> `kctl ... disk-layout`, `/etc/kcore/disk-management-mode`). Disko is still
+> the underlying tool that performs the partitioning; we just don't lead with
+> the brand name on operator-facing surfaces.
+
 ## Disko Ownership Modes (safe installer/controller split)
 
 kcore uses an explicit ownership split for disk partitioning state:
 
-- `installer-only` (default): install-time layout is authoritative; controller day-2 disko apply is blocked.
-- `controller-managed`: controller/kctl day-2 disko apply is allowed.
+- `installer-only` (default): install-time layout is authoritative; controller / `kctl` day-2 disk apply is blocked.
+- `controller-managed`: controller / `kctl` day-2 disk apply is allowed.
 
 Install-time behavior writes the default mode marker:
 
-- `/etc/kcore/disko-management-mode` contains `installer-only` after `node install`.
+- `/etc/kcore/disk-management-mode` contains `installer-only` after `node install` (the legacy `/etc/kcore/disko-management-mode` path is still read as a fallback for one release; a symlink is created for backwards compatibility).
 
 This prevents accidental day-2 destructive layout changes on newly installed nodes until operators explicitly promote ownership.
 
@@ -129,25 +136,56 @@ This prevents accidental day-2 destructive layout changes on newly installed nod
 Operators can promote a node explicitly once runbooks and maintenance windows are in place:
 
 ```bash
-echo controller-managed | sudo tee /etc/kcore/disko-management-mode
+echo controller-managed | sudo tee /etc/kcore/disk-management-mode
 ```
 
 ### Apply mode safety gate
 
-`kcore-kctl node apply-disko --apply` succeeds only in `controller-managed` mode.  
-In `installer-only`, the RPC returns a clear rejection and reports the active mode.
+`kcore-kctl node apply-disk --apply` (alias `apply-disko` kept for one release)
+succeeds only in `controller-managed` mode. In `installer-only`, the RPC
+returns a clear rejection and reports the active mode.
 
-## Day-2 Disko workflow (validate first, then apply)
+## Day-2 disk workflows
 
-### 1) Prepare disko layout file
+There are two equivalent ways to drive a day-2 disk change.
 
-Create a Nix file that defines `disko.devices` for the intended day-2 change (for example adding a new data disk).
+### A) Declarative `kctl apply -f` (recommended)
 
-### 2) Validate only (recommended first step)
+Submit a `DiskLayout` manifest to the controller; the controller persists it,
+replicates it, and the controller-side reconciler pushes it to the target
+node:
+
+```yaml
+kind: DiskLayout
+metadata:
+  name: prod-data-pool
+spec:
+  nodeId: node-prod-01
+  layoutNixFile: ./day2-disk.nix   # or inline `layoutNix: |`
+```
 
 ```bash
-kcore-kctl --node 192.168.40.105:9091 node apply-disko \
-  -f ./day2-disko.nix
+kcore-kctl diff   -f day2-disk-layout.yaml   # controller pre-flight, no writes
+kcore-kctl apply  -f day2-disk-layout.yaml   # creates/updates DiskLayout
+kcore-kctl get disk-layouts                  # see status (pending / applied / refused)
+kcore-kctl describe disk-layout prod-data-pool
+```
+
+The node-agent classifier (live `lsblk` based) is the authoritative gate.
+If the node-agent refuses (e.g. the targeted disk currently backs an active
+kcore volume), the refusal code lands on the layout's `status.refusalReason`
+and the operator can drain the affected VMs and resubmit the same manifest —
+the generation does not bump on unchanged content, so the reconciler will
+retry until the node accepts.
+
+### B) Direct node-agent push (`kctl node apply-disk`)
+
+For one-off operator workflows (validation, manual apply), you can still push
+straight to a single node-agent:
+
+```bash
+kcore-kctl --node 192.168.40.105:9091 node apply-disk \
+  -f ./day2-disk.nix
 ```
 
 Validation parses/evaluates layout input without partitioning disks.
@@ -155,8 +193,8 @@ Validation parses/evaluates layout input without partitioning disks.
 ### 3) Apply with bounded timeout (controller-managed mode only)
 
 ```bash
-kcore-kctl --node 192.168.40.105:9091 node apply-disko \
-  -f ./day2-disko.nix \
+kcore-kctl --node 192.168.40.105:9091 node apply-disk \
+  -f ./day2-disk.nix \
   --apply \
   --timeout-seconds 600
 ```
@@ -165,10 +203,10 @@ Runtime is bounded server-side (`timeout`), and command output includes success/
 
 ### 4) Reconcile mounts/services
 
-After successful day-2 disko apply, run:
-
-- `kcore-kctl --node <node:9091> node apply-nix -f <node-config.nix>`
-- or a full `nixos-rebuild switch` on-node, depending on your operational workflow.
+The node-agent persists the applied layout to `/etc/kcore/disk/current.nix`
+and chains `nixos-rebuild test` followed by `nixos-rebuild switch`
+automatically. There is no longer a separate manual `apply-nix` step —
+operators pass `--no-rebuild` only for validation flows or local tests.
 
 ## Controller-side disko fragments (multi-node consistency)
 

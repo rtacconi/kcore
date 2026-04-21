@@ -360,6 +360,41 @@ impl Controller for ManyVmsController {
     ) -> Result<Response<ListVolumesResponse>, Status> {
         Err(Status::unimplemented(""))
     }
+
+    async fn create_disk_layout(
+        &self,
+        _: TRequest<CreateDiskLayoutRequest>,
+    ) -> Result<Response<CreateDiskLayoutResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+
+    async fn get_disk_layout(
+        &self,
+        _: TRequest<GetDiskLayoutRequest>,
+    ) -> Result<Response<GetDiskLayoutResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+
+    async fn list_disk_layouts(
+        &self,
+        _: TRequest<ListDiskLayoutsRequest>,
+    ) -> Result<Response<ListDiskLayoutsResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+
+    async fn delete_disk_layout(
+        &self,
+        _: TRequest<DeleteDiskLayoutRequest>,
+    ) -> Result<Response<DeleteDiskLayoutResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+
+    async fn classify_disk_layout(
+        &self,
+        _: TRequest<ClassifyDiskLayoutRequest>,
+    ) -> Result<Response<ClassifyDiskLayoutResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
 }
 
 async fn spawn_many_vms_controller() -> SocketAddr {

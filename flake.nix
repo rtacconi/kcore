@@ -211,6 +211,7 @@
                   dashboard = inputs.self.packages.x86_64-linux.kcore-dashboard;
                   diskoPackage = inputs.disko.packages.x86_64-linux.default;
                   kcoreDiskoModule = ./modules/kcore-disko.nix;
+                  kcoreBrandingModule = ./modules/kcore-branding.nix;
                 in
                 {
                   system.stateVersion = "25.05";
@@ -424,11 +425,23 @@
                                                                 fi
 
                                                                 echo "======================================================"
-                                                                echo "  KCORE Node - Automated Disk Installer"
+                                                                echo "  kcoreOS Node - Automated Disk Installer"
                                                                 echo "======================================================"
                                                                 echo ""
-                                                                echo "WARNING: This will ERASE the selected disk and install NixOS!"
+                                                                echo "WARNING: This will ERASE the selected disk and install kcoreOS!"
                                                                 echo ""
+
+                                                                print_install_overview() {
+                                                                  echo "kcoreOS hardware discovery"
+                                                                  echo "--------------------------"
+                                                                  echo "Network interfaces:"
+                                                                  ip -o -4 addr show scope global | awk '{print "  - " $2 "  " $4}' || true
+                                                                  echo ""
+                                                                  echo "Disks:"
+                                                                  lsblk -d -o NAME,SIZE,MODEL,TYPE | awk '$4 == "disk" {printf "  - /dev/%s  %s  %s\n", $1, $2, $3}'
+                                                                  echo ""
+                                                                }
+                                                                print_install_overview
 
                                                                 echo "Available disks:"
                                                                 lsblk -d -o NAME,SIZE,TYPE,MODEL | grep disk
@@ -688,7 +701,7 @@
                                                                   echo "Data disks formatted via disko (backend: $DATA_DISK_MODE)."
                                                                 fi
 
-                                                                echo "Generating NixOS hardware configuration..."
+                                                                echo "Generating kcoreOS hardware configuration..."
                                                                 nixos-generate-config --root /mnt
 
                                                                 echo "Copying kcore binaries..."
@@ -708,6 +721,7 @@
 
                                                                 echo "Copying disko configuration..."
                                                                 cp ${kcoreDiskoModule} /mnt/etc/nixos/modules/kcore-disko.nix
+                                                                cp ${kcoreBrandingModule} /mnt/etc/nixos/modules/kcore-branding.nix
                                                                 cp /tmp/disko-config.nix /mnt/etc/nixos/disko-config.nix
 
                                                                 echo "Copying kcore config and certificates..."
@@ -724,7 +738,9 @@
                                                                   printf "%s\n" "''${DATA_DISKS[@]}" > /mnt/etc/kcore/data-disks
                                                                 fi
                                                                 # Safe split default: installer owns disk layout until explicitly promoted.
-                                                                echo "installer-only" > /mnt/etc/kcore/disko-management-mode
+                                                                echo "installer-only" > /mnt/etc/kcore/disk-management-mode
+                                                                # Compatibility symlink so node-agents on the previous release still see the mode.
+                                                                ln -sf disk-management-mode /mnt/etc/kcore/disko-management-mode
 
                                                                 if [ "$DISABLE_VXLAN" = "true" ]; then
                                                                   touch /mnt/etc/kcore/disable-vxlan
@@ -958,7 +974,7 @@
                                                                   )
                                                                 fi
 
-                                                                # Build LUKS boot config for NixOS
+                                                                # Build LUKS boot config for kcoreOS
                                                                 ROOT_PART_UUID=$(blkid -s UUID -o value "$ROOT_PART")
                                                                 LUKS_BOOT_CONFIG=""
                                                                 if [ "$LUKS_METHOD" = "tpm2" ]; then
@@ -985,7 +1001,7 @@
                                                                   LUKS_BOOT_CONFIG="''${LUKS_BOOT_CONFIG//ROOT_PART_UUID_PLACEHOLDER/$ROOT_PART_UUID}"
                                                                 fi
 
-                                                                # --- Storage-specific NixOS configuration ---
+                                                                # --- Storage-specific kcoreOS configuration ---
                                                                 STORAGE_BOOT_CONFIG=""
                                                                 HOST_ID=$(echo "$INSTALL_HOSTNAME" | md5sum | head -c 8)
                                                                 case "$DATA_DISK_MODE" in
@@ -1005,7 +1021,7 @@
                                                                     ;;
                                                                 esac
 
-                                                                echo "Writing NixOS configuration..."
+                                                                echo "Writing kcoreOS configuration..."
                                                                 cat > /mnt/etc/nixos/configuration.nix <<NIXEOF
                       { config, pkgs, lib, ... }:
                       {
@@ -1014,6 +1030,7 @@
                         imports = [
                           ./hardware-configuration.nix
                           ./modules/ch-vm
+                          ./modules/kcore-branding.nix
                           ./kcore-vms.nix
                         ];
 
@@ -1108,7 +1125,7 @@
                       }
                       NIXEOF
 
-                                                                echo "Installing NixOS (this will take 10-20 minutes)..."
+                                                                echo "Installing kcoreOS (this will take 10-20 minutes)..."
                                                                 export NIX_CONFIG="experimental-features = nix-command flakes"
                                                                 export NIX_PATH="nixos-config=/mnt/etc/nixos/configuration.nix:nixpkgs=${pkgs.path}"
                                                                 nixos-install --no-root-passwd
@@ -1210,7 +1227,7 @@
                   isoImage.volumeID = "KCORE";
                   isoImage.makeUsbBootable = true;
                   isoImage.makeEfiBootable = true;
-                  image.fileName = "nixos-kcore-${kcoreVersion}-x86_64-linux.iso";
+                  image.fileName = "kcoreos-${kcoreVersion}-x86_64-linux.iso";
                 }
               )
             ];

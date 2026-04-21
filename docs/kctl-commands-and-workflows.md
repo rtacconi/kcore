@@ -317,20 +317,53 @@ Skip rebuild (write only):
 kctl --node 10.0.0.21:9091 node apply-nix -f ./node-config.nix --no-rebuild
 ```
 
-Validate a day-2 disko layout on a node:
+Validate a day-2 disk layout on a node (no writes, structural + classifier check only):
 
 ```bash
-kctl --node 10.0.0.21:9091 node apply-disko -f ./day2-disko.nix
+kctl --node 10.0.0.21:9091 node apply-disk -f ./day2-disk.nix
 ```
 
-Apply a day-2 disko layout (requires `controller-managed` disko mode on node):
+Apply a day-2 disk layout to a single node (requires `controller-managed`
+disk-management mode on the node). The node-agent persists the layout to
+`/etc/kcore/disk/current.nix` and chains `nixos-rebuild test` then
+`nixos-rebuild switch` automatically; pass `--no-rebuild` to skip:
 
 ```bash
-kctl --node 10.0.0.21:9091 node apply-disko \
-  -f ./day2-disko.nix \
+kctl --node 10.0.0.21:9091 node apply-disk \
+  -f ./day2-disk.nix \
   --apply \
   --timeout-seconds 600
 ```
+
+The legacy `node apply-disko` spelling stays as an alias for one release.
+
+### Declarative DiskLayout via the controller (preferred)
+
+Submit the same Nix body as a controller-managed `DiskLayout` resource so it
+is replicated across controllers and reconciled to the target node:
+
+```yaml
+kind: DiskLayout
+metadata:
+  name: prod-data-pool
+spec:
+  nodeId: node-prod-01
+  layoutNixFile: ./day2-disk.nix
+```
+
+```bash
+kctl diff   -f day2-disk-layout.yaml
+kctl apply  -f day2-disk-layout.yaml
+kctl get    disk-layouts
+kctl describe disk-layout prod-data-pool
+kctl delete disk-layout prod-data-pool   # removes it from the controller; does NOT touch the node
+```
+
+The controller never touches VMs. If the node-agent's classifier refuses the
+layout (the targeted disk currently backs an active kcore volume, an active
+LVM PV, or a ZFS pool member), the refusal code surfaces on
+`status.refusalReason`. Drain the affected VMs and resubmit the same
+manifest — the reconciler retries until the node accepts.
 
 ## 7) Image operations
 
@@ -483,7 +516,8 @@ Top-level commands:
 - `kctl node nics`
 - `kctl node install --os-disk ... --join-controller ... [--data-disk ...] [--storage-backend filesystem|lvm|zfs] [--disable-vxlan]`
 - `kctl node apply-nix -f ... [--no-rebuild]`
-- `kctl node apply-disko -f ... [--apply] [--timeout-seconds N]`
+- `kctl node apply-disk -f ... [--apply] [--timeout-seconds N] [--no-rebuild]` (alias `apply-disko`)
+- `kctl apply -f <DiskLayout>.yaml`, `kctl diff -f <DiskLayout>.yaml`, `kctl get disk-layouts`, `kctl describe disk-layout <name>`, `kctl delete disk-layout <name>`
 - `kctl pull image <uri>` (legacy/manual path)
 - `kctl node approve <NODE_ID>`
 - `kctl node reject <NODE_ID>`
@@ -507,7 +541,7 @@ Day-2 operations:
 2. review compliance posture with `kctl get compliance-report` (crypto, mTLS, access control, encryption at rest, per-node cert and LUKS status)
 3. adjust desired VM running state with `kctl set vm ... --state ...` (or `kctl start/stop vm ...`)
 4. update configs with `kctl node apply-nix ...` or `kctl apply ...`
-5. for day-2 disk layout changes, use `kctl node apply-disko ...` (validate first, then `--apply`)
+5. for day-2 disk layout changes, prefer declarative `kctl apply -f <DiskLayout>.yaml` (use `kctl diff -f` first); for one-off pushes, `kctl node apply-disk ...` (validate first, then `--apply`)
 6. rotate controller cert with `kctl rotate certs --controller <host:port>`
 7. rotate sub-CA with `kctl rotate sub-ca`
 

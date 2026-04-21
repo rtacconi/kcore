@@ -1417,6 +1417,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "kcore-disko-types",
  "kcore-sanitize",
  "libc",
  "pem",
@@ -1468,6 +1469,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "kcore-disko-types"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+]
+
+[[package]]
 name = "kcore-kctl"
 version = "0.1.0"
 dependencies = [
@@ -1505,6 +1513,7 @@ dependencies = [
  "hyper",
  "hyper-util",
  "hyperlocal",
+ "kcore-disko-types",
  "kcore-sanitize",
  "libc",
  "pem",

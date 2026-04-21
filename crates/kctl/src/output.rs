@@ -315,7 +315,7 @@ pub fn print_compliance_report(r: &controller_proto::GetComplianceReportResponse
         "Infrastructure",
         &["SOC 2 CC8.1", "PCI DSS 2.2", "PCI DSS 6.3"],
     );
-    field("OS", "NixOS (declarative, atomic updates)");
+    field("OS", "kcoreOS (declarative, atomic updates)");
     field("Hypervisor", "Cloud Hypervisor (KVM)");
     field(
         "VM Isolation",

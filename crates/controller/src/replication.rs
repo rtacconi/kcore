@@ -634,6 +634,8 @@ fn apply_replication_event(
         | "security_group.detach"
         | "ssh_key.create"
         | "ssh_key.delete"
+        | "disk_layout.create"
+        | "disk_layout.delete"
         | "controller.register" => {
             // Phase-2 skeleton: payload validation + typed dispatch point.
             Ok(())
@@ -924,6 +926,13 @@ fn apply_domain_compensation(
                 let _ = db
                     .delete_ssh_key(name)
                     .map_err(|e| format!("compensate ssh_key.create delete {name}: {e}"))?;
+            }
+        }
+        "disk_layout.create" => {
+            if let Some(name) = loser_body.get("name").and_then(Value::as_str) {
+                let _ = db
+                    .delete_disk_layout(name)
+                    .map_err(|e| format!("compensate disk_layout.create delete {name}: {e}"))?;
             }
         }
         _ => {}
@@ -1568,6 +1577,30 @@ fn apply_head_to_domain(db: &Database, head: &ReplicationResourceHeadRow) -> Res
             let dc_id = body.get("dcId").and_then(Value::as_str).unwrap_or("DC1");
             db.upsert_controller_peer(controller_id, address, dc_id)
                 .map_err(|e| format!("upsert controller peer {controller_id}: {e}"))?;
+            Ok(())
+        }
+        "disk_layout.create" => {
+            let name = required_str(&body, "name", &head.resource_key)?;
+            let node_id = required_str(&body, "nodeId", &head.resource_key)?;
+            let layout_nix = required_str(&body, "layoutNix", &head.resource_key)?;
+            let generation = body.get("generation").and_then(Value::as_i64).unwrap_or(1);
+            let row = crate::db::DiskLayoutRow {
+                name: name.to_string(),
+                node_id: node_id.to_string(),
+                generation,
+                layout_nix: layout_nix.to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            };
+            db.upsert_disk_layout(&row)
+                .map_err(|e| format!("upsert disk layout {name}: {e}"))?;
+            Ok(())
+        }
+        "disk_layout.delete" => {
+            let name = required_str(&body, "name", &head.resource_key)?;
+            let _ = db
+                .delete_disk_layout(name)
+                .map_err(|e| format!("delete disk layout {name}: {e}"))?;
             Ok(())
         }
         _ => Ok(()),

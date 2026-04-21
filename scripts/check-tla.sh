@@ -33,6 +33,7 @@ pushd "${SPEC_DIR}" >/dev/null
 run_tlc "ControllerNodeReconcile.tla" "ControllerNodeReconcile.cfg"
 run_tlc "ControllerReplication.tla" "ControllerReplication.cfg"
 run_tlc "CrossDcReplication.tla" "CrossDcReplication.cfg"
+run_tlc "DiskLayoutReconcile.tla" "DiskLayoutReconcile.cfg"
 popd >/dev/null
 
 echo "TLA+ model checks passed."

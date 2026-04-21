@@ -1,0 +1,11 @@
+kind: NodeInstall
+metadata:
+  name: kvm-node-151
+spec:
+  node: 192.168.40.151:9091
+  osDisk: /dev/sda
+  joinControllers:
+    - 192.168.40.107:9090
+    - 192.168.40.105:9090
+  dcId: DC1
+  insecure: true

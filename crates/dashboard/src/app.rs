@@ -367,7 +367,7 @@ fn compliance_view(data: ComplianceDto) -> impl IntoView {
                 <h2>"Infrastructure"</h2>
                 <dl class="kv">
                     <dt>"Controller"</dt><dd>{data.controller_version.clone()}</dd>
-                    <dt>"OS"</dt><dd>"NixOS (declarative, atomic updates)"</dd>
+                    <dt>"OS"</dt><dd>"kcoreOS (declarative, atomic updates)"</dd>
                     <dt>"Hypervisor"</dt><dd>"Cloud Hypervisor (KVM)"</dd>
                     <dt>"VM isolation"</dt><dd>"Hardware KVM + per-VM TAP + per-network bridge"</dd>
                     <dt>"Node approval"</dt><dd>"Required (approval queue)"</dd>

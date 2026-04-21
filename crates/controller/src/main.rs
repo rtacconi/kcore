@@ -9,6 +9,7 @@
 mod auth;
 mod config;
 mod db;
+mod disk_reconciler;
 mod grpc;
 mod nixgen;
 mod node_client;
@@ -114,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
     replication::spawn_compensation_executor(database.clone());
     replication::spawn_head_materializer(database.clone());
     replication::spawn_reservation_retry_executor(database.clone());
+    disk_reconciler::spawn_disk_layout_reconciler(database.clone(), clients.clone());
 
     let staleness_db = database.clone();
     tokio::spawn(async move {

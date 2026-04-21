@@ -129,6 +129,26 @@ pub struct SecurityGroupVmAttachmentRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct DiskLayoutRow {
+    pub name: String,
+    pub node_id: String,
+    pub generation: i64,
+    pub layout_nix: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DiskLayoutStatusRow {
+    pub name: String,
+    pub observed_generation: i64,
+    pub phase: String,
+    pub refusal_reason: String,
+    pub message: String,
+    pub last_transition_at: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SecurityGroupNetworkAttachmentRow {
     pub security_group: String,
     pub network_name: String,
@@ -362,6 +382,23 @@ impl Database {
                 network_name TEXT NOT NULL,
                 node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
                 PRIMARY KEY (security_group, network_name, node_id)
+            );
+            CREATE TABLE IF NOT EXISTS disk_layouts (
+                name TEXT PRIMARY KEY,
+                node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                generation INTEGER NOT NULL DEFAULT 1,
+                layout_nix TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            );
+            CREATE INDEX IF NOT EXISTS idx_disk_layouts_node ON disk_layouts(node_id);
+            CREATE TABLE IF NOT EXISTS disk_layout_status (
+                name TEXT PRIMARY KEY REFERENCES disk_layouts(name) ON DELETE CASCADE,
+                observed_generation INTEGER NOT NULL DEFAULT 0,
+                phase TEXT NOT NULL DEFAULT 'pending',
+                refusal_reason TEXT NOT NULL DEFAULT '',
+                message TEXT NOT NULL DEFAULT '',
+                last_transition_at TEXT NOT NULL DEFAULT (datetime('now'))
             );",
         )?;
 
@@ -725,7 +762,29 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 26;
+        if version < 27 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS disk_layouts (
+                    name TEXT PRIMARY KEY,
+                    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                    generation INTEGER NOT NULL DEFAULT 1,
+                    layout_nix TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE INDEX IF NOT EXISTS idx_disk_layouts_node ON disk_layouts(node_id);
+                CREATE TABLE IF NOT EXISTS disk_layout_status (
+                    name TEXT PRIMARY KEY REFERENCES disk_layouts(name) ON DELETE CASCADE,
+                    observed_generation INTEGER NOT NULL DEFAULT 0,
+                    phase TEXT NOT NULL DEFAULT 'pending',
+                    refusal_reason TEXT NOT NULL DEFAULT '',
+                    message TEXT NOT NULL DEFAULT '',
+                    last_transition_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 27;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -1942,6 +2001,202 @@ impl Database {
         let conn = self.lock_conn()?;
         let rows = conn.execute("DELETE FROM security_groups WHERE name = ?1", params![name])?;
         Ok(rows > 0)
+    }
+
+    pub fn upsert_disk_layout(
+        &self,
+        layout: &DiskLayoutRow,
+    ) -> Result<DiskLayoutRow, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO disk_layouts (name, node_id, generation, layout_nix)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(name) DO UPDATE SET
+               node_id = excluded.node_id,
+               generation = excluded.generation,
+               layout_nix = excluded.layout_nix,
+               updated_at = datetime('now')",
+            params![
+                layout.name,
+                layout.node_id,
+                layout.generation,
+                layout.layout_nix,
+            ],
+        )?;
+        let mut stmt = conn.prepare(
+            "SELECT name, node_id, generation, layout_nix, created_at, updated_at
+             FROM disk_layouts WHERE name = ?1",
+        )?;
+        let row = stmt.query_row(params![layout.name], |row| {
+            Ok(DiskLayoutRow {
+                name: row.get(0)?,
+                node_id: row.get(1)?,
+                generation: row.get(2)?,
+                layout_nix: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        Ok(row)
+    }
+
+    pub fn get_disk_layout(&self, name: &str) -> Result<Option<DiskLayoutRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, node_id, generation, layout_nix, created_at, updated_at
+             FROM disk_layouts WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![name], |row| {
+            Ok(DiskLayoutRow {
+                name: row.get(0)?,
+                node_id: row.get(1)?,
+                generation: row.get(2)?,
+                layout_nix: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn list_disk_layouts(
+        &self,
+        node_id_filter: Option<&str>,
+    ) -> Result<Vec<DiskLayoutRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        if let Some(node_id) = node_id_filter {
+            let mut stmt = conn.prepare(
+                "SELECT name, node_id, generation, layout_nix, created_at, updated_at
+                 FROM disk_layouts WHERE node_id = ?1 ORDER BY name ASC",
+            )?;
+            let rows = stmt.query_map(params![node_id], |row| {
+                Ok(DiskLayoutRow {
+                    name: row.get(0)?,
+                    node_id: row.get(1)?,
+                    generation: row.get(2)?,
+                    layout_nix: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?;
+            rows.collect()
+        } else {
+            let mut stmt = conn.prepare(
+                "SELECT name, node_id, generation, layout_nix, created_at, updated_at
+                 FROM disk_layouts ORDER BY name ASC",
+            )?;
+            let rows = stmt.query_map([], |row| {
+                Ok(DiskLayoutRow {
+                    name: row.get(0)?,
+                    node_id: row.get(1)?,
+                    generation: row.get(2)?,
+                    layout_nix: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })?;
+            rows.collect()
+        }
+    }
+
+    pub fn delete_disk_layout(&self, name: &str) -> Result<bool, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let rows = conn.execute("DELETE FROM disk_layouts WHERE name = ?1", params![name])?;
+        Ok(rows > 0)
+    }
+
+    pub fn upsert_disk_layout_status(
+        &self,
+        status: &DiskLayoutStatusRow,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO disk_layout_status (
+                name, observed_generation, phase, refusal_reason, message, last_transition_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, datetime('now'))
+             ON CONFLICT(name) DO UPDATE SET
+               observed_generation = excluded.observed_generation,
+               phase = excluded.phase,
+               refusal_reason = excluded.refusal_reason,
+               message = excluded.message,
+               last_transition_at = datetime('now')",
+            params![
+                status.name,
+                status.observed_generation,
+                status.phase,
+                status.refusal_reason,
+                status.message,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_disk_layout_status(
+        &self,
+        name: &str,
+    ) -> Result<Option<DiskLayoutStatusRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, observed_generation, phase, refusal_reason, message, last_transition_at
+             FROM disk_layout_status WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![name], |row| {
+            Ok(DiskLayoutStatusRow {
+                name: row.get(0)?,
+                observed_generation: row.get(1)?,
+                phase: row.get(2)?,
+                refusal_reason: row.get(3)?,
+                message: row.get(4)?,
+                last_transition_at: row.get(5)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn list_disk_layout_statuses(&self) -> Result<Vec<DiskLayoutStatusRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, observed_generation, phase, refusal_reason, message, last_transition_at
+             FROM disk_layout_status",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DiskLayoutStatusRow {
+                name: row.get(0)?,
+                observed_generation: row.get(1)?,
+                phase: row.get(2)?,
+                refusal_reason: row.get(3)?,
+                message: row.get(4)?,
+                last_transition_at: row.get(5)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    /// Return disk layouts whose status has `observed_generation < generation`
+    /// (or no status row yet). These are the rows the reconciler should push
+    /// to the node-agent on the next tick.
+    pub fn list_disk_layouts_needing_reconcile(
+        &self,
+    ) -> Result<Vec<DiskLayoutRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT d.name, d.node_id, d.generation, d.layout_nix, d.created_at, d.updated_at
+             FROM disk_layouts d
+             LEFT JOIN disk_layout_status s ON s.name = d.name
+             WHERE s.name IS NULL OR s.observed_generation < d.generation
+             ORDER BY d.name ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(DiskLayoutRow {
+                name: row.get(0)?,
+                node_id: row.get(1)?,
+                generation: row.get(2)?,
+                layout_nix: row.get(3)?,
+                created_at: row.get(4)?,
+                updated_at: row.get(5)?,
+            })
+        })?;
+        rows.collect()
     }
 
     pub fn replace_security_group_rules(
@@ -3862,6 +4117,207 @@ mod proptests {
             prop_assert_eq!(&after_first.luks_method, &after_second.luks_method);
             prop_assert_eq!(&after_first.status, &after_second.status);
             prop_assert_eq!(&after_first.approval_status, &after_second.approval_status);
+        }
+
+        /// **DiskLayout CRUD round-trip**: for any randomised
+        /// `DiskLayoutRow` whose `node_id` matches an existing node,
+        /// `upsert_disk_layout` followed by `get_disk_layout` returns
+        /// a row whose user-set fields equal the inserted ones.
+        #[test]
+        fn disk_layout_upsert_then_get_returns_same_row(
+            node_id in "[a-z0-9-]{1,8}",
+            name in "[a-z0-9-]{1,12}",
+            generation in 1i64..=1024,
+            layout_nix in "[ -~\n]{0,256}",
+        ) {
+            let db = Database::open(":memory:").expect("open db");
+            db.upsert_node(&make_node(
+                &node_id, "h", "127.0.0.1:9091",
+                4, 1024, 0, 0, false, 0, "DC1",
+            )).unwrap();
+
+            let layout = DiskLayoutRow {
+                name: name.clone(),
+                node_id: node_id.clone(),
+                generation,
+                layout_nix: layout_nix.clone(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            };
+            db.upsert_disk_layout(&layout).unwrap();
+
+            let got = db.get_disk_layout(&name).unwrap().expect("layout exists");
+            prop_assert_eq!(&got.name, &name);
+            prop_assert_eq!(&got.node_id, &node_id);
+            prop_assert_eq!(got.generation, generation);
+            prop_assert_eq!(&got.layout_nix, &layout_nix);
+            prop_assert!(!got.created_at.is_empty());
+            prop_assert!(!got.updated_at.is_empty());
+        }
+
+        /// **DiskLayout upsert is idempotent**: applying the same row
+        /// twice yields exactly one row in `list_disk_layouts`.
+        #[test]
+        fn disk_layout_upsert_is_idempotent(
+            node_id in "[a-z0-9-]{1,8}",
+            name in "[a-z0-9-]{1,12}",
+        ) {
+            let db = Database::open(":memory:").expect("open db");
+            db.upsert_node(&make_node(
+                &node_id, "h", "127.0.0.1:9091",
+                4, 1024, 0, 0, false, 0, "DC1",
+            )).unwrap();
+
+            let layout = DiskLayoutRow {
+                name: name.clone(),
+                node_id: node_id.clone(),
+                generation: 1,
+                layout_nix: "{ disko.devices = {}; }".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            };
+            db.upsert_disk_layout(&layout).unwrap();
+            db.upsert_disk_layout(&layout).unwrap();
+
+            let listed = db.list_disk_layouts(None).unwrap();
+            prop_assert_eq!(listed.len(), 1);
+            prop_assert_eq!(&listed[0].name, &name);
+
+            let only_node = db.list_disk_layouts(Some(&node_id)).unwrap();
+            prop_assert_eq!(only_node.len(), 1);
+        }
+
+        /// **DiskLayout FK integrity**: inserting a layout whose
+        /// `node_id` does not exist must fail with a SQLite FK
+        /// constraint violation.
+        #[test]
+        fn disk_layout_rejects_unknown_node_id(
+            present_node in "[a-z0-9-]{1,8}",
+            missing_node in "[a-z0-9-]{1,8}",
+            name in "[a-z0-9-]{1,12}",
+        ) {
+            prop_assume!(present_node != missing_node);
+            let db = Database::open(":memory:").expect("open db");
+            db.upsert_node(&make_node(
+                &present_node, "h", "127.0.0.1:9091",
+                1, 1024, 0, 0, false, 0, "DC1",
+            )).unwrap();
+
+            let layout = DiskLayoutRow {
+                name,
+                node_id: missing_node,
+                generation: 1,
+                layout_nix: "{}".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            };
+            const SQLITE_CONSTRAINT_FOREIGNKEY: i32 = 787;
+            match db.upsert_disk_layout(&layout) {
+                Ok(_) => prop_assert!(false, "expected FK violation, got Ok"),
+                Err(rusqlite::Error::SqliteFailure(sqlite_err, _))
+                    if sqlite_err.code == rusqlite::ErrorCode::ConstraintViolation
+                        && sqlite_err.extended_code == SQLITE_CONSTRAINT_FOREIGNKEY => {}
+                Err(other) => prop_assert!(
+                    false,
+                    "expected SQLITE_CONSTRAINT_FOREIGNKEY, got: {other}"
+                ),
+            }
+        }
+
+        /// **DiskLayout delete removes from every view**: after
+        /// `delete_disk_layout`, the layout disappears from
+        /// `get_disk_layout` and `list_disk_layouts` and any status
+        /// row is cascaded away.
+        #[test]
+        fn disk_layout_delete_removes_from_all_views(
+            node_id in "[a-z0-9-]{1,8}",
+            name in "[a-z0-9-]{1,12}",
+        ) {
+            let db = Database::open(":memory:").expect("open db");
+            db.upsert_node(&make_node(
+                &node_id, "h", "127.0.0.1:9091",
+                4, 1024, 0, 0, false, 0, "DC1",
+            )).unwrap();
+
+            let layout = DiskLayoutRow {
+                name: name.clone(),
+                node_id: node_id.clone(),
+                generation: 7,
+                layout_nix: "{}".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            };
+            db.upsert_disk_layout(&layout).unwrap();
+            db.upsert_disk_layout_status(&DiskLayoutStatusRow {
+                name: name.clone(),
+                observed_generation: 7,
+                phase: "applied".to_string(),
+                refusal_reason: String::new(),
+                message: "ok".to_string(),
+                last_transition_at: String::new(),
+            }).unwrap();
+
+            let deleted = db.delete_disk_layout(&name).unwrap();
+            prop_assert!(deleted);
+            prop_assert!(db.get_disk_layout(&name).unwrap().is_none());
+            prop_assert!(db.get_disk_layout_status(&name).unwrap().is_none());
+            let listed = db.list_disk_layouts(None).unwrap();
+            prop_assert!(!listed.iter().any(|l| l.name == name));
+        }
+
+        /// **Reconciler queue invariant**: a layout shows up in
+        /// `list_disk_layouts_needing_reconcile` iff it has no status
+        /// row, or its status `observed_generation` is strictly
+        /// behind the layout's `generation`. Once status catches up,
+        /// it must drop out of the queue.
+        #[test]
+        fn disk_layout_reconcile_queue_tracks_observed_generation(
+            node_id in "[a-z0-9-]{1,8}",
+            name in "[a-z0-9-]{1,12}",
+            generation in 1i64..=64,
+        ) {
+            let db = Database::open(":memory:").expect("open db");
+            db.upsert_node(&make_node(
+                &node_id, "h", "127.0.0.1:9091",
+                4, 1024, 0, 0, false, 0, "DC1",
+            )).unwrap();
+
+            db.upsert_disk_layout(&DiskLayoutRow {
+                name: name.clone(),
+                node_id: node_id.clone(),
+                generation,
+                layout_nix: "{}".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            }).unwrap();
+
+            let pending = db.list_disk_layouts_needing_reconcile().unwrap();
+            prop_assert!(pending.iter().any(|l| l.name == name),
+                "freshly created layout must be queued for reconcile");
+
+            db.upsert_disk_layout_status(&DiskLayoutStatusRow {
+                name: name.clone(),
+                observed_generation: generation,
+                phase: "applied".to_string(),
+                refusal_reason: String::new(),
+                message: String::new(),
+                last_transition_at: String::new(),
+            }).unwrap();
+            let after = db.list_disk_layouts_needing_reconcile().unwrap();
+            prop_assert!(!after.iter().any(|l| l.name == name),
+                "layout with observed_generation == generation must NOT be queued");
+
+            db.upsert_disk_layout(&DiskLayoutRow {
+                name: name.clone(),
+                node_id: node_id.clone(),
+                generation: generation + 1,
+                layout_nix: "{ updated = true; }".to_string(),
+                created_at: String::new(),
+                updated_at: String::new(),
+            }).unwrap();
+            let bumped = db.list_disk_layouts_needing_reconcile().unwrap();
+            prop_assert!(bumped.iter().any(|l| l.name == name),
+                "layout whose generation moved past observed_generation must be re-queued");
         }
     }
 }

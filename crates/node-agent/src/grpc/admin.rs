@@ -13,6 +13,8 @@ use tracing::{error, info};
 
 use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL};
 use crate::discovery;
+use crate::disk::classifier::{self, Verdict};
+use crate::disk::lsblk;
 use crate::proto;
 use crate::storage::{self, StorageAdapter};
 pub struct AdminService {
@@ -26,9 +28,13 @@ const BOOTSTRAP_CERT_DIR: &str = "/etc/kcore/certs";
 const INSTALL_LOG_DIR: &str = "/var/log/kcore";
 const NIXOS_CONFIG_PATH: &str = "/etc/nixos/configuration.nix";
 const IMAGE_CACHE_DIR: &str = "/var/lib/kcore/images";
-const DISKO_MANAGEMENT_MODE_PATH: &str = "/etc/kcore/disko-management-mode";
-const DISKO_MODE_INSTALLER_ONLY: &str = "installer-only";
-const DISKO_MODE_CONTROLLER_MANAGED: &str = "controller-managed";
+const DISK_MANAGEMENT_MODE_PATH: &str = "/etc/kcore/disk-management-mode";
+const DISK_MANAGEMENT_MODE_PATH_LEGACY: &str = "/etc/kcore/disko-management-mode";
+const DISK_MODE_INSTALLER_ONLY: &str = "installer-only";
+const DISK_MODE_CONTROLLER_MANAGED: &str = "controller-managed";
+const DISK_LAYOUT_DIR: &str = "/etc/kcore/disk";
+const DISK_LAYOUT_CURRENT_PATH: &str = "/etc/kcore/disk/current.nix";
+const KCORE_VOLUME_ROOTS: &[&str] = &["/var/lib/kcore/volumes", "/var/lib/kcore/images"];
 
 async fn resolve_nixpkgs_path() -> Option<String> {
     for candidate in [
@@ -116,20 +122,21 @@ fn validate_disk_path(path: &str, field: &str) -> Result<(), Status> {
     Ok(())
 }
 
-fn normalize_disko_management_mode(raw: &str) -> &'static str {
+fn normalize_disk_management_mode(raw: &str) -> &'static str {
     match raw.trim().to_ascii_lowercase().as_str() {
-        DISKO_MODE_CONTROLLER_MANAGED => DISKO_MODE_CONTROLLER_MANAGED,
-        _ => DISKO_MODE_INSTALLER_ONLY,
+        DISK_MODE_CONTROLLER_MANAGED => DISK_MODE_CONTROLLER_MANAGED,
+        _ => DISK_MODE_INSTALLER_ONLY,
     }
 }
 
-fn read_disko_management_mode() -> &'static str {
-    let raw = std::fs::read_to_string(DISKO_MANAGEMENT_MODE_PATH)
-        .unwrap_or_else(|_| DISKO_MODE_INSTALLER_ONLY.to_string());
-    normalize_disko_management_mode(&raw)
+fn read_disk_management_mode() -> &'static str {
+    let raw = std::fs::read_to_string(DISK_MANAGEMENT_MODE_PATH)
+        .or_else(|_| std::fs::read_to_string(DISK_MANAGEMENT_MODE_PATH_LEGACY))
+        .unwrap_or_else(|_| DISK_MODE_INSTALLER_ONLY.to_string());
+    normalize_disk_management_mode(&raw)
 }
 
-fn validate_disko_timeout_seconds_or_default(timeout_seconds: i32) -> u64 {
+fn validate_disk_timeout_seconds_or_default(timeout_seconds: i32) -> u64 {
     if timeout_seconds <= 0 {
         300
     } else {
@@ -902,6 +909,193 @@ fn build_install_command_args(req: &proto::InstallToDiskRequest) -> Result<Vec<S
     Ok(args)
 }
 
+async fn apply_disk_layout_impl(
+    req: proto::ApplyDiskLayoutRequest,
+) -> Result<Response<proto::ApplyDiskLayoutResponse>, Status> {
+    let mode = read_disk_management_mode();
+
+    if req.disk_layout_nix.trim().is_empty() {
+        return Err(Status::invalid_argument("disk_layout_nix cannot be empty"));
+    }
+    // The underlying tool is still disko; enforce the disko.devices attribute so
+    // we fail fast on configuration that cannot possibly be applied.
+    if !req.disk_layout_nix.contains("disko.devices") {
+        return Err(Status::invalid_argument(
+            "disk_layout_nix must define disko.devices",
+        ));
+    }
+    if req.apply && mode != DISK_MODE_CONTROLLER_MANAGED {
+        return Ok(Response::new(proto::ApplyDiskLayoutResponse {
+            success: false,
+            message: "node is in installer-only disk management mode; enable controller-managed mode first"
+                .to_string(),
+            mode: mode.to_string(),
+            refusal_reason: String::new(),
+        }));
+    }
+
+    // Safe/dangerous classifier runs only for apply mode. Validate-only calls
+    // never touch the disks, so they are always permitted.
+    if req.apply {
+        let targets = classifier::extract_target_devices(&req.disk_layout_nix);
+        match lsblk::snapshot().await {
+            Ok(snap) => {
+                let verdict = classifier::classify_disk_layout(&targets, &snap, KCORE_VOLUME_ROOTS);
+                if let Verdict::Dangerous { code, detail } = verdict {
+                    info!(
+                        refusal_reason = code,
+                        detail = %detail,
+                        targets = ?targets,
+                        "refusing dangerous disk layout apply"
+                    );
+                    return Ok(Response::new(proto::ApplyDiskLayoutResponse {
+                        success: false,
+                        message: detail,
+                        mode: mode.to_string(),
+                        refusal_reason: code.to_string(),
+                    }));
+                }
+            }
+            Err(e) => {
+                // Fail closed: if we can't confirm the node is idle, refuse.
+                error!(error = %e, "lsblk snapshot failed; refusing disk layout apply");
+                return Ok(Response::new(proto::ApplyDiskLayoutResponse {
+                    success: false,
+                    message: format!("could not inspect block devices to classify request: {e}"),
+                    mode: mode.to_string(),
+                    refusal_reason: "lsblk_probe_failed".to_string(),
+                }));
+            }
+        }
+    }
+
+    let timeout_seconds = validate_disk_timeout_seconds_or_default(req.timeout_seconds);
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|e| Status::internal(format!("system clock error: {e}")))?
+        .as_secs();
+
+    // Always stage the expression in a temp file co-located with the final
+    // persisted path so the apply-mode rename is atomic (same filesystem).
+    let staging_dir = if req.apply {
+        PathBuf::from(DISK_LAYOUT_DIR)
+    } else {
+        PathBuf::from("/tmp")
+    };
+    let temp_path = staging_dir.join(format!(".kcore-disk-layout-{timestamp}.nix.tmp"));
+
+    let staging_dir_clone = staging_dir.clone();
+    let write_path = temp_path.clone();
+    let layout_nix = req.disk_layout_nix.clone();
+    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+        std::fs::create_dir_all(&staging_dir_clone)?;
+        std::fs::write(&write_path, layout_nix)
+    })
+    .await
+    .map_err(|e| Status::internal(format!("task join: {e}")))?
+    .map_err(|e| {
+        Status::internal(format!(
+            "staging disk layout config {}: {e}",
+            temp_path.display()
+        ))
+    })?;
+
+    let run_path = temp_path.clone();
+    let mut cmd = Command::new("timeout");
+    cmd.args([format!("{timeout_seconds}s")]);
+    if req.apply {
+        cmd.arg("disko")
+            .arg("--mode")
+            .arg("format,mount")
+            .arg(run_path.as_os_str());
+    } else {
+        cmd.arg("nix-instantiate")
+            .arg("--parse")
+            .arg(run_path.as_os_str());
+    }
+    let output = cmd
+        .output()
+        .await
+        .map_err(|e| Status::internal(format!("running disko command: {e}")))?;
+
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+
+    if !output.status.success() {
+        // On any failure, drop the staged temp file; we never promote a failed
+        // apply to the persisted path.
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        let detail = if stderr.is_empty() {
+            format!("disko command failed with status {}", output.status)
+        } else {
+            format!("disko command failed: {stderr}")
+        };
+        return Ok(Response::new(proto::ApplyDiskLayoutResponse {
+            success: false,
+            message: detail,
+            mode: mode.to_string(),
+            refusal_reason: String::new(),
+        }));
+    }
+
+    // On successful apply, atomically promote the staged temp file to the
+    // canonical persisted path so NixOS (via modules/kcore-disko.nix) and the
+    // reconciler both observe the layout that was actually realised.
+    let persisted = if req.apply {
+        let current_path = PathBuf::from(DISK_LAYOUT_CURRENT_PATH);
+        let staged = temp_path.clone();
+        let target = current_path.clone();
+        tokio::task::spawn_blocking(move || std::fs::rename(&staged, &target))
+            .await
+            .map_err(|e| Status::internal(format!("task join: {e}")))?
+            .map_err(|e| {
+                Status::internal(format!(
+                    "persisting disk layout to {}: {e}",
+                    current_path.display()
+                ))
+            })?;
+        Some(current_path)
+    } else {
+        let _ = tokio::fs::remove_file(&temp_path).await;
+        None
+    };
+
+    // Chain nixos-rebuild test -> switch so the persisted layout is evaluated
+    // by NixOS and activated atomically. We fire-and-forget inside a transient
+    // systemd unit (same helper ApplyNixConfig uses) to avoid blocking the
+    // RPC on what is often a multi-minute rebuild.
+    let mut rebuild_scheduled = false;
+    if req.apply && req.rebuild {
+        if let Some(persisted_path) = persisted.clone() {
+            tokio::spawn(async move {
+                run_test_then_switch(persisted_path, Vec::new()).await;
+            });
+            rebuild_scheduled = true;
+        }
+    }
+
+    let action = if req.apply { "applied" } else { "validated" };
+    let base = if stdout.is_empty() {
+        format!("disk layout {action} successfully")
+    } else {
+        format!("disk layout {action} successfully: {stdout}")
+    };
+    let mut detail = base;
+    if let Some(ref path) = persisted {
+        detail = format!("{detail}; persisted at {}", path.display());
+    }
+    if rebuild_scheduled {
+        detail = format!("{detail}; nixos-rebuild test+switch started");
+    }
+
+    Ok(Response::new(proto::ApplyDiskLayoutResponse {
+        success: true,
+        message: detail,
+        mode: mode.to_string(),
+        refusal_reason: String::new(),
+    }))
+}
+
 #[tonic::async_trait]
 impl proto::node_admin_server::NodeAdmin for AdminService {
     async fn list_disks(
@@ -984,91 +1178,32 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
         }))
     }
 
+    async fn apply_disk_layout(
+        &self,
+        request: Request<proto::ApplyDiskLayoutRequest>,
+    ) -> Result<Response<proto::ApplyDiskLayoutResponse>, Status> {
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        apply_disk_layout_impl(req).await
+    }
+
     async fn apply_disko_layout(
         &self,
         request: Request<proto::ApplyDiskoLayoutRequest>,
     ) -> Result<Response<proto::ApplyDiskoLayoutResponse>, Status> {
         auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
-        let req = request.into_inner();
-        let mode = read_disko_management_mode();
-
-        if req.disko_nix.trim().is_empty() {
-            return Err(Status::invalid_argument("disko_nix cannot be empty"));
-        }
-        if !req.disko_nix.contains("disko.devices") {
-            return Err(Status::invalid_argument(
-                "disko_nix must define disko.devices",
-            ));
-        }
-        if req.apply && mode != DISKO_MODE_CONTROLLER_MANAGED {
-            return Ok(Response::new(proto::ApplyDiskoLayoutResponse {
-                success: false,
-                message:
-                    "node is in installer-only disko mode; enable controller-managed mode first"
-                        .to_string(),
-                mode: mode.to_string(),
-            }));
-        }
-
-        let timeout_seconds = validate_disko_timeout_seconds_or_default(req.timeout_seconds);
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| Status::internal(format!("system clock error: {e}")))?
-            .as_secs();
-        let temp_path = PathBuf::from(format!("/tmp/kcore-disko-day2-{timestamp}.nix"));
-
-        let write_path = temp_path.clone();
-        let disko_nix = req.disko_nix.clone();
-        tokio::task::spawn_blocking(move || std::fs::write(&write_path, disko_nix))
-            .await
-            .map_err(|e| Status::internal(format!("task join: {e}")))?
-            .map_err(|e| {
-                Status::internal(format!("writing disko config {}: {e}", temp_path.display()))
-            })?;
-
-        let mut cmd = Command::new("timeout");
-        cmd.args([format!("{timeout_seconds}s")]);
-        if req.apply {
-            cmd.arg("disko")
-                .arg("--mode")
-                .arg("format,mount")
-                .arg(temp_path.as_os_str());
-        } else {
-            cmd.arg("nix-instantiate")
-                .arg("--parse")
-                .arg(temp_path.as_os_str());
-        }
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| Status::internal(format!("running disko command: {e}")))?;
-        let _ = tokio::fs::remove_file(&temp_path).await;
-
-        let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        if output.status.success() {
-            let action = if req.apply { "applied" } else { "validated" };
-            let detail = if stdout.is_empty() {
-                format!("disko layout {action} successfully")
-            } else {
-                format!("disko layout {action} successfully: {stdout}")
-            };
-            return Ok(Response::new(proto::ApplyDiskoLayoutResponse {
-                success: true,
-                message: detail,
-                mode: mode.to_string(),
-            }));
-        }
-
-        let detail = if stderr.is_empty() {
-            format!("disko command failed with status {}", output.status)
-        } else {
-            format!("disko command failed: {stderr}")
+        let legacy = request.into_inner();
+        let translated = proto::ApplyDiskLayoutRequest {
+            disk_layout_nix: legacy.disko_nix,
+            apply: legacy.apply,
+            timeout_seconds: legacy.timeout_seconds,
+            rebuild: false,
         };
+        let resp = apply_disk_layout_impl(translated).await?.into_inner();
         Ok(Response::new(proto::ApplyDiskoLayoutResponse {
-            success: false,
-            message: detail,
-            mode: mode.to_string(),
+            success: resp.success,
+            message: resp.message,
+            mode: resp.mode,
         }))
     }
 
@@ -1981,23 +2116,20 @@ mod tests {
     }
 
     #[test]
-    fn disko_management_mode_defaults_to_installer_only() {
+    fn disk_management_mode_defaults_to_installer_only() {
+        assert_eq!(normalize_disk_management_mode(""), DISK_MODE_INSTALLER_ONLY);
         assert_eq!(
-            normalize_disko_management_mode(""),
-            DISKO_MODE_INSTALLER_ONLY
-        );
-        assert_eq!(
-            normalize_disko_management_mode("unknown"),
-            DISKO_MODE_INSTALLER_ONLY
+            normalize_disk_management_mode("unknown"),
+            DISK_MODE_INSTALLER_ONLY
         );
     }
 
     #[test]
-    fn disko_timeout_defaults_and_caps() {
-        assert_eq!(validate_disko_timeout_seconds_or_default(0), 300);
-        assert_eq!(validate_disko_timeout_seconds_or_default(-1), 300);
-        assert_eq!(validate_disko_timeout_seconds_or_default(120), 120);
-        assert_eq!(validate_disko_timeout_seconds_or_default(7200), 3600);
+    fn disk_timeout_defaults_and_caps() {
+        assert_eq!(validate_disk_timeout_seconds_or_default(0), 300);
+        assert_eq!(validate_disk_timeout_seconds_or_default(-1), 300);
+        assert_eq!(validate_disk_timeout_seconds_or_default(120), 120);
+        assert_eq!(validate_disk_timeout_seconds_or_default(7200), 3600);
     }
 
     #[test]

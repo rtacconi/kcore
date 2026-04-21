@@ -5,14 +5,16 @@
 mod auth;
 mod config;
 mod discovery;
+mod disk;
 mod grpc;
+mod issue_screen;
 mod path_safety;
 mod registration;
 mod runtime;
 mod storage;
 mod vmm;
 
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use tokio::signal;
 use tonic::transport::{Certificate, Identity, Server, ServerTlsConfig};
 use tracing::{info, warn};
@@ -62,6 +64,26 @@ struct Cli {
     /// Allow running without TLS (INSECURE: all RPCs are unauthenticated)
     #[arg(long)]
     allow_insecure: bool,
+
+    #[command(subcommand)]
+    command: Option<CliCommand>,
+}
+
+#[derive(Subcommand)]
+enum CliCommand {
+    /// Render an ESX-like pre-login issue screen.
+    RenderIssue(RenderIssueArgs),
+}
+
+#[derive(Args)]
+struct RenderIssueArgs {
+    /// Destination file for rendered output ("-" for stdout).
+    #[arg(long, default_value = "/etc/issue")]
+    output: String,
+
+    /// Disable ANSI colors in output.
+    #[arg(long)]
+    no_color: bool,
 }
 
 #[tokio::main]
@@ -75,6 +97,18 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let cli = Cli::parse();
+    if let Some(CliCommand::RenderIssue(args)) = cli.command {
+        let use_color = !args.no_color && issue_screen::should_use_color();
+        let rendered = issue_screen::render_issue(use_color);
+        if args.output == "-" {
+            print!("{rendered}");
+        } else {
+            std::fs::write(&args.output, rendered)
+                .map_err(|e| anyhow::anyhow!("writing {}: {e}", args.output))?;
+        }
+        return Ok(());
+    }
+
     let cfg = config::Config::load(&cli.config)?;
 
     if cfg.tls.is_none() && !cli.allow_insecure {

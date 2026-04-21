@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/kcore-sanitize",
+    "crates/kcore-disko-types",
     "crates/node-agent",
     "crates/controller",
     "crates/kctl",
