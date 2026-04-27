@@ -15,10 +15,14 @@
 //! `layoutNixFile` is accepted as a shortcut to read the Nix body from a
 //! file next to the manifest, so operators don't have to inline a
 //! several-KB-long expression.
+//!
+//! `diskLayout` holds a structured YAML description (`kcore-disk-layout-yaml`)
+//! that `kctl` expands to the same `disko.devices` Nix the controller stores.
 
 use std::path::Path;
 
 use anyhow::{bail, Context, Result};
+use kcore_disk_layout_yaml::emit_disko_devices_nix;
 use serde::Deserialize;
 
 use crate::apply_summary::render_apply_summary;
@@ -47,6 +51,8 @@ struct DiskLayoutSpec {
     layout_nix: String,
     #[serde(default)]
     layout_nix_file: String,
+    #[serde(default)]
+    disk_layout: Option<kcore_disk_layout_yaml::DiskLayoutBody>,
 }
 
 pub async fn apply_from_file(info: &ConnectionInfo, file: &str) -> Result<()> {
@@ -226,21 +232,30 @@ fn parse_manifest(file: &str) -> Result<DiskLayoutManifest> {
 fn resolve_layout_nix(manifest_path: &str, spec: &DiskLayoutSpec) -> Result<String> {
     let has_inline = !spec.layout_nix.trim().is_empty();
     let has_file = !spec.layout_nix_file.trim().is_empty();
-    match (has_inline, has_file) {
-        (true, true) => {
-            bail!("spec.layoutNix and spec.layoutNixFile are mutually exclusive; pick one")
+    let has_yaml = spec.disk_layout.is_some();
+    let n = u8::from(has_inline) + u8::from(has_file) + u8::from(has_yaml);
+    if n != 1 {
+        if n == 0 {
+            bail!(
+                "spec must set exactly one of: diskLayout (structured YAML), layoutNix, or layoutNixFile"
+            );
         }
-        (true, false) => Ok(spec.layout_nix.clone()),
-        (false, true) => {
-            let base = Path::new(manifest_path)
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-            let full = base.join(spec.layout_nix_file.trim());
-            std::fs::read_to_string(&full)
-                .with_context(|| format!("reading layoutNixFile {}", full.display()))
-        }
-        (false, false) => bail!("one of spec.layoutNix or spec.layoutNixFile is required"),
+        bail!(
+            "spec.diskLayout, spec.layoutNix, and spec.layoutNixFile are mutually exclusive; pick one"
+        );
     }
+    if let Some(body) = &spec.disk_layout {
+        return emit_disko_devices_nix(body).map_err(|e| anyhow::anyhow!(e));
+    }
+    if has_inline {
+        return Ok(spec.layout_nix.clone());
+    }
+    let base = Path::new(manifest_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let full = base.join(spec.layout_nix_file.trim());
+    std::fs::read_to_string(&full)
+        .with_context(|| format!("reading layoutNixFile {}", full.display()))
 }
 
 fn phase_str(phase: i32) -> &'static str {
@@ -311,9 +326,10 @@ spec:
             node_id: "n".to_string(),
             layout_nix: String::new(),
             layout_nix_file: String::new(),
+            disk_layout: None,
         };
         let err = resolve_layout_nix("/tmp/does-not-exist", &spec).unwrap_err();
-        assert!(format!("{err:#}").contains("one of spec.layoutNix"));
+        assert!(format!("{err:#}").contains("diskLayout"));
     }
 
     #[test]
@@ -322,6 +338,7 @@ spec:
             node_id: "n".to_string(),
             layout_nix: "disko.devices = {};".to_string(),
             layout_nix_file: "disk.nix".to_string(),
+            disk_layout: None,
         };
         let err = resolve_layout_nix("/tmp/does-not-exist", &spec).unwrap_err();
         assert!(format!("{err:#}").contains("mutually exclusive"));
@@ -338,8 +355,40 @@ spec:
             node_id: "n".to_string(),
             layout_nix: String::new(),
             layout_nix_file: "disk.nix".to_string(),
+            disk_layout: None,
         };
         let got = resolve_layout_nix(manifest_path.to_str().unwrap(), &spec).unwrap();
         assert!(got.contains("disko.devices"));
+    }
+
+    #[test]
+    fn manifest_parses_disk_layout_yaml() {
+        let manifest = r#"
+kind: DiskLayout
+metadata:
+  name: ssd-pool
+spec:
+  nodeId: node-a
+  diskLayout:
+    disks:
+      - name: data1
+        device: /dev/nvme1n1
+        gpt:
+          partitions:
+            - name: kcore0
+              size: "100%"
+              content:
+                type: filesystem
+                format: ext4
+                mountpoint: /var/lib/kcore/volumes1
+"#;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("dl.yaml");
+        std::fs::write(&path, manifest).unwrap();
+        let got = parse_manifest(path.to_str().unwrap()).unwrap();
+        assert!(got.spec.disk_layout.is_some());
+        let nix = resolve_layout_nix(path.to_str().unwrap(), &got.spec).unwrap();
+        assert!(nix.contains("disko.devices"));
+        assert!(nix.contains("/dev/nvme1n1"));
     }
 }

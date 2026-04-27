@@ -8,6 +8,7 @@
 | Topic | Document |
 |--------|-----------|
 | Architecture | [Architecture.md](./Architecture.md) |
+| Appliance console | [appliance-console.md](./appliance-console.md) |
 | Day-2 filesystem operations | [day-2-filesystem-operations.md](./day-2-filesystem-operations.md) |
 | CRDT / HA replication | [ha-crdt-replication.md](./ha-crdt-replication.md) |
 | File layout | [file-structure.md](./file-structure.md) |
@@ -29,4 +30,4 @@
 
 ## User-facing guides
 
-See **[kcorehypervisor.com/docs/user/](https://kcorehypervisor.com/docs/user/)** — the canonical location for operator-focused guides (no duplicate copies in this tree).
+See **[kcorehypervisor.com/docs/user/](https://kcorehypervisor.com/docs/user/)** — the canonical location for operator-focused guides. The local index for those pages is in [`docs/user/`](./user/README.md).

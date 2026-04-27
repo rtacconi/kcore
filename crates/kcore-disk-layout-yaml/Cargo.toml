@@ -1,0 +1,12 @@
+[package]
+name = "kcore-disk-layout-yaml"
+version = "0.1.0"
+edition = "2021"
+description = "Declarative YAML disk layouts for kcore DiskLayout, emitted as disko.devices Nix"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+
+[lints]
+workspace = true

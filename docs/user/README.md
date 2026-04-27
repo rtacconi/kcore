@@ -7,6 +7,7 @@ Operator-focused guides are published on the product site:
 | Guide | Link |
 |--------|------|
 | Overview | [docs/user/index.html](https://kcorehypervisor.com/docs/user/index.html) |
+| Appliance console | [appliance-console.html](https://kcorehypervisor.com/docs/user/appliance-console.html) |
 | Add a node to the cluster | [add-node.html](https://kcorehypervisor.com/docs/user/add-node.html) |
 | VM creation modes | [vm-creation.html](https://kcorehypervisor.com/docs/user/vm-creation.html) |
 | VM images workflow | [images.html](https://kcorehypervisor.com/docs/user/images.html) |

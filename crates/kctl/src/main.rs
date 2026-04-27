@@ -147,8 +147,9 @@ enum Command {
         dry_run: bool,
     },
     /// Show a controller-side pre-flight diff/safety report for a manifest.
-    /// Currently supports `kind: DiskLayout` manifests; other kinds will be
-    /// added as their classifiers land.
+    /// Currently supports `kind: DiskLayout` manifests (`spec.diskLayout` YAML,
+    /// or `layoutNix` / `layoutNixFile`); other kinds will be added as their
+    /// classifiers land.
     Diff {
         /// Path to the manifest file
         #[arg(short = 'f', long = "filename")]
