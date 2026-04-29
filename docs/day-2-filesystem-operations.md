@@ -65,13 +65,28 @@ The controller is never expected to drain, stop, migrate, or reboot VMs. The ope
 
 Day-2 disk changes are best driven through the controller as a `kind: DiskLayout` resource instead of direct node pushes. The controller persists the manifest in its replicated DB, classifier-pre-flights it, and the controller-side reconciler dispatches `ApplyDiskLayout` to the owning node and writes the result back into `status`.
 
+Structured YAML (`spec.diskLayout`) is expanded by `kctl` to `disko.devices`
+Nix before it reaches the controller. Alternatively, set `layoutNix` /
+`layoutNixFile` for full disko expressiveness — **exactly one** of the three.
+
 ```yaml
 kind: DiskLayout
 metadata:
   name: prod-data-pool
 spec:
   nodeId: node-prod-01
-  layoutNixFile: ./day2-disk.nix   # or inline `layoutNix: |`
+  diskLayout:
+    disks:
+      - name: data1
+        device: /dev/nvme1n1
+        gpt:
+          partitions:
+            - name: kcore0
+              size: "100%"
+              content:
+                type: filesystem
+                format: ext4
+                mountpoint: /var/lib/kcore/volumes1
 ```
 
 ```bash
@@ -84,7 +99,7 @@ kctl delete disk-layout prod-data-pool       # removes from controller DB; node 
 
 `kctl diff` calls the controller's read-only `ClassifyDiskLayout` RPC, which extracts the target devices from the Nix body and runs the controller-side pre-flight (structural checks today; live inventory once the replicated block-device table lands). The node-agent classifier is still the authoritative gate on every apply.
 
-The reconciler retries refused layouts on every tick using the same generation, so the operator drains affected VMs and re-checks `kctl describe disk-layout <name>` until `phase = applied`. Editing `spec.layoutNix` (or its referenced file) bumps the generation; resubmitting the identical content does not.
+The reconciler retries refused layouts on every tick using the same generation, so the operator drains affected VMs and re-checks `kctl describe disk-layout <name>` until `phase = applied`. Editing `spec.diskLayout`, `spec.layoutNix`, or the referenced `layoutNixFile` bumps the generation when the resolved Nix body changes; resubmitting the identical content does not.
 
 `kctl node apply-disk -f …` remains available for one-off operator pushes and for validation flows where there is no controller (or for nodes still in `installer-only` mode that haven't been registered as DiskLayout targets).
 

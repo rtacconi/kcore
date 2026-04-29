@@ -1,0 +1,40 @@
+# Reference unit for non-NixOS or custom packaging. On NixOS, use
+# `modules/kcore-branding.nix` (or copy the generated unit from a built system).
+#
+# The control plane user `kcore-console` cannot read+write /dev/tty1 on most
+# Linux systems (root owns the TTY, group `tty` is often write-only). The
+# unit below runs as root for a reliable full-screen TUI. Tighten with a
+# dedicated udev/ACL policy if you must drop privileges.
+#
+# Mask virtual terminals so no agetty/login is shown (see docs/appliance-console.md).
+#
+[Unit]
+Description=kcore Hypervisor Appliance Console
+Documentation=https://kcore.ai/docs
+After=network-online.target local-fs.target
+Wants=network-online.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=simple
+Environment=PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/kcore-console --tty /dev/tty1
+Restart=always
+RestartSec=2
+StandardInput=tty
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=yes
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

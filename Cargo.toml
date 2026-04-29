@@ -2,6 +2,8 @@
 members = [
     "crates/kcore-sanitize",
     "crates/kcore-disko-types",
+    "crates/kcore-disk-layout-yaml",
+    "crates/kcore-console",
     "crates/node-agent",
     "crates/controller",
     "crates/kctl",

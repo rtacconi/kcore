@@ -153,16 +153,46 @@ There are two equivalent ways to drive a day-2 disk change.
 
 Submit a `DiskLayout` manifest to the controller; the controller persists it,
 replicates it, and the controller-side reconciler pushes it to the target
-node:
+node.
+
+**Preferred — structured YAML (`spec.diskLayout`):** `kctl` expands this to the
+same `disko.devices` Nix the controller stores (see crate `kcore-disk-layout-yaml`).
+You must set **exactly one** of `diskLayout`, `layoutNix`, or `layoutNixFile`.
 
 ```yaml
 kind: DiskLayout
 metadata:
   name: prod-data-pool
 spec:
-  nodeId: node-prod-01
-  layoutNixFile: ./day2-disk.nix   # or inline `layoutNix: |`
+  nodeId: kvm-node-192-168-40-105
+  diskLayout:
+    disks:
+      - name: data1
+        device: /dev/nvme1n1
+        gpt:
+          partitions:
+            - name: kcore0
+              size: "100%"
+              content:
+                type: filesystem
+                format: ext4
+                mountpoint: /var/lib/kcore/volumes1
 ```
+
+For LVM PV or ZFS-member partitions, use `content: { type: lvm_pv, vg: vg_kcore }`
+or `content: { type: zfs, pool: tank0 }`, and list empty stubs as needed:
+
+```yaml
+  diskLayout:
+    lvmVolumeGroups:
+      - name: vg_kcore
+    zfsPools:
+      - name: tank0
+    disks: [ ... ]
+```
+
+**Advanced — raw Nix:** inline `layoutNix: |` or `layoutNixFile: ./day2-disk.nix`
+when you need disko features not covered by the YAML schema yet.
 
 ```bash
 kcore-kctl diff   -f day2-disk-layout.yaml   # controller pre-flight, no writes

@@ -52,7 +52,8 @@
               path: type:
               (craneLib.filterCargoSources path type)
               || pkgs.lib.hasPrefix "${toString ./.}/proto/" (toString path)
-              || pkgs.lib.hasPrefix "${toString ./.}/crates/dashboard/assets/" (toString path);
+              || pkgs.lib.hasPrefix "${toString ./.}/crates/dashboard/assets/" (toString path)
+              || pkgs.lib.hasPrefix "${toString ./.}/crates/kcore-console/" (toString path);
           };
 
           commonArgs = {
@@ -104,6 +105,18 @@
               cargoExtraArgs = "-p kcore-dashboard";
             }
           );
+
+          kcoreGitRev = inputs.self.shortRev or inputs.self.dirtyShortRev or "dev";
+
+          kcore-console = craneLib.buildPackage (
+            commonArgs
+            // {
+              inherit cargoArtifacts;
+              pname = "kcore-console";
+              cargoExtraArgs = "-p kcore-console";
+              KCORE_GIT_REV = kcoreGitRev;
+            }
+          );
         in
         {
           packages = {
@@ -113,6 +126,7 @@
               kcore-controller
               kcore-kctl
               kcore-dashboard
+              kcore-console
               ;
           };
 
@@ -122,6 +136,7 @@
               kcore-controller
               kcore-kctl
               kcore-dashboard
+              kcore-console
               ;
             clippy = craneLib.cargoClippy (
               commonArgs
@@ -210,6 +225,7 @@
                   controller = inputs.self.packages.x86_64-linux.kcore-controller;
                   kctl = inputs.self.packages.x86_64-linux.kcore-kctl;
                   dashboard = inputs.self.packages.x86_64-linux.kcore-dashboard;
+                  kcoreConsole = inputs.self.packages.x86_64-linux.kcore-console;
                   diskoPackage = inputs.disko.packages.x86_64-linux.default;
                   kcoreDiskoModule = ./modules/kcore-disko.nix;
                   kcoreBrandingModule = ./modules/kcore-branding.nix;
@@ -217,6 +233,11 @@
                 {
                   system.stateVersion = "25.05";
                   nixpkgs.config.allowUnfree = true;
+                  nixpkgs.overlays = [
+                    (_final: _prev: {
+                      kcore-console = kcoreConsole;
+                    })
+                  ];
 
                   boot.loader.timeout = lib.mkForce 0;
                   boot.loader.systemd-boot.editor = false;
@@ -302,6 +323,7 @@
                     pkgs.cryptsetup
                     pkgs.tpm2-tools
                     pkgs.openssl
+                    kcoreConsole
                     nodeAgent
                     controller
                     kctl
@@ -433,14 +455,130 @@
                                                                 echo ""
 
                                                                 print_install_overview() {
-                                                                  echo "kcoreOS hardware discovery"
-                                                                  echo "--------------------------"
-                                                                  echo "Network interfaces:"
-                                                                  ip -o -4 addr show scope global | awk '{print "  - " $2 "  " $4}' || true
-                                                                  echo ""
-                                                                  echo "Disks:"
-                                                                  lsblk -d -o NAME,SIZE,MODEL,TYPE | awk '$4 == "disk" {printf "  - /dev/%s  %s  %s\n", $1, $2, $3}'
-                                                                  echo ""
+                                                                  ESC="$(printf '\033')"
+                                                                  RESET="$ESC[0m"
+                                                                  HEADER_BG1="$ESC[48;2;99;102;241m"
+                                                                  HEADER_BG2="$ESC[48;2;123;95;246m"
+                                                                  PANEL_BG="$ESC[48;2;13;20;45m"
+                                                                  SEPARATOR="$ESC[38;2;99;102;241m"
+                                                                  TEXT="$ESC[38;2;235;236;255m"
+                                                                  WARN="$ESC[38;2;255;190;130m"
+                                                                  cols="$(tput cols 2>/dev/null || echo 80)"
+                                                                  [ "$cols" -lt 80 ] && cols=80
+                                                                  left_w=$(( (cols - 3) / 2 ))
+                                                                  right_w=$(( cols - left_w - 3 ))
+
+                                                                  fit() {
+                                                                    text="$1"
+                                                                    width="$2"
+                                                                    printf "%-''${width}.''${width}s" "$text"
+                                                                  }
+
+                                                                  print_band() {
+                                                                    color="$1"
+                                                                    msg="$2"
+                                                                    printf "%b" "$color"
+                                                                    printf "%-''${cols}.''${cols}s" " $msg "
+                                                                    printf "%b\n" "$RESET"
+                                                                  }
+
+                                                                  get_primary_ip() {
+                                                                    ip -o -4 route show default 2>/dev/null | awk 'NR==1 {print $9}'
+                                                                  }
+
+                                                                  service_status() {
+                                                                    svc="$1"
+                                                                    port="$2"
+                                                                    if systemctl is-active --quiet "$svc"; then
+                                                                      ip_addr="$(get_primary_ip)"
+                                                                      [ -z "$ip_addr" ] && ip_addr="-"
+                                                                      printf "%s:%s" "$ip_addr" "$port"
+                                                                    else
+                                                                      printf "not installed"
+                                                                    fi
+                                                                  }
+
+                                                                  left_file="$(mktemp)"
+                                                                  right_file="$(mktemp)"
+                                                                  cleanup_overview() { rm -f "$left_file" "$right_file"; }
+                                                                  trap cleanup_overview RETURN
+
+                                                                  {
+                                                                    printf "Network Interfaces\n"
+                                                                    printf "%-12s %-8s %-17s %s\n" "NAME" "STATE" "MAC" "PRIMARY IPv4"
+                                                                    iface_count=0
+                                                                    while read -r iface; do
+                                                                      [ -z "$iface" ] && continue
+                                                                      [ "$iface" = "lo" ] && continue
+                                                                      state="$(cat "/sys/class/net/$iface/operstate" 2>/dev/null || echo "unknown")"
+                                                                      mac="$(cat "/sys/class/net/$iface/address" 2>/dev/null || echo "-")"
+                                                                      addr="$(ip -o -4 addr show dev "$iface" scope global 2>/dev/null | awk 'NR==1 {print $4}')"
+                                                                      [ -z "$addr" ] && addr="-"
+                                                                      printf "%-12s %-8s %-17s %s\n" "$iface" "$state" "$mac" "$addr"
+                                                                      iface_count=$((iface_count + 1))
+                                                                    done < <(ls /sys/class/net 2>/dev/null | sort)
+                                                                    if [ "$iface_count" -eq 0 ]; then
+                                                                      printf "(no network interfaces detected)\n"
+                                                                    fi
+                                                                    printf "\nDisks\n"
+                                                                    printf "%-14s %-8s %-12s %s\n" "PATH" "SIZE" "LABEL/UUID" "MODEL"
+                                                                    disk_count=0
+                                                                    while read -r row; do
+                                                                      path="$(printf "%s\n" "$row" | sed -n 's/.*PATH=\"\([^\"]*\)\".*/\1/p')"
+                                                                      size="$(printf "%s\n" "$row" | sed -n 's/.*SIZE=\"\([^\"]*\)\".*/\1/p')"
+                                                                      label="$(printf "%s\n" "$row" | sed -n 's/.*LABEL=\"\([^\"]*\)\".*/\1/p')"
+                                                                      uuid="$(printf "%s\n" "$row" | sed -n 's/.*UUID=\"\([^\"]*\)\".*/\1/p')"
+                                                                      model="$(printf "%s\n" "$row" | sed -n 's/.*MODEL=\"\([^\"]*\)\".*/\1/p')"
+                                                                      dtype="$(printf "%s\n" "$row" | sed -n 's/.*TYPE=\"\([^\"]*\)\".*/\1/p')"
+                                                                      [ "$dtype" != "disk" ] && continue
+                                                                      label_uuid="$label"
+                                                                      [ -z "$label_uuid" ] && label_uuid="$uuid"
+                                                                      [ -z "$label_uuid" ] && label_uuid="-"
+                                                                      [ -z "$model" ] && model="-"
+                                                                      printf "%-14s %-8s %-12s %s\n" "$path" "$size" "$label_uuid" "$model"
+                                                                      disk_count=$((disk_count + 1))
+                                                                    done < <(lsblk -dn -P -o PATH,SIZE,LABEL,UUID,MODEL,TYPE 2>/dev/null || true)
+                                                                    if [ "$disk_count" -eq 0 ]; then
+                                                                      printf "(no disks detected)\n"
+                                                                    fi
+                                                                  } > "$left_file"
+
+                                                                  {
+                                                                    printf "Services\n"
+                                                                    printf "%-14s %s\n" "NAME" "ENDPOINT / STATUS"
+                                                                    printf "%-14s %s\n" "node-agent" "$(service_status kcore-node-agent.service 9091)"
+                                                                    printf "%-14s %s\n" "controller" "$(service_status kcore-controller.service 9090)"
+                                                                    printf "%-14s %s\n" "dashboard" "$(service_status kcore-dashboard.service 8080)"
+                                                                    printf "\nAccess\n"
+                                                                    printf "%s\n" "SSH only (no local login)"
+                                                                    printf "%s\n" "Use kctl from operator host"
+                                                                  } > "$right_file"
+
+                                                                  mapfile -t left_rows < "$left_file"
+                                                                  mapfile -t right_rows < "$right_file"
+                                                                  max_rows="''${#left_rows[@]}"
+                                                                  if [ "''${#right_rows[@]}" -gt "$max_rows" ]; then
+                                                                    max_rows="''${#right_rows[@]}"
+                                                                  fi
+
+                                                                  print_band "$HEADER_BG1$TEXT" "kcoreOS Installer"
+                                                                  print_band "$HEADER_BG1$TEXT" "Declarative Virtualization Platform"
+                                                                  print_band "$HEADER_BG2$TEXT" "for Edge & Datacenters"
+                                                                  printf "\n"
+                                                                  for ((i=0; i<max_rows; i++)); do
+                                                                    left="''${left_rows[$i]:-}"
+                                                                    right="''${right_rows[$i]:-}"
+                                                                    if [ -z "$left" ] && [ -z "$right" ]; then
+                                                                      printf "\n"
+                                                                    else
+                                                                      printf "%b%b" "$PANEL_BG" "$TEXT"
+                                                                      fit "$left" "$left_w"
+                                                                      printf "%b│%b" "$SEPARATOR" "$TEXT"
+                                                                      fit "$right" "$right_w"
+                                                                      printf "%b\n" "$RESET"
+                                                                    fi
+                                                                  done
+                                                                  printf "\n"
                                                                 }
                                                                 print_install_overview
 
@@ -711,10 +849,12 @@
                                                                 cp "${controller}/bin/kcore-controller" /mnt/opt/kcore/bin/kcore-controller
                                                                 cp "${kctl}/bin/kcore-kctl" /mnt/opt/kcore/bin/kcore-kctl
                                                                 cp "${dashboard}/bin/kcore-dashboard" /mnt/opt/kcore/bin/kcore-dashboard
+                                                                cp "${kcoreConsole}/bin/kcore-console" /mnt/opt/kcore/bin/kcore-console
                                                                 chmod +x /mnt/opt/kcore/bin/kcore-node-agent
                                                                 chmod +x /mnt/opt/kcore/bin/kcore-controller
                                                                 chmod +x /mnt/opt/kcore/bin/kcore-kctl
                                                                 chmod +x /mnt/opt/kcore/bin/kcore-dashboard
+                                                                chmod +x /mnt/opt/kcore/bin/kcore-console
 
                                                                 echo "Copying ch-vm module..."
                                                                 mkdir -p /mnt/etc/nixos/modules/ch-vm

@@ -1,15 +1,13 @@
-{ lib, ... }:
+{ lib, pkgs, ... }:
 let
+  kcoreConsoleExe =
+    if pkgs ? kcore-console then
+      "${pkgs.kcore-console}/bin/kcore-console"
+    else
+      "/opt/kcore/bin/kcore-console";
   staticIssue = ''
-    ██╗  ██╗ ██████╗  ██████╗ ██████╗ ███████╗
-    ██║ ██╔╝██╔════╝ ██╔═══██╗██╔══██╗██╔════╝
-    █████╔╝ ██║      ██║   ██║██████╔╝█████╗
-    ██╔═██╗ ██║      ██║   ██║██╔══██╗██╔══╝
-    ██║  ██╗╚██████╗ ╚██████╔╝██║  ██║███████╗
-    ╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝  ╚═╝╚══════╝
-
-    Welcome to kcoreOS
-    Kernel \r on an \m (\l)
+    kcore hypervisor appliance console
+    Local shell login is disabled. Use SSH and kcorectl for administration.
 
   '';
 in
@@ -75,50 +73,71 @@ in
 
   '';
 
-  systemd.services.kcore-issue-refresh = {
-    description = "Render dynamic kcoreOS TTY issue screen";
+  # No local console login: only SSH and kctl operations are supported.
+  #
+  # NixOS wires the first VT through autovt@tty1 (see systemd.targets.getty in
+  # nixpkgs getty.nix). Disabling only getty@tty1 leaves agetty running via
+  # autovt@, which still shows login(1). Disable the autovt template and all
+  # VT getty instances, and clear installer-style autologin if merged later.
+  services.getty.autologinUser = lib.mkForce null;
+  services.getty.helpLine = lib.mkForce "";
+
+  systemd.services."autovt@".enable = lib.mkForce false;
+  systemd.services."getty@tty1".enable = lib.mkForce false;
+  systemd.services."getty@tty2".enable = lib.mkForce false;
+  systemd.services."getty@tty3".enable = lib.mkForce false;
+  systemd.services."getty@tty4".enable = lib.mkForce false;
+  systemd.services."getty@tty5".enable = lib.mkForce false;
+  systemd.services."getty@tty6".enable = lib.mkForce false;
+  systemd.services."serial-getty@ttyS0".enable = lib.mkForce false;
+  systemd.services."serial-getty@hvc0".enable = lib.mkForce false;
+
+  # Ratatui appliance TUI (see `crates/kcore-console` and `docs/appliance-console.md`).
+  systemd.services.kcore-console = {
+    description = "kcore hypervisor appliance console (TUI)";
+    documentation = [ "https://kcore.ai/docs" ];
     after = [
       "local-fs.target"
       "network-online.target"
-      "kcore-node-agent.service"
     ];
     wants = [ "network-online.target" ];
     wantedBy = [ "multi-user.target" ];
+    before = [ "getty.target" ];
     serviceConfig = {
-      Type = "oneshot";
-      TimeoutStartSec = "30s";
+      Type = "simple";
+      Restart = "always";
+      RestartSec = "2s";
+      ExecStart = "${kcoreConsoleExe} --tty /dev/tty1";
+      User = "root";
+      Group = "root";
+      # ip, lsblk, systemctl for inventory
+      Environment = "PATH=${
+        lib.makeBinPath (
+          with pkgs;
+          [
+            coreutils
+            iproute2
+            util-linux
+            systemd
+          ]
+        )
+      }:/run/wrappers/bin";
+      UMask = "0077";
+      NoNewPrivileges = true;
+      ProtectSystem = true;
+      ProtectHome = true;
+      PrivateTmp = true;
+      StandardInput = "tty";
+      StandardOutput = "tty";
+      StandardError = "journal";
+      TTYPath = "/dev/tty1";
+      TTYReset = true;
+      TTYVHangup = true;
+      TTYVTDisallocate = true;
     };
-    script = ''
-      set -euo pipefail
-      tmp_issue="$(mktemp)"
-      cleanup() { rm -f "$tmp_issue"; }
-      trap cleanup EXIT
-
-      agent_bin=""
-      if [ -x /opt/kcore/bin/kcore-node-agent ]; then
-        agent_bin="/opt/kcore/bin/kcore-node-agent"
-      elif [ -x /run/current-system/sw/bin/kcore-node-agent ]; then
-        agent_bin="/run/current-system/sw/bin/kcore-node-agent"
-      fi
-
-      if [ -n "$agent_bin" ] && timeout 20s "$agent_bin" render-issue --output "$tmp_issue"; then
-        rm -f /etc/issue
-        install -m 0644 "$tmp_issue" /etc/issue
-      else
-        echo "kcore-issue-refresh: renderer failed, restoring static issue" >&2
-        rm -f /etc/issue
-        install -m 0644 /etc/issue.kcore-static /etc/issue
-      fi
-    '';
-  };
-
-  systemd.timers.kcore-issue-refresh = {
-    description = "Periodic kcoreOS issue refresh";
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnBootSec = "20s";
-      OnUnitActiveSec = "5min";
-      Unit = "kcore-issue-refresh.service";
-    };
+    unitConfig.Conflicts = [
+      "getty@tty1.service"
+      "autovt@tty1.service"
+    ];
   };
 }
