@@ -1,4 +1,4 @@
-.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace test-replication-soak coverage test-controller test-node-agent test-kctl test-rust-filter loc iso iso-remote kctl clean install-hooks kani help release-build release-dist release-publish release
+.PHONY: all build check fmt clippy audit lint-nix test test-all test-rust test-nix test-vm test-tla test-tla-trace test-replication-soak coverage test-controller test-node-agent test-kctl test-rust-filter loc iso iso-remote kctl clean install-hooks kani help
 
 VERSION := $(shell cat VERSION)
 V ?= v$(VERSION)
@@ -92,7 +92,7 @@ iso:
 	@echo ""
 	@ls -lh result-iso/iso/*.iso
 	@echo ""
-	@echo "ISO built under result-iso/iso/ (release-dist copies it to kcoreos-$(VERSION)-x86_64-linux.iso)"
+	@echo "ISO built: result-iso/iso/kcoreos-$(VERSION)-x86_64-linux.iso"
 
 iso-remote:
 	@echo "Building kcore ISO $(V) on remote Linux server..."
@@ -100,22 +100,6 @@ iso-remote:
 
 kctl:
 	cargo build --release -p kcore-kctl
-
-# Release (operator machine: Linux x86_64, Nix + flakes, gh CLI authenticated).
-# Flow: bump VERSION → merge PR → tag v$(VERSION) → push tag → edit RELEASE_NOTES.md → make release-build release-dist → make release-publish
-release-build:
-	bash ./scripts/release.sh build
-
-release-dist:
-	bash ./scripts/release.sh dist
-
-release-publish:
-	bash ./scripts/release.sh publish
-
-release: release-build release-dist
-	@echo ""
-	@echo "Artifacts are under dist/. Next: ensure git tag v$(VERSION) exists on origin,"
-	@echo "fill RELEASE_NOTES.md (from RELEASE_NOTES.template.md), then: make release-publish"
 
 install-hooks:
 	@for hook in scripts/hooks/*; do \
@@ -126,7 +110,7 @@ install-hooks:
 
 clean:
 	cargo clean
-	rm -rf result result-iso result-kctl dist
+	rm -rf result result-iso dist
 
 help:
 	@echo "kcore $(V)"
@@ -156,10 +140,6 @@ help:
 	@echo "  iso         Build NixOS ISO (Linux only)"
 	@echo "  iso-remote  Build NixOS ISO on remote Linux server (from macOS)"
 	@echo "  kctl        Build kctl CLI only"
-	@echo "  release-build   Nix-build ISO + kcore-kctl (result-iso, result-kctl)"
-	@echo "  release-dist    Tarball + ISO under dist/ + SHA256SUMS"
-	@echo "  release-publish Create GitHub Release from tag (needs gh, RELEASE_NOTES.md)"
-	@echo "  release         release-build + release-dist (then publish manually)"
 	@echo "  install-hooks  Install git pre-commit/pre-push hooks"
 	@echo "  clean       Remove build artifacts"
 	@echo "  help        Show this help"

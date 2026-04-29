@@ -138,8 +138,6 @@ cargo fmt --check
 cargo audit
 ```
 
-**Releases** (version bump, Nix build, GitHub Release assets): [docs/release.md](docs/release.md).
-
 ## Known Gaps / Next Priorities
 
 1. Add certificate lifecycle management (rotation, expiry handling, revocation strategy).
