@@ -7,7 +7,7 @@ Releases are **operator-driven**: build artifacts locally with Nix, publish to G
 | Source | Role |
 |--------|------|
 | [`VERSION`](../VERSION) (single line, e.g. `0.2.0`) | **Product / packaging version**: Nix `kcoreVersion`, ISO filename `kcoreos-$(VERSION)-x86_64-linux.iso`, Git tag `v$(VERSION)`, release assets. **Bump this for every release.** |
-| `crates/*/Cargo.toml` `version = "…"` | Rust crate semver (currently `0.1.0` for workspace members). **Not automatically tied to `VERSION`.** Optional: bump crate versions in the same PR as `VERSION` if you want `kcore-kctl --version` to match the product version everywhere. |
+| `crates/*/Cargo.toml` `version = "…"` | Rust crate semver. **Not automatically tied to `VERSION`.** This repo usually bumps crate versions in the same PR as `VERSION` so `kcore-kctl --version` matches the product version. |
 
 ## Preconditions
 
