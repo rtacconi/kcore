@@ -4,8 +4,4 @@
 /target
 /result
 /result-*
-/result-kctl
-/dist
-# Local release notes (copy from RELEASE_NOTES.template.md before make release-publish)
-/RELEASE_NOTES.md
 *.iso

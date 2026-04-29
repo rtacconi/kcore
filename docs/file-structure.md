@@ -250,7 +250,6 @@ For each file: purpose + where it is used in runtime/operator flows.
 - `specs/tla/CrossDcReplication.tla` — multi-DC replication convergence model with link failures.
 - `specs/tla/CrossDcReplication.cfg` — TLC constants/properties for cross-DC replication model.
 - `scripts/build-iso-remote.sh` — remote build automation script; orchestrates ISO build steps on a remote Linux builder host.
-- `scripts/release.sh` — non-interactive release helper: Nix-build ISO and `kcore-kctl`, package `dist/` + `SHA256SUMS`, `gh release create` (see `docs/release.md`).
 
 ### Documentation
 
@@ -269,4 +268,3 @@ For each file: purpose + where it is used in runtime/operator flows.
 - `docs/mtls-bootstrap-and-auth.md` — certificate lifecycle guide; bootstrapping, cert roles, and auth usage in runtime calls.
 - `docs/formal-methods-and-verification.md` — verification strategy notes; current checks and future formalization directions.
 - `docs/file-structure.md` — repository map and deep catalog; explains file responsibilities and runtime/operator relevance.
-- `docs/release.md` — release checklist: bump `VERSION`, tag, Nix build, GitHub Release assets via Make/`gh`.
