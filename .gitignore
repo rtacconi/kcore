@@ -1,6 +1,6 @@
-/.cursor/*
-!/.cursor/rules/
-!/.cursor/rules/**
+# Cursor IDE: agent rules and local IDE config (not shared via git)
+.cursor/
+
 /target
 /result
 /result-*
