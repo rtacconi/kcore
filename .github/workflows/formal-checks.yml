@@ -78,7 +78,10 @@ jobs:
   kani-shard:
     name: "kani-shard / ${{ matrix.crate }} :: ${{ matrix.harness }}"
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Must exceed install + proof step ceilings plus checkout/cache/rust-cache overhead.
+    # Cold Kani install + CBMC setup can approach 15 min on busy runners; install+proof
+    # ceilings plus checkout/cache need headroom (avoid cancelling mid-proof).
+    timeout-minutes: 35
     strategy:
       # `fail-fast: false` lets all harnesses report results even
       # if one regresses; otherwise GHA cancels the rest and we lose
@@ -186,7 +189,7 @@ jobs:
       # action's last step runs `cargo-kani` at the workspace root with
       # no `-p` flag, which on this multi-crate workspace tries to
       # verify every member and hangs (cancelled at ~9-10 min, well
-      # before our 15-min step budget). Direct install + explicit
+      # before the job timeout). Direct install + explicit
       # `-p kcore-sanitize --harness` below gives predictable timing.
       #
       # No protobuf compiler is needed: `kcore-sanitize` is a leaf
@@ -197,7 +200,7 @@ jobs:
       # every time it runs even when the layout is already in place.
       - name: Install kani-verifier
         id: kani-install
-        timeout-minutes: 10
+        timeout-minutes: 18
         run: |
           set -euo pipefail
           if ! command -v cargo-kani >/dev/null 2>&1; then
@@ -253,7 +256,7 @@ jobs:
       # match. `--exact` would be stricter but does not exist in
       # kani-verifier 0.67.0.
       - name: Run bounded Kani proof
-        timeout-minutes: 8
+        timeout-minutes: 12
         run: |
           set -euo pipefail
           cargo-kani --version
