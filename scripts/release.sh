@@ -3,9 +3,10 @@
 # Usage:
 #   ./scripts/release.sh build    # nix build ISO + kcore-kctl -> result-iso, result-kctl
 #   ./scripts/release.sh dist     # dist/*.tar.gz, ISO copy, dist/SHA256SUMS
-#   ./scripts/release.sh publish  # gh release create (needs tag on remote, RELEASE_NOTES.md)
+#   ./scripts/release.sh publish  # gh release create/upload (needs tag on remote)
 # Environment:
-#   RELEASE_NOTES   Path to release notes file (default: RELEASE_NOTES.md)
+#   RELEASE_NOTES   Optional path to release notes file (defaults to RELEASE_NOTES.md if present;
+#                   otherwise GitHub auto-generated release notes are used)
 #   GH_REPO         owner/repo override for gh (optional; defaults to git remote)
 set -euo pipefail
 
@@ -63,21 +64,33 @@ cmd_dist() {
 
 cmd_publish() {
 	require_cmd nix
-	NOTES="${RELEASE_NOTES:-RELEASE_NOTES.md}"
-	[[ -f "${NOTES}" ]] || die "missing ${NOTES} - copy RELEASE_NOTES.template.md to RELEASE_NOTES.md and edit"
 	[[ -f "dist/${KCTL_ARCHIVE}" ]] || die "run '${0} dist' first"
 	[[ -f "dist/${ISO_NAME}" ]] || die "run '${0} dist' first"
 	[[ -f dist/SHA256SUMS ]] || die "run '${0} dist' first"
 
 	TAG="v${VERSION}"
-	echo "==> Creating GitHub release ${TAG} (verify-tag)..."
-	nix develop --command gh release create "${TAG}" \
-		--verify-tag \
-		--title "kcore ${VERSION}" \
-		--notes-file "${NOTES}" \
-		"dist/${KCTL_ARCHIVE}" \
-		"dist/${ISO_NAME}" \
-		dist/SHA256SUMS
+	assets=("dist/${KCTL_ARCHIVE}" "dist/${ISO_NAME}" dist/SHA256SUMS)
+	notes_args=()
+	if [[ -n "${RELEASE_NOTES:-}" ]]; then
+		[[ -f "${RELEASE_NOTES}" ]] || die "missing RELEASE_NOTES file: ${RELEASE_NOTES}"
+		notes_args=(--notes-file "${RELEASE_NOTES}")
+	elif [[ -f RELEASE_NOTES.md ]]; then
+		notes_args=(--notes-file RELEASE_NOTES.md)
+	else
+		notes_args=(--generate-notes)
+	fi
+
+	if nix develop --command gh release view "${TAG}" >/dev/null 2>&1; then
+		echo "==> GitHub release ${TAG} exists; uploading assets with --clobber..."
+		nix develop --command gh release upload "${TAG}" --clobber "${assets[@]}"
+	else
+		echo "==> Creating GitHub release ${TAG} (verify-tag)..."
+		nix develop --command gh release create "${TAG}" \
+			--verify-tag \
+			--title "kcore ${VERSION}" \
+			"${notes_args[@]}" \
+			"${assets[@]}"
+	fi
 	echo "==> Done: nix develop --command gh release view ${TAG}"
 }
 

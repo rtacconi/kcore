@@ -12,7 +12,7 @@
 | Day-2 filesystem operations | [day-2-filesystem-operations.md](./day-2-filesystem-operations.md) |
 | CRDT / HA replication | [ha-crdt-replication.md](./ha-crdt-replication.md) |
 | File layout | [file-structure.md](./file-structure.md) |
-| Releases (Make + Nix + `gh`) | [release.md](./release.md) |
+| Releases (GitHub Actions + Nix) | [release.md](./release.md) |
 | Formal methods | [formal-methods-and-verification.md](./formal-methods-and-verification.md) |
 | Heartbeat | [heartbeat.md](./heartbeat.md) |
 | kctl workflows | [kctl-commands-and-workflows.md](./kctl-commands-and-workflows.md) |

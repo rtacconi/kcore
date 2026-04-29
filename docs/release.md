@@ -1,6 +1,9 @@
-# Release process (Make + Nix + GitHub Releases)
+# Automated Release Process (GitHub Actions + Nix)
 
-Releases are **operator-driven**: build artifacts locally with Nix, publish to GitHub with `gh`. There is no release workflow in GitHub Actions; CI on `main` remains the quality gate only.
+Releases are automated from Git tags. Pushing a version tag (`vX.Y.Z`) starts
+the [`release`](../.github/workflows/release.yml) workflow, which builds the Nix
+ISO and `kcore-kctl`, packages `dist/`, uploads a workflow artifact bundle, and
+publishes the GitHub Release assets.
 
 ## Version sources (policy)
 
@@ -11,9 +14,12 @@ Releases are **operator-driven**: build artifacts locally with Nix, publish to G
 
 ## Preconditions
 
-- **Host**: Linux **x86_64** with Nix and flakes working (`nix build .#kcore-kctl`).
-- **GitHub CLI**: `gh` installed and authenticated (`gh auth login`) with `contents: write` on the repo. Optional: set `GH_REPO=owner/repo` if not using the default remote.
-- **Tag**: The annotated tag `v$(cat VERSION)` must exist **on the remote** before `make release-publish` (the script uses `gh release create --verify-tag`).
+- The version bump PR is merged to `main`, including [`VERSION`](../VERSION)
+  (and crate versions, when applicable).
+- The GitHub Actions `release` workflow has `contents: write` permission. This is
+  declared in the workflow and uses GitHub's `GITHUB_TOKEN`.
+- The release tag must match `VERSION`: if `VERSION` is `0.2.0`, the tag must be
+  `v0.2.0`. The workflow validates this before building.
 
 ## Steps
 
@@ -28,48 +34,52 @@ Releases are **operator-driven**: build artifacts locally with Nix, publish to G
    git push origin "v$(tr -d '\n' < VERSION)"
    ```
 
-3. **Quality gate (recommended)**  
-   `make check` and/or `make test-all` per [rust-quality-checks](../.cursor/rules/rust-quality-checks.mdc).
+3. **GitHub Actions publishes the release**
+   The tag push starts `.github/workflows/release.yml`. The workflow:
 
-4. **Build artifacts (Nix)**  
-   At the same commit as the tag (or clean tree on `main` at that commit):
+   - checks out the tag,
+   - verifies `v$(cat VERSION)` matches the tag,
+   - installs Nix,
+   - runs `make release` (`release-build` + `release-dist`),
+   - uploads `dist/*` as a workflow artifact,
+   - runs `make release-publish` with `GH_TOKEN=${{ github.token }}`.
 
-   ```bash
-   make release-build
-   ```
+   `scripts/release.sh publish` uses GitHub-generated release notes unless a
+   `RELEASE_NOTES` file is explicitly supplied.
 
-   This runs [`scripts/release.sh`](../scripts/release.sh) `build`: ISO → `result-iso/`, `kcore-kctl` → `result-kctl/`.
+4. **Manual re-run if needed**
+   If the workflow fails after the tag exists, re-run it in GitHub Actions or use
+   `workflow_dispatch` with the existing tag (for example `v0.2.0`). Publishing is
+   idempotent for assets: if the release already exists, the script re-uploads
+   assets with `gh release upload --clobber`.
 
-5. **Package `dist/`**  
-   Produces the GitHub upload set:
+## Local debugging targets
 
-   ```bash
-   make release-dist
-   ```
+The Make targets remain useful for reproducing the release build locally on
+Linux x86_64 with Nix:
 
-   - `dist/kcore-kctl-$(VERSION)-linux-x86_64.tar.gz` (binary at archive root: `kcore-kctl`)  
-   - `dist/kcoreos-$(VERSION)-x86_64-linux.iso` (release asset name; copied from the single ISO produced under `result-iso/iso/`)  
-   - `dist/SHA256SUMS` for both files  
+```bash
+make release-build
+make release-dist
+```
 
-   Or in one step after a successful build: `make release` (build + dist; does not publish).
+`make release` runs both. It produces:
 
-6. **Release notes**  
-   Copy the template and edit:
+- `dist/kcore-kctl-$(VERSION)-linux-x86_64.tar.gz` (binary at archive root: `kcore-kctl`)
+- `dist/kcoreos-$(VERSION)-x86_64-linux.iso` (release asset name; copied from the single ISO produced under `result-iso/iso/`)
+- `dist/SHA256SUMS` for both files
 
-   ```bash
-   cp RELEASE_NOTES.template.md RELEASE_NOTES.md
-   # edit RELEASE_NOTES.md (not committed; see .gitignore)
-   ```
+Manual publishing is still available for break-glass recovery:
 
-   Publish uses `RELEASE_NOTES` env if you need another path: `RELEASE_NOTES=path/to/notes.md make release-publish`.
+```bash
+GH_TOKEN=... make release-publish
+```
 
-7. **Publish the GitHub Release**  
+By default this uses GitHub-generated release notes. To force custom notes:
 
-   ```bash
-   make release-publish
-   ```
-
-   This runs `nix develop --command gh release create v$(VERSION) --verify-tag` (GitHub CLI from the dev shell) and uploads the tarball, ISO, and `SHA256SUMS`.
+```bash
+RELEASE_NOTES=path/to/notes.md GH_TOKEN=... make release-publish
+```
 
 ## Artifact notes
 
@@ -79,6 +89,7 @@ Releases are **operator-driven**: build artifacts locally with Nix, publish to G
 
 ## Troubleshooting
 
-- **`gh release create` fails on `--verify-tag`**: push the tag first: `git push origin vX.Y.Z`.
+- **Workflow rejects the tag**: ensure `VERSION` contains `X.Y.Z` and the tag is exactly `vX.Y.Z`.
+- **`gh release create` fails on `--verify-tag` locally**: push the tag first: `git push origin vX.Y.Z`.
 - **Wrong ISO name**: Nix may place the built ISO under a NixOS-derived name in `result-iso/iso/`; the dist step discovers the single `*.iso` there and copies it to the release asset name `kcoreos-$(VERSION)-x86_64-linux.iso`.
-- **Token in automation**: set `GH_TOKEN` in the environment for non-interactive `gh` (e.g. CI in the future); this doc targets local operator use.
+- **Manual publish authentication**: set `GH_TOKEN` in the environment for non-interactive `gh`. The GitHub Actions workflow already sets this from `${{ github.token }}`.

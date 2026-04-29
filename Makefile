@@ -101,8 +101,8 @@ iso-remote:
 kctl:
 	cargo build --release -p kcore-kctl
 
-# Release (operator machine: Linux x86_64, Nix + flakes, gh CLI authenticated).
-# Flow: bump VERSION → merge PR → tag v$(VERSION) → push tag → edit RELEASE_NOTES.md → make release-build release-dist → make release-publish
+# Release helpers. Normal releases are automated by .github/workflows/release.yml
+# when a v$(VERSION) tag is pushed; these targets reproduce the build/publish steps locally.
 release-build:
 	bash ./scripts/release.sh build
 
@@ -114,8 +114,8 @@ release-publish:
 
 release: release-build release-dist
 	@echo ""
-	@echo "Artifacts are under dist/. Next: ensure git tag v$(VERSION) exists on origin,"
-	@echo "fill RELEASE_NOTES.md (from RELEASE_NOTES.template.md), then: make release-publish"
+	@echo "Artifacts are under dist/. Normal path: push tag v$(VERSION) and let GitHub Actions publish."
+	@echo "Break-glass local publish: GH_TOKEN=... make release-publish"
 
 install-hooks:
 	@for hook in scripts/hooks/*; do \
@@ -158,8 +158,8 @@ help:
 	@echo "  kctl        Build kctl CLI only"
 	@echo "  release-build   Nix-build ISO + kcore-kctl (result-iso, result-kctl)"
 	@echo "  release-dist    Tarball + ISO under dist/ + SHA256SUMS"
-	@echo "  release-publish Create GitHub Release from tag (needs gh, RELEASE_NOTES.md)"
-	@echo "  release         release-build + release-dist (then publish manually)"
+	@echo "  release-publish Create/update GitHub Release assets from tag (needs GH_TOKEN/gh)"
+	@echo "  release         release-build + release-dist (normally published by GitHub Actions)"
 	@echo "  install-hooks  Install git pre-commit/pre-push hooks"
 	@echo "  clean       Remove build artifacts"
 	@echo "  help        Show this help"
