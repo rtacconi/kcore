@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">KCORE Hypervisor logo</title>
+  <desc id="desc">A restrained enterprise-style KCORE Hypervisor logo with a geometric K inside a hexagon.</desc>
+  <defs>
+    <linearGradient id="edgeBlue" x1="236" y1="224" x2="788" y2="776" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#26b6e8"/>
+      <stop offset="0.52" stop-color="#1471b8"/>
+      <stop offset="1" stop-color="#0b3c78"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="276" y1="260" x2="724" y2="644" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#f7fbff"/>
+      <stop offset="0.48" stop-color="#b8c7d7"/>
+      <stop offset="1" stop-color="#5a6d82"/>
+    </linearGradient>
+    <linearGradient id="navyPanel" x1="292" y1="242" x2="704" y2="700" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#10233c"/>
+      <stop offset="1" stop-color="#07111f"/>
+    </linearGradient>
+    <filter id="softShadow" x="-15%" y="-15%" width="130%" height="130%">
+      <feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#03101f" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+
+  <g filter="url(#softShadow)">
+    <path d="M512 114 812 287v346L512 806 212 633V287Z" fill="#07111f"/>
+    <path d="M512 114 812 287v346L512 806 212 633V287Z" fill="none" stroke="#d7e3ee" stroke-width="16" stroke-linejoin="round"/>
+    <path d="M512 158 774 309v302L512 762 250 611V309Z" fill="none" stroke="url(#edgeBlue)" stroke-width="24" stroke-linejoin="round"/>
+    <path d="M512 204 735 333v258L512 720 289 591V333Z" fill="url(#navyPanel)" stroke="#173b62" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+
+  <g opacity="0.85">
+    <path d="M365 321h88v382h-88Z" fill="url(#steel)"/>
+    <path d="M453 477 650 321h116L548 512Z" fill="#eef6ff"/>
+    <path d="M548 512 770 703H650L453 547Z" fill="#c5d4e3"/>
+    <path d="M453 477v70l-88 86V563Z" fill="#168bd0"/>
+    <path d="M650 321h116L548 512l-68-35Z" fill="none" stroke="#5d7288" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M548 512 770 703H650L480 547Z" fill="none" stroke="#5d7288" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M365 321h88v382h-88Z" fill="none" stroke="#5d7288" stroke-width="8" stroke-linejoin="round"/>
+  </g>
+
+  <g fill="none" stroke="#2bbfec" stroke-width="10" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M620 350h106"/>
+    <path d="M671 398h91"/>
+    <path d="M721 446h64"/>
+  </g>
+  <g fill="#07111f" stroke="#d8e8f6" stroke-width="10">
+    <circle cx="736" cy="350" r="19"/>
+    <circle cx="772" cy="398" r="19"/>
+    <circle cx="794" cy="446" r="19"/>
+  </g>
+
+  <g transform="translate(0 828)">
+    <text x="512" y="0" fill="#eef4fb" font-family="Montserrat, Eurostile, Bank Gothic, Arial, sans-serif" font-size="118" font-weight="800" letter-spacing="14" text-anchor="middle">KCORE</text>
+    <text x="512" y="70" fill="#8fa4b9" font-family="Montserrat, Eurostile, Bank Gothic, Arial, sans-serif" font-size="38" font-weight="600" letter-spacing="18" text-anchor="middle">HYPERVISOR</text>
+    <path d="M249 32h150M625 32h150" stroke="#1c9bd4" stroke-width="8" stroke-linecap="round"/>
+  </g>
+</svg>
