@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="assets/kcore-logo.png" alt="KCore" width="300">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/kcore-logo-github-dark.png">
+    <img src="assets/kcore-logo-github-light.png" alt="KCore" width="300">
+  </picture>
 </p>
 
 # kcore-rust
