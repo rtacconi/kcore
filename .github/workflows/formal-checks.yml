@@ -81,9 +81,9 @@ jobs:
     # Must exceed install + proof step ceilings plus checkout/cache/rust-cache overhead.
     # Cold Kani install + CBMC setup can approach 15 min on busy runners; install+proof
     # ceilings plus checkout/cache need headroom (avoid cancelling mid-proof).
-    # kcore-disko-types harnesses can exceed 25m CBMC wall-clock on throttled GHA hosts;
-    # keep the proof step and job timeout above (install ceiling + proof ceiling + margin).
-    timeout-minutes: 90
+    # Slow shards can approach an hour on cold runners; keep the job ceiling
+    # above (install + longest proof step + cache/checkout slack).
+    timeout-minutes: 120
     strategy:
       # `fail-fast: false` lets all harnesses report results even
       # if one regresses; otherwise GHA cancels the rest and we lose
@@ -258,7 +258,7 @@ jobs:
       # match. `--exact` would be stricter but does not exist in
       # kani-verifier 0.67.0.
       - name: Run bounded Kani proof
-        timeout-minutes: 60
+        timeout-minutes: 90
         run: |
           set -euo pipefail
           cargo-kani --version

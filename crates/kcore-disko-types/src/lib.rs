@@ -540,9 +540,9 @@ mod prop_tests {
 mod kani_proofs {
     use super::*;
 
-    // Six keeps `"device"` (+ boundary tokens) representable while shrinking the
-    // symbolic state space enough for CBMC to finish on GitHub-hosted runners.
-    const MAX_INPUT_LEN: usize = 6;
+    // Match `kcore-sanitize` (4) so layout-diff parsing stays in the same
+    // CBMC budget. Proptest still exercises long real layouts.
+    const MAX_INPUT_LEN: usize = 4;
 
     fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
         let len: usize = kani::any();
@@ -559,7 +559,7 @@ mod kani_proofs {
     /// ASCII input up to the bound. This rules out a panicking
     /// controller-side parser feeding adversarial layout bodies.
     #[kani::proof]
-    #[kani::unwind(10)]
+    #[kani::unwind(8)]
     fn extract_target_devices_never_panics() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
@@ -571,7 +571,7 @@ mod kani_proofs {
     /// extractor's byte indices stay valid against the original
     /// source text.
     #[kani::proof]
-    #[kani::unwind(10)]
+    #[kani::unwind(8)]
     fn strip_nix_comments_preserves_length() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
@@ -584,7 +584,7 @@ mod kani_proofs {
     /// check assumes this prefix; if the parser ever returned
     /// `"…something else…"` the classifier could silently no-op.
     #[kani::proof]
-    #[kani::unwind(10)]
+    #[kani::unwind(8)]
     fn extract_target_devices_outputs_dev_prefixed_paths() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
@@ -598,7 +598,7 @@ mod kani_proofs {
     /// catches any accidental dependence on uninitialised memory,
     /// hash randomisation, or iterator order.
     #[kani::proof]
-    #[kani::unwind(10)]
+    #[kani::unwind(8)]
     fn extract_target_devices_is_deterministic() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);

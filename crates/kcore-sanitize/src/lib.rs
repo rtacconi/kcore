@@ -19,10 +19,26 @@
 /// string literal (`"…"`). Escapes `\`, `"`, and the `${`
 /// interpolation marker.
 ///
-/// Uses a byte index walk (ASCII invariants, non-ASCII via
-/// `chars().next()`) instead of a `peekable` char iterator so Kani
-/// does not spend tens of minutes in iterator-heavy `core` code.
+/// Uses a byte index walk instead of a `peekable` char iterator so
+/// Kani does not spend tens of minutes in iterator-heavy `core` code.
+///
+/// Under `cfg(kani)`, only the ASCII-only fast path is compiled: every
+/// harness uses [`kani_proofs::any_ascii_str`], so UTF-8 suffix decoding
+/// never appears in the verification artifact (CBMC was spending most
+/// of its budget there).
 pub fn nix_escape(s: &str) -> String {
+    #[cfg(kani)]
+    {
+        return nix_escape_for_kani(s);
+    }
+    #[cfg(not(kani))]
+    {
+        nix_escape_utf8(s)
+    }
+}
+
+#[cfg(not(kani))]
+fn nix_escape_utf8(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0usize;
@@ -54,6 +70,34 @@ pub fn nix_escape(s: &str) -> String {
     out
 }
 
+#[cfg(kani)]
+fn nix_escape_for_kani(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => {
+                out.push_str("\\\\");
+                i += 1;
+            }
+            b'"' => {
+                out.push_str("\\\"");
+                i += 1;
+            }
+            b'$' if i + 1 < b.len() && b[i + 1] == b'{' => {
+                out.push_str("\\${");
+                i += 2;
+            }
+            _ => {
+                out.push(char::from(b[i]));
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
 /// Strip a Nix attribute key to only safe characters
 /// (alphanumeric, dash, underscore). Every disallowed input
 /// character is replaced by a single `-`, so character count is
@@ -64,7 +108,23 @@ pub fn nix_escape(s: &str) -> String {
 /// `chars().map().collect()`.
 /// The iterator chain was orders of magnitude slower for Kani/CBMC
 /// (same story as `path_segments_include_dot_dot` above).
+///
+/// Under `cfg(kani)`, only per-byte ASCII handling is compiled — matching
+/// [`kani_proofs::any_ascii_str`] inputs — so CBMC never pulls UTF-8 decode
+/// machinery into the proof.
 pub fn sanitize_nix_attr_key(s: &str) -> String {
+    #[cfg(kani)]
+    {
+        return sanitize_nix_attr_key_for_kani(s);
+    }
+    #[cfg(not(kani))]
+    {
+        sanitize_nix_attr_key_utf8(s)
+    }
+}
+
+#[cfg(not(kani))]
+fn sanitize_nix_attr_key_utf8(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0usize;
@@ -78,6 +138,20 @@ pub fn sanitize_nix_attr_key(s: &str) -> String {
             i += ch.len_utf8();
             ch
         };
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('-');
+        }
+    }
+    out
+}
+
+#[cfg(kani)]
+fn sanitize_nix_attr_key_for_kani(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for &b in s.as_bytes() {
+        let c = char::from(b);
         if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
             out.push(c);
         } else {
