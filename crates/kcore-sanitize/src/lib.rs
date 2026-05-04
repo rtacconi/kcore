@@ -543,7 +543,10 @@ mod kani_proofs {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
         let out = sanitize_nix_attr_key(s);
-        assert!(out.chars().count() == s.chars().count());
+        // `any_ascii_str` only supplies ASCII, so one byte per char; the sanitizer
+        // never introduces multi-byte UTF-8 for ASCII inputs. Avoid `chars().count()`
+        // in harnesses — Kani/CBMC pays heavily for `core::str::Chars`.
+        assert!(out.len() == s.len());
     }
 
     #[kani::proof]
@@ -552,8 +555,8 @@ mod kani_proofs {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
         let out = sanitize_nix_attr_key(s);
-        for c in out.chars() {
-            assert!(c.is_ascii_alphanumeric() || c == '-' || c == '_');
+        for &b in out.as_bytes() {
+            assert!(b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
         }
     }
 
