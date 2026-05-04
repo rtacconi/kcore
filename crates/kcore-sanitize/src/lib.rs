@@ -18,18 +18,37 @@
 /// Escape a string for safe inclusion inside a Nix double-quoted
 /// string literal (`"…"`). Escapes `\`, `"`, and the `${`
 /// interpolation marker.
+///
+/// Uses a byte index walk (ASCII invariants, non-ASCII via
+/// `chars().next()`) instead of a `peekable` char iterator so Kani
+/// does not spend tens of minutes in iterator-heavy `core` code.
 pub fn nix_escape(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
-    let mut chars = s.chars().peekable();
-    while let Some(c) = chars.next() {
-        match c {
-            '\\' => out.push_str("\\\\"),
-            '"' => out.push_str("\\\""),
-            '$' if chars.peek() == Some(&'{') => {
-                out.push_str("\\${");
-                chars.next();
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        match b[i] {
+            b'\\' => {
+                out.push_str("\\\\");
+                i += 1;
             }
-            _ => out.push(c),
+            b'"' => {
+                out.push_str("\\\"");
+                i += 1;
+            }
+            b'$' if i + 1 < b.len() && b[i + 1] == b'{' => {
+                out.push_str("\\${");
+                i += 2;
+            }
+            _ if b[i] < 128 => {
+                out.push(char::from(b[i]));
+                i += 1;
+            }
+            _ => {
+                let ch = s[i..].chars().next().unwrap();
+                i += ch.len_utf8();
+                out.push(ch);
+            }
         }
     }
     out
@@ -39,16 +58,33 @@ pub fn nix_escape(s: &str) -> String {
 /// (alphanumeric, dash, underscore). Every disallowed input
 /// character is replaced by a single `-`, so character count is
 /// preserved.
+///
+/// Implemented as a manual UTF-8 scan (ASCII fast path, non-ASCII
+/// via one `chars().next()` per codepoint) instead of
+/// `chars().map().collect()`.
+/// The iterator chain was orders of magnitude slower for Kani/CBMC
+/// (same story as `path_segments_include_dot_dot` above).
 pub fn sanitize_nix_attr_key(s: &str) -> String {
-    s.chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-                c
-            } else {
-                '-'
-            }
-        })
-        .collect()
+    let mut out = String::with_capacity(s.len());
+    let b = s.as_bytes();
+    let mut i = 0usize;
+    while i < b.len() {
+        let c = if b[i] < 128 {
+            let ch = char::from(b[i]);
+            i += 1;
+            ch
+        } else {
+            let ch = s[i..].chars().next().unwrap();
+            i += ch.len_utf8();
+            ch
+        };
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+            out.push(c);
+        } else {
+            out.push('-');
+        }
+    }
+    out
 }
 
 // =============================================================

@@ -540,7 +540,9 @@ mod prop_tests {
 mod kani_proofs {
     use super::*;
 
-    const MAX_INPUT_LEN: usize = 8;
+    // Six keeps `"device"` (+ boundary tokens) representable while shrinking the
+    // symbolic state space enough for CBMC to finish on GitHub-hosted runners.
+    const MAX_INPUT_LEN: usize = 6;
 
     fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
         let len: usize = kani::any();
