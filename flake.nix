@@ -227,9 +227,9 @@
                   ...
                 }:
                 let
+                  inherit (inputs.self.packages.x86_64-linux) kctl;
                   nodeAgent = inputs.self.packages.x86_64-linux.kcore-node-agent;
                   controller = inputs.self.packages.x86_64-linux.kcore-controller;
-                  kctl = inputs.self.packages.x86_64-linux.kctl;
                   dashboard = inputs.self.packages.x86_64-linux.kcore-dashboard;
                   kcoreConsole = inputs.self.packages.x86_64-linux.kcore-console;
                   diskoPackage = inputs.disko.packages.x86_64-linux.default;
