@@ -7,6 +7,8 @@
 )]
 
 mod auth;
+mod cluster_update_reconciler;
+mod cluster_update_spec;
 mod config;
 mod db;
 mod disk_reconciler;
@@ -116,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
     replication::spawn_head_materializer(database.clone());
     replication::spawn_reservation_retry_executor(database.clone());
     disk_reconciler::spawn_disk_layout_reconciler(database.clone(), clients.clone());
+    cluster_update_reconciler::spawn_cluster_update_reconciler(database.clone(), clients.clone());
 
     let staleness_db = database.clone();
     tokio::spawn(async move {

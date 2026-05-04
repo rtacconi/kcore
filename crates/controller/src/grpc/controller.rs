@@ -6,11 +6,12 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::auth::{self, CN_CONTROLLER_PREFIX, CN_KCTL, CN_NODE_PREFIX};
+use crate::cluster_update_spec;
 use crate::config::{NetworkConfig, ReplicationConfig};
 use crate::controller_proto;
 use crate::db::{
-    Database, DiskLayoutRow, DiskLayoutStatusRow, NetworkRow, NodeRow, SecurityGroupRow,
-    SecurityGroupRuleRow, VmRow, WorkloadRow,
+    ClusterUpdateNodeRow, ClusterUpdateRow, Database, DiskLayoutRow, DiskLayoutStatusRow,
+    NetworkRow, NodeRow, SecurityGroupRow, SecurityGroupRuleRow, VmRow, WorkloadRow,
 };
 use crate::node_proto;
 use crate::{nixgen, node_client::NodeClients, scheduler};
@@ -50,6 +51,10 @@ const EVT_SSH_KEY_CREATE: &str = "ssh_key.create";
 const EVT_SSH_KEY_DELETE: &str = "ssh_key.delete";
 const EVT_DISK_LAYOUT_CREATE: &str = "disk_layout.create";
 const EVT_DISK_LAYOUT_DELETE: &str = "disk_layout.delete";
+const EVT_CLUSTER_UPDATE_CREATE: &str = "cluster_update.create";
+const EVT_CLUSTER_UPDATE_APPROVE: &str = "cluster_update.approve";
+const EVT_CLUSTER_UPDATE_CANCEL: &str = "cluster_update.cancel";
+const EVT_CLUSTER_UPDATE_ROLLBACK: &str = "cluster_update.rollback";
 
 fn normalize_sg_protocol(protocol: &str) -> Result<String, Status> {
     let p = protocol.trim().to_ascii_lowercase();
@@ -1305,6 +1310,74 @@ fn disk_layout_status_to_proto(row: &DiskLayoutStatusRow) -> controller_proto::D
         phase,
         refusal_reason: row.refusal_reason.clone(),
         message: row.message.clone(),
+        last_transition_at: parse_datetime_to_timestamp(&row.last_transition_at),
+    }
+}
+
+fn cluster_update_phase_to_proto(s: &str) -> i32 {
+    match s {
+        "pending" => controller_proto::ClusterUpdatePhase::Pending as i32,
+        "ready" => controller_proto::ClusterUpdatePhase::Ready as i32,
+        "rolling_out" => controller_proto::ClusterUpdatePhase::RollingOut as i32,
+        "succeeded" => controller_proto::ClusterUpdatePhase::Succeeded as i32,
+        "failed" => controller_proto::ClusterUpdatePhase::Failed as i32,
+        "cancelled" => controller_proto::ClusterUpdatePhase::Cancelled as i32,
+        "rolling_back" => controller_proto::ClusterUpdatePhase::RollingBack as i32,
+        _ => controller_proto::ClusterUpdatePhase::Unspecified as i32,
+    }
+}
+
+fn cluster_update_approval_to_proto(s: &str) -> i32 {
+    match s {
+        "awaiting" => {
+            controller_proto::ClusterUpdateApprovalStatus::ClusterUpdateApprovalAwaiting as i32
+        }
+        "approved" => {
+            controller_proto::ClusterUpdateApprovalStatus::ClusterUpdateApprovalApproved as i32
+        }
+        _ => controller_proto::ClusterUpdateApprovalStatus::Unspecified as i32,
+    }
+}
+
+fn node_update_phase_to_proto(s: &str) -> i32 {
+    match s {
+        "pending" => controller_proto::NodeUpdatePhase::Pending as i32,
+        "prepared" => controller_proto::NodeUpdatePhase::Prepared as i32,
+        "succeeded" => controller_proto::NodeUpdatePhase::Succeeded as i32,
+        "failed" => controller_proto::NodeUpdatePhase::Failed as i32,
+        "cancelled" => controller_proto::NodeUpdatePhase::Cancelled as i32,
+        "rolling_back" => controller_proto::NodeUpdatePhase::RollingBack as i32,
+        _ => controller_proto::NodeUpdatePhase::Unspecified as i32,
+    }
+}
+
+fn cluster_update_row_to_proto(
+    row: &ClusterUpdateRow,
+    spec: controller_proto::ClusterUpdateSpec,
+) -> controller_proto::ClusterUpdate {
+    controller_proto::ClusterUpdate {
+        spec: Some(spec),
+        generation: row.generation,
+        phase: cluster_update_phase_to_proto(&row.phase),
+        approval_status: cluster_update_approval_to_proto(&row.approval_status),
+        created_at: parse_datetime_to_timestamp(&row.created_at),
+        updated_at: parse_datetime_to_timestamp(&row.updated_at),
+    }
+}
+
+fn node_update_row_to_proto(row: &ClusterUpdateNodeRow) -> controller_proto::NodeUpdateStatus {
+    controller_proto::NodeUpdateStatus {
+        update_name: row.update_name.clone(),
+        node_id: row.node_id.clone(),
+        observed_generation: row.observed_generation,
+        phase: node_update_phase_to_proto(&row.phase),
+        current_version: row.current_version.clone(),
+        target_version: row.target_version.clone(),
+        prepared_closure: row.prepared_closure.clone(),
+        current_generation: row.current_generation.clone(),
+        target_generation: row.target_generation.clone(),
+        requires_reboot: row.requires_reboot,
+        last_error: row.last_error.clone(),
         last_transition_at: parse_datetime_to_timestamp(&row.last_transition_at),
     }
 }
@@ -4909,6 +4982,13 @@ impl controller_proto::controller_server::Controller for ControllerService {
             acl("GetNetworkOverview", CN_KCTL),
             acl("GetStorageOverview", CN_KCTL),
             acl("ApplyNixConfig", CN_KCTL),
+            acl("CreateClusterUpdate", CN_KCTL),
+            acl("GetClusterUpdate", CN_KCTL),
+            acl("ListClusterUpdates", CN_KCTL),
+            acl("PlanClusterUpdate", CN_KCTL),
+            acl("ApproveClusterUpdate", CN_KCTL),
+            acl("CancelClusterUpdate", CN_KCTL),
+            acl("RollbackClusterUpdate", CN_KCTL),
         ];
 
         Ok(Response::new(
@@ -4986,6 +5066,386 @@ impl controller_proto::controller_server::Controller for ControllerService {
     ) -> Result<Response<controller_proto::DeleteDiskLayoutResponse>, Status> {
         auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
         self.delete_disk_layout_impl(request.into_inner()).await
+    }
+
+    async fn create_cluster_update(
+        &self,
+        request: Request<controller_proto::CreateClusterUpdateRequest>,
+    ) -> Result<Response<controller_proto::CreateClusterUpdateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        let spec = req
+            .spec
+            .ok_or_else(|| Status::invalid_argument("spec is required"))?;
+        cluster_update_spec::validate_spec(&spec).map_err(Status::invalid_argument)?;
+        let target_ids = cluster_update_spec::resolve_target_node_ids(&self.db, &spec)
+            .map_err(Status::invalid_argument)?;
+        if target_ids.is_empty() {
+            return Err(Status::invalid_argument("selector matched no nodes"));
+        }
+        let spec_json = cluster_update_spec::spec_to_json(&spec)
+            .map_err(|e| Status::internal(format!("encode spec: {e}")))?;
+        let name = spec.name.trim().to_string();
+        let existing = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let target = spec
+            .target
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("spec.target is required"))?;
+        let target_version = target.version.trim().to_string();
+        let flake_ref = target.flake_ref.trim().to_string();
+        let flake_rev = target.flake_rev.trim().to_string();
+
+        let (action, generation, changed_fields) = if let Some(ex) = existing.as_ref() {
+            if ex.spec_json == spec_json {
+                (
+                    controller_proto::ApplyAction::Unchanged as i32,
+                    ex.generation,
+                    Vec::<String>::new(),
+                )
+            } else {
+                (
+                    controller_proto::ApplyAction::Updated as i32,
+                    ex.generation.saturating_add(1),
+                    vec!["spec".to_string()],
+                )
+            }
+        } else {
+            (
+                controller_proto::ApplyAction::Created as i32,
+                1i64,
+                Vec::<String>::new(),
+            )
+        };
+
+        if action == controller_proto::ApplyAction::Unchanged as i32 {
+            let ex = existing.expect("unchanged implies existing");
+            let parsed = cluster_update_spec::spec_from_json(&ex.spec_json)
+                .map_err(|e| Status::internal(format!("decode spec: {e}")))?;
+            return Ok(Response::new(
+                controller_proto::CreateClusterUpdateResponse {
+                    success: true,
+                    cluster_update: Some(cluster_update_row_to_proto(&ex, parsed)),
+                    action,
+                    changed_fields,
+                },
+            ));
+        }
+
+        let manual = cluster_update_spec::requires_manual_approval(&spec);
+        let (approval_status, phase) = if manual {
+            ("awaiting", "pending")
+        } else {
+            ("approved", "ready")
+        };
+        let created_at = existing
+            .as_ref()
+            .map(|e| e.created_at.clone())
+            .unwrap_or_default();
+
+        let row = ClusterUpdateRow {
+            name: name.clone(),
+            generation,
+            target_version,
+            flake_ref,
+            flake_rev,
+            spec_json: spec_json.clone(),
+            phase: phase.to_string(),
+            approval_status: approval_status.to_string(),
+            created_at,
+            updated_at: String::new(),
+        };
+        self.db
+            .upsert_cluster_update(&row)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let mut node_rows: Vec<ClusterUpdateNodeRow> = Vec::new();
+        for nid in &target_ids {
+            node_rows.push(ClusterUpdateNodeRow {
+                update_name: name.clone(),
+                node_id: nid.clone(),
+                observed_generation: generation,
+                phase: "pending".to_string(),
+                current_version: String::new(),
+                target_version: target.version.trim().to_string(),
+                prepared_closure: String::new(),
+                current_generation: String::new(),
+                target_generation: String::new(),
+                requires_reboot: false,
+                last_error: String::new(),
+                last_transition_at: String::new(),
+            });
+        }
+        self.db
+            .replace_cluster_update_nodes(&name, &node_rows)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        let stored = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .expect("just inserted");
+        let parsed_spec = cluster_update_spec::spec_from_json(&stored.spec_json)
+            .map_err(|e| Status::internal(format!("decode spec: {e}")))?;
+
+        let _ = self.log_replication_event_required(
+            EVT_CLUSTER_UPDATE_CREATE,
+            &name,
+            serde_json::json!({ "generation": generation }),
+        );
+
+        Ok(Response::new(
+            controller_proto::CreateClusterUpdateResponse {
+                success: true,
+                cluster_update: Some(cluster_update_row_to_proto(&stored, parsed_spec)),
+                action,
+                changed_fields,
+            },
+        ))
+    }
+
+    async fn get_cluster_update(
+        &self,
+        request: Request<controller_proto::GetClusterUpdateRequest>,
+    ) -> Result<Response<controller_proto::GetClusterUpdateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        if req.name.trim().is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let row = self
+            .db
+            .get_cluster_update(req.name.trim())
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("cluster update '{}' not found", req.name)))?;
+        let parsed = cluster_update_spec::spec_from_json(&row.spec_json)
+            .map_err(|e| Status::internal(format!("decode spec: {e}")))?;
+        let statuses = self
+            .db
+            .list_cluster_update_nodes(req.name.trim())
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let node_statuses: Vec<controller_proto::NodeUpdateStatus> =
+            statuses.iter().map(node_update_row_to_proto).collect();
+        Ok(Response::new(controller_proto::GetClusterUpdateResponse {
+            cluster_update: Some(cluster_update_row_to_proto(&row, parsed)),
+            node_statuses,
+        }))
+    }
+
+    async fn list_cluster_updates(
+        &self,
+        request: Request<controller_proto::ListClusterUpdatesRequest>,
+    ) -> Result<Response<controller_proto::ListClusterUpdatesResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let _ = request.into_inner();
+        let rows = self
+            .db
+            .list_cluster_updates()
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let mut cluster_updates = Vec::with_capacity(rows.len());
+        for row in rows {
+            let parsed = cluster_update_spec::spec_from_json(&row.spec_json)
+                .map_err(|e| Status::internal(format!("decode spec for {}: {e}", row.name)))?;
+            cluster_updates.push(cluster_update_row_to_proto(&row, parsed));
+        }
+        Ok(Response::new(
+            controller_proto::ListClusterUpdatesResponse { cluster_updates },
+        ))
+    }
+
+    async fn plan_cluster_update(
+        &self,
+        request: Request<controller_proto::PlanClusterUpdateRequest>,
+    ) -> Result<Response<controller_proto::PlanClusterUpdateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        let spec = req
+            .spec
+            .ok_or_else(|| Status::invalid_argument("spec is required"))?;
+        cluster_update_spec::validate_spec(&spec).map_err(Status::invalid_argument)?;
+        let target_ids = cluster_update_spec::resolve_target_node_ids(&self.db, &spec)
+            .map_err(Status::invalid_argument)?;
+        let mut issues = Vec::new();
+        for nid in &target_ids {
+            if self
+                .db
+                .get_node(nid)
+                .map_err(|e| Status::internal(e.to_string()))?
+                .is_none()
+            {
+                issues.push(controller_proto::PlanIssue {
+                    node_id: nid.clone(),
+                    reason: "node not registered".into(),
+                });
+            }
+        }
+        let viable = !target_ids.is_empty() && issues.is_empty();
+        Ok(Response::new(controller_proto::PlanClusterUpdateResponse {
+            viable,
+            target_node_ids: target_ids,
+            issues,
+            likely_requires_reboot: true,
+            detail: "MVP: assumes flake rollout may restart kcore services".into(),
+        }))
+    }
+
+    async fn approve_cluster_update(
+        &self,
+        request: Request<controller_proto::ApproveClusterUpdateRequest>,
+    ) -> Result<Response<controller_proto::ApproveClusterUpdateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        if req.name.trim().is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let name = req.name.trim().to_string();
+        let existing = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("cluster update '{}' not found", req.name)))?;
+        let mut row = existing.clone();
+        row.approval_status = "approved".into();
+        if row.phase == "pending" {
+            row.phase = "ready".into();
+        }
+        self.db
+            .upsert_cluster_update(&row)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let stored = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .expect("row exists");
+        let parsed = cluster_update_spec::spec_from_json(&stored.spec_json)
+            .map_err(|e| Status::internal(format!("decode spec: {e}")))?;
+        let _ = self.log_replication_event_required(
+            EVT_CLUSTER_UPDATE_APPROVE,
+            &name,
+            serde_json::json!({}),
+        );
+        Ok(Response::new(
+            controller_proto::ApproveClusterUpdateResponse {
+                success: true,
+                cluster_update: Some(cluster_update_row_to_proto(&stored, parsed)),
+            },
+        ))
+    }
+
+    async fn cancel_cluster_update(
+        &self,
+        request: Request<controller_proto::CancelClusterUpdateRequest>,
+    ) -> Result<Response<controller_proto::CancelClusterUpdateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        if req.name.trim().is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let name = req.name.trim().to_string();
+        let existing = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("cluster update '{}' not found", req.name)))?;
+        let mut row = existing.clone();
+        row.phase = "cancelled".into();
+        self.db
+            .upsert_cluster_update(&row)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        let nodes = self
+            .db
+            .list_cluster_update_nodes(&name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        for n in nodes {
+            if n.phase != "succeeded" {
+                self.db
+                    .upsert_cluster_update_node(&ClusterUpdateNodeRow {
+                        phase: "cancelled".into(),
+                        ..n
+                    })
+                    .map_err(|e| Status::internal(e.to_string()))?;
+            }
+        }
+        let stored = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .expect("row exists");
+        let parsed = cluster_update_spec::spec_from_json(&stored.spec_json)
+            .map_err(|e| Status::internal(format!("decode spec: {e}")))?;
+        let _ = self.log_replication_event_required(
+            EVT_CLUSTER_UPDATE_CANCEL,
+            &name,
+            serde_json::json!({}),
+        );
+        Ok(Response::new(
+            controller_proto::CancelClusterUpdateResponse {
+                success: true,
+                cluster_update: Some(cluster_update_row_to_proto(&stored, parsed)),
+            },
+        ))
+    }
+
+    async fn rollback_cluster_update(
+        &self,
+        request: Request<controller_proto::RollbackClusterUpdateRequest>,
+    ) -> Result<Response<controller_proto::RollbackClusterUpdateResponse>, Status> {
+        auth::require_peer(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        if req.name.trim().is_empty() {
+            return Err(Status::invalid_argument("name is required"));
+        }
+        let name = req.name.trim().to_string();
+        let existing = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .ok_or_else(|| Status::not_found(format!("cluster update '{}' not found", req.name)))?;
+        let mut row = existing.clone();
+        row.phase = "rolling_back".into();
+        self.db
+            .upsert_cluster_update(&row)
+            .map_err(|e| Status::internal(e.to_string()))?;
+
+        // Mark non-terminal nodes as `rolling_back` so the reconciler picks
+        // them up. Nodes that already activated are the ones we actually
+        // need to roll back; nodes still pending/prepared also get marked
+        // so the reconciler can quickly cancel their staging directories.
+        let nodes = self
+            .db
+            .list_cluster_update_nodes(&name)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        for n in nodes {
+            if n.phase == "succeeded" || n.phase == "prepared" || n.phase == "pending" {
+                self.db
+                    .upsert_cluster_update_node(&ClusterUpdateNodeRow {
+                        phase: "rolling_back".into(),
+                        ..n
+                    })
+                    .map_err(|e| Status::internal(e.to_string()))?;
+            }
+        }
+
+        let stored = self
+            .db
+            .get_cluster_update(&name)
+            .map_err(|e| Status::internal(e.to_string()))?
+            .expect("row exists");
+        let parsed = cluster_update_spec::spec_from_json(&stored.spec_json)
+            .map_err(|e| Status::internal(format!("decode spec: {e}")))?;
+        let _ = self.log_replication_event_required(
+            EVT_CLUSTER_UPDATE_ROLLBACK,
+            &name,
+            serde_json::json!({}),
+        );
+        Ok(Response::new(
+            controller_proto::RollbackClusterUpdateResponse {
+                success: true,
+                cluster_update: Some(cluster_update_row_to_proto(&stored, parsed)),
+            },
+        ))
     }
 
     async fn classify_disk_layout(
@@ -6609,5 +7069,339 @@ mod tests {
             controller_proto::ApplyAction::Unchanged as i32
         );
         assert!(second.changed_fields.is_empty());
+    }
+
+    fn make_cluster_update_spec() -> controller_proto::ClusterUpdateSpec {
+        controller_proto::ClusterUpdateSpec {
+            name: "release-0-3-0".into(),
+            target: Some(controller_proto::ClusterUpdateTarget {
+                version: "0.3.0".into(),
+                flake_ref: "github:kcorehypervisor/kcore/v0.3.0".into(),
+                flake_rev: "0123456789abcdef0123456789abcdef01234567".into(),
+                nixpkgs_rev: String::new(),
+                system_profile: String::new(),
+            }),
+            selector: Some(controller_proto::ClusterUpdateSelector {
+                all_nodes: true,
+                ..Default::default()
+            }),
+            strategy: Some(controller_proto::ClusterUpdateStrategy {
+                r#type: controller_proto::ClusterUpdateStrategyType::ClusterUpdateStrategyOneAtATime
+                    as i32,
+                max_unavailable: 1,
+                batch_size: 0,
+            }),
+            drain_vms: false,
+            drain_timeout_seconds: 0,
+            activation_mode:
+                controller_proto::ClusterUpdateActivationMode::ClusterUpdateActivationSwitch as i32,
+            reboot_policy: "if-required".into(),
+            approval_policy:
+                controller_proto::ClusterUpdateApprovalPolicy::ClusterUpdateApprovalManual as i32,
+            automatic_rollback: false,
+        }
+    }
+
+    fn cluster_svc() -> (Database, ControllerService) {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_node(&test_node()).expect("insert node");
+        let mut other = test_node();
+        other.id = "node-2".to_string();
+        other.hostname = "node-2".to_string();
+        db.upsert_node(&other).expect("insert node-2");
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+        (db, svc)
+    }
+
+    #[tokio::test]
+    async fn create_cluster_update_creates_then_unchanged_then_updated() {
+        let (db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+
+        let created = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest {
+                spec: Some(spec.clone()),
+            }),
+        )
+        .await
+        .expect("first create")
+        .into_inner();
+        assert_eq!(
+            created.action,
+            controller_proto::ApplyAction::Created as i32
+        );
+        let cu = created.cluster_update.expect("cluster_update");
+        assert_eq!(cu.generation, 1);
+        assert_eq!(
+            cu.phase,
+            controller_proto::ClusterUpdatePhase::Pending as i32,
+            "manual approval should leave phase=pending"
+        );
+        assert_eq!(
+            cu.approval_status,
+            controller_proto::ClusterUpdateApprovalStatus::ClusterUpdateApprovalAwaiting as i32
+        );
+        let stored_nodes = db.list_cluster_update_nodes("release-0-3-0").unwrap();
+        assert_eq!(
+            stored_nodes.len(),
+            2,
+            "all_nodes must enroll every registered node"
+        );
+
+        let same = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec.clone()) }),
+        )
+        .await
+        .expect("idempotent create")
+        .into_inner();
+        assert_eq!(same.action, controller_proto::ApplyAction::Unchanged as i32);
+        assert!(same.changed_fields.is_empty());
+
+        let mut spec2 = spec.clone();
+        spec2.target.as_mut().unwrap().flake_rev =
+            "9999999999999999999999999999999999999999".into();
+        let updated = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec2) }),
+        )
+        .await
+        .expect("updated create")
+        .into_inner();
+        assert_eq!(
+            updated.action,
+            controller_proto::ApplyAction::Updated as i32
+        );
+        let cu = updated.cluster_update.expect("cluster_update");
+        assert_eq!(cu.generation, 2, "spec change must bump generation");
+    }
+
+    #[tokio::test]
+    async fn create_cluster_update_rejects_selector_with_no_match() {
+        let db = Database::open(":memory:").expect("open db");
+        db.upsert_node(&test_node()).expect("insert node");
+        let hook: PushHook = Arc::new(|_n: &NodeRow| Ok(()));
+        let svc = ControllerService::new_with_test_push_hook(
+            db.clone(),
+            NodeClients::new(None),
+            test_network(),
+            None,
+            hook,
+        );
+        let mut spec = make_cluster_update_spec();
+        spec.selector = Some(controller_proto::ClusterUpdateSelector {
+            datacenters: vec!["NOPE".into()],
+            ..Default::default()
+        });
+        let err = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect_err("empty selector match must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn create_cluster_update_with_auto_approval_starts_ready_and_approved() {
+        let (_db, svc) = cluster_svc();
+        let mut spec = make_cluster_update_spec();
+        spec.approval_policy =
+            controller_proto::ClusterUpdateApprovalPolicy::ClusterUpdateApprovalAuto as i32;
+        let created = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("auto approval create")
+        .into_inner();
+        let cu = created.cluster_update.expect("cluster_update");
+        assert_eq!(cu.phase, controller_proto::ClusterUpdatePhase::Ready as i32);
+        assert_eq!(
+            cu.approval_status,
+            controller_proto::ClusterUpdateApprovalStatus::ClusterUpdateApprovalApproved as i32
+        );
+    }
+
+    #[tokio::test]
+    async fn approve_cluster_update_moves_pending_to_ready() {
+        let (db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("create");
+
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::approve_cluster_update(
+            &svc,
+            Request::new(controller_proto::ApproveClusterUpdateRequest { name: "release-0-3-0".into() }),
+        )
+        .await
+        .expect("approve")
+        .into_inner();
+        let cu = resp.cluster_update.expect("cluster_update");
+        assert_eq!(cu.phase, controller_proto::ClusterUpdatePhase::Ready as i32);
+        assert_eq!(
+            cu.approval_status,
+            controller_proto::ClusterUpdateApprovalStatus::ClusterUpdateApprovalApproved as i32
+        );
+        // Cluster row must be in `ready` so the reconciler picks it up.
+        let row = db.get_cluster_update("release-0-3-0").unwrap().unwrap();
+        assert_eq!(row.phase, "ready");
+    }
+
+    #[tokio::test]
+    async fn cancel_cluster_update_marks_non_terminal_nodes_cancelled() {
+        let (db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("create");
+        // Pretend node-1 already activated; node-2 is still preparing.
+        let mut node_rows = db.list_cluster_update_nodes("release-0-3-0").unwrap();
+        for n in &mut node_rows {
+            if n.node_id == "node-1" {
+                n.phase = "succeeded".into();
+                db.upsert_cluster_update_node(n).unwrap();
+            } else {
+                n.phase = "prepared".into();
+                db.upsert_cluster_update_node(n).unwrap();
+            }
+        }
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::cancel_cluster_update(
+            &svc,
+            Request::new(controller_proto::CancelClusterUpdateRequest { name: "release-0-3-0".into() }),
+        )
+        .await
+        .expect("cancel");
+        let row = db.get_cluster_update("release-0-3-0").unwrap().unwrap();
+        assert_eq!(row.phase, "cancelled");
+        let nodes = db.list_cluster_update_nodes("release-0-3-0").unwrap();
+        let by_id: std::collections::HashMap<_, _> = nodes
+            .iter()
+            .map(|n| (n.node_id.clone(), n.phase.clone()))
+            .collect();
+        assert_eq!(
+            by_id["node-1"], "succeeded",
+            "succeeded nodes must not be cancelled"
+        );
+        assert_eq!(by_id["node-2"], "cancelled");
+    }
+
+    #[tokio::test]
+    async fn rollback_cluster_update_marks_succeeded_and_inflight_nodes_for_rollback() {
+        let (db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("create");
+        let mut nodes = db.list_cluster_update_nodes("release-0-3-0").unwrap();
+        for n in &mut nodes {
+            n.phase = if n.node_id == "node-1" {
+                "succeeded".into()
+            } else {
+                "prepared".into()
+            };
+            db.upsert_cluster_update_node(n).unwrap();
+        }
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::rollback_cluster_update(
+            &svc,
+            Request::new(controller_proto::RollbackClusterUpdateRequest { name: "release-0-3-0".into() }),
+        )
+        .await
+        .expect("rollback");
+        let row = db.get_cluster_update("release-0-3-0").unwrap().unwrap();
+        assert_eq!(row.phase, "rolling_back");
+        for n in db.list_cluster_update_nodes("release-0-3-0").unwrap() {
+            assert_eq!(
+                n.phase, "rolling_back",
+                "all eligible nodes must be flagged for rollback (got node {} phase {})",
+                n.node_id, n.phase
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn list_cluster_updates_returns_each_persisted_row() {
+        let (_db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("create");
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::list_cluster_updates(
+            &svc,
+            Request::new(controller_proto::ListClusterUpdatesRequest {}),
+        )
+        .await
+        .expect("list")
+        .into_inner();
+        assert_eq!(resp.cluster_updates.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn get_cluster_update_returns_node_statuses() {
+        let (db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+        let _ = <ControllerService as controller_proto::controller_server::Controller>::create_cluster_update(
+            &svc,
+            Request::new(controller_proto::CreateClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("create");
+        let mut nodes = db.list_cluster_update_nodes("release-0-3-0").unwrap();
+        nodes[0].phase = "prepared".into();
+        nodes[0].prepared_closure = "/var/lib/kcore/updates/release-0-3-0/manifest.json".into();
+        db.upsert_cluster_update_node(&nodes[0]).unwrap();
+
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::get_cluster_update(
+            &svc,
+            Request::new(controller_proto::GetClusterUpdateRequest { name: "release-0-3-0".into() }),
+        )
+        .await
+        .expect("get")
+        .into_inner();
+        assert_eq!(resp.node_statuses.len(), 2);
+        let prepared = resp
+            .node_statuses
+            .iter()
+            .find(|n| n.phase == controller_proto::NodeUpdatePhase::Prepared as i32);
+        assert!(prepared.is_some(), "expected one node in Prepared phase");
+    }
+
+    #[tokio::test]
+    async fn plan_cluster_update_returns_target_node_ids() {
+        let (_db, svc) = cluster_svc();
+        let spec = make_cluster_update_spec();
+        let resp = <ControllerService as controller_proto::controller_server::Controller>::plan_cluster_update(
+            &svc,
+            Request::new(controller_proto::PlanClusterUpdateRequest { spec: Some(spec) }),
+        )
+        .await
+        .expect("plan")
+        .into_inner();
+        assert!(resp.viable);
+        let mut ids = resp.target_node_ids.clone();
+        ids.sort();
+        assert_eq!(ids, vec!["node-1".to_string(), "node-2".to_string()]);
+        assert!(resp.issues.is_empty());
     }
 }

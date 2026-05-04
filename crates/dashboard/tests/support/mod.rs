@@ -479,6 +479,55 @@ impl Controller for MockController {
     ) -> Result<Response<ClassifyDiskLayoutResponse>, Status> {
         Err(unimp("classify_disk_layout"))
     }
+
+    async fn create_cluster_update(
+        &self,
+        _: Request<CreateClusterUpdateRequest>,
+    ) -> Result<Response<CreateClusterUpdateResponse>, Status> {
+        Err(unimp("create_cluster_update"))
+    }
+
+    async fn get_cluster_update(
+        &self,
+        _: Request<GetClusterUpdateRequest>,
+    ) -> Result<Response<GetClusterUpdateResponse>, Status> {
+        Err(unimp("get_cluster_update"))
+    }
+
+    async fn list_cluster_updates(
+        &self,
+        _: Request<ListClusterUpdatesRequest>,
+    ) -> Result<Response<ListClusterUpdatesResponse>, Status> {
+        Err(unimp("list_cluster_updates"))
+    }
+
+    async fn plan_cluster_update(
+        &self,
+        _: Request<PlanClusterUpdateRequest>,
+    ) -> Result<Response<PlanClusterUpdateResponse>, Status> {
+        Err(unimp("plan_cluster_update"))
+    }
+
+    async fn approve_cluster_update(
+        &self,
+        _: Request<ApproveClusterUpdateRequest>,
+    ) -> Result<Response<ApproveClusterUpdateResponse>, Status> {
+        Err(unimp("approve_cluster_update"))
+    }
+
+    async fn cancel_cluster_update(
+        &self,
+        _: Request<CancelClusterUpdateRequest>,
+    ) -> Result<Response<CancelClusterUpdateResponse>, Status> {
+        Err(unimp("cancel_cluster_update"))
+    }
+
+    async fn rollback_cluster_update(
+        &self,
+        _: Request<RollbackClusterUpdateRequest>,
+    ) -> Result<Response<RollbackClusterUpdateResponse>, Status> {
+        Err(unimp("rollback_cluster_update"))
+    }
 }
 
 #[tonic::async_trait]

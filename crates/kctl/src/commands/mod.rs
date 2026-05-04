@@ -1,6 +1,7 @@
 pub mod apply;
 pub mod certs;
 pub mod cluster;
+pub mod cluster_update;
 pub mod compliance;
 pub mod conflict;
 pub mod container;

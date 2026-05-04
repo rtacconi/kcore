@@ -149,6 +149,36 @@ pub struct DiskLayoutStatusRow {
 }
 
 #[derive(Debug, Clone)]
+pub struct ClusterUpdateRow {
+    pub name: String,
+    pub generation: i64,
+    pub target_version: String,
+    pub flake_ref: String,
+    pub flake_rev: String,
+    pub spec_json: String,
+    pub phase: String,
+    pub approval_status: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ClusterUpdateNodeRow {
+    pub update_name: String,
+    pub node_id: String,
+    pub observed_generation: i64,
+    pub phase: String,
+    pub current_version: String,
+    pub target_version: String,
+    pub prepared_closure: String,
+    pub current_generation: String,
+    pub target_generation: String,
+    pub requires_reboot: bool,
+    pub last_error: String,
+    pub last_transition_at: String,
+}
+
+#[derive(Debug, Clone)]
 pub struct SecurityGroupNetworkAttachmentRow {
     pub security_group: String,
     pub network_name: String,
@@ -784,7 +814,48 @@ impl Database {
             );
         }
 
-        const CURRENT_VERSION: i32 = 27;
+        if version < 28 {
+            let _ = conn.execute_batch(
+                "CREATE TABLE IF NOT EXISTS cluster_updates (
+                    name TEXT PRIMARY KEY,
+                    generation INTEGER NOT NULL,
+                    target_version TEXT NOT NULL,
+                    flake_ref TEXT NOT NULL,
+                    flake_rev TEXT NOT NULL,
+                    spec_json TEXT NOT NULL,
+                    phase TEXT NOT NULL,
+                    approval_status TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );
+                CREATE TABLE IF NOT EXISTS cluster_update_nodes (
+                    update_name TEXT NOT NULL REFERENCES cluster_updates(name) ON DELETE CASCADE,
+                    node_id TEXT NOT NULL REFERENCES nodes(id) ON DELETE CASCADE,
+                    observed_generation INTEGER NOT NULL DEFAULT 0,
+                    phase TEXT NOT NULL DEFAULT 'pending',
+                    current_version TEXT NOT NULL DEFAULT '',
+                    target_version TEXT NOT NULL DEFAULT '',
+                    prepared_closure TEXT NOT NULL DEFAULT '',
+                    current_generation TEXT NOT NULL DEFAULT '',
+                    target_generation TEXT NOT NULL DEFAULT '',
+                    requires_reboot INTEGER NOT NULL DEFAULT 0,
+                    last_error TEXT NOT NULL DEFAULT '',
+                    last_transition_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    PRIMARY KEY (update_name, node_id)
+                );
+                CREATE INDEX IF NOT EXISTS idx_cluster_update_nodes_update
+                  ON cluster_update_nodes(update_name);
+                CREATE TABLE IF NOT EXISTS cluster_update_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    update_name TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    body_json TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                );",
+            );
+        }
+
+        const CURRENT_VERSION: i32 = 28;
         if version < CURRENT_VERSION {
             conn.execute("DELETE FROM schema_version", [])?;
             conn.execute(
@@ -2197,6 +2268,252 @@ impl Database {
             })
         })?;
         rows.collect()
+    }
+
+    pub fn upsert_cluster_update(&self, row: &ClusterUpdateRow) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO cluster_updates (
+                name, generation, target_version, flake_ref, flake_rev, spec_json,
+                phase, approval_status, created_at, updated_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
+                COALESCE(NULLIF(?9, ''), datetime('now')), datetime('now'))
+             ON CONFLICT(name) DO UPDATE SET
+               generation = excluded.generation,
+               target_version = excluded.target_version,
+               flake_ref = excluded.flake_ref,
+               flake_rev = excluded.flake_rev,
+               spec_json = excluded.spec_json,
+               phase = excluded.phase,
+               approval_status = excluded.approval_status,
+               updated_at = datetime('now')",
+            params![
+                row.name,
+                row.generation,
+                row.target_version,
+                row.flake_ref,
+                row.flake_rev,
+                row.spec_json,
+                row.phase,
+                row.approval_status,
+                row.created_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_cluster_update(
+        &self,
+        name: &str,
+    ) -> Result<Option<ClusterUpdateRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, generation, target_version, flake_ref, flake_rev, spec_json,
+                    phase, approval_status, created_at, updated_at
+             FROM cluster_updates WHERE name = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![name], |row| {
+            Ok(ClusterUpdateRow {
+                name: row.get(0)?,
+                generation: row.get(1)?,
+                target_version: row.get(2)?,
+                flake_ref: row.get(3)?,
+                flake_rev: row.get(4)?,
+                spec_json: row.get(5)?,
+                phase: row.get(6)?,
+                approval_status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+        rows.next().transpose()
+    }
+
+    pub fn list_cluster_updates(&self) -> Result<Vec<ClusterUpdateRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, generation, target_version, flake_ref, flake_rev, spec_json,
+                    phase, approval_status, created_at, updated_at
+             FROM cluster_updates ORDER BY name ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ClusterUpdateRow {
+                name: row.get(0)?,
+                generation: row.get(1)?,
+                target_version: row.get(2)?,
+                flake_ref: row.get(3)?,
+                flake_rev: row.get(4)?,
+                spec_json: row.get(5)?,
+                phase: row.get(6)?,
+                approval_status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn delete_cluster_update_nodes(&self, update_name: &str) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "DELETE FROM cluster_update_nodes WHERE update_name = ?1",
+            params![update_name],
+        )?;
+        Ok(())
+    }
+
+    pub fn replace_cluster_update_nodes(
+        &self,
+        update_name: &str,
+        rows: &[ClusterUpdateNodeRow],
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let tx = conn.unchecked_transaction()?;
+        tx.execute(
+            "DELETE FROM cluster_update_nodes WHERE update_name = ?1",
+            params![update_name],
+        )?;
+        for r in rows {
+            tx.execute(
+                "INSERT INTO cluster_update_nodes (
+                    update_name, node_id, observed_generation, phase,
+                    current_version, target_version, prepared_closure,
+                    current_generation, target_generation, requires_reboot,
+                    last_error, last_transition_at
+                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+                params![
+                    r.update_name,
+                    r.node_id,
+                    r.observed_generation,
+                    r.phase,
+                    r.current_version,
+                    r.target_version,
+                    r.prepared_closure,
+                    r.current_generation,
+                    r.target_generation,
+                    r.requires_reboot as i32,
+                    r.last_error,
+                    r.last_transition_at,
+                ],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn upsert_cluster_update_node(
+        &self,
+        row: &ClusterUpdateNodeRow,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "INSERT INTO cluster_update_nodes (
+                update_name, node_id, observed_generation, phase,
+                current_version, target_version, prepared_closure,
+                current_generation, target_generation, requires_reboot,
+                last_error, last_transition_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+             ON CONFLICT(update_name, node_id) DO UPDATE SET
+               observed_generation = excluded.observed_generation,
+               phase = excluded.phase,
+               current_version = excluded.current_version,
+               target_version = excluded.target_version,
+               prepared_closure = excluded.prepared_closure,
+               current_generation = excluded.current_generation,
+               target_generation = excluded.target_generation,
+               requires_reboot = excluded.requires_reboot,
+               last_error = excluded.last_error,
+               last_transition_at = datetime('now')",
+            params![
+                row.update_name,
+                row.node_id,
+                row.observed_generation,
+                row.phase,
+                row.current_version,
+                row.target_version,
+                row.prepared_closure,
+                row.current_generation,
+                row.target_generation,
+                row.requires_reboot as i32,
+                row.last_error,
+                row.last_transition_at,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_cluster_update_nodes(
+        &self,
+        update_name: &str,
+    ) -> Result<Vec<ClusterUpdateNodeRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT update_name, node_id, observed_generation, phase,
+                    current_version, target_version, prepared_closure,
+                    current_generation, target_generation, requires_reboot,
+                    last_error, last_transition_at
+             FROM cluster_update_nodes
+             WHERE update_name = ?1
+             ORDER BY node_id ASC",
+        )?;
+        let rows = stmt.query_map(params![update_name], |row| {
+            Ok(ClusterUpdateNodeRow {
+                update_name: row.get(0)?,
+                node_id: row.get(1)?,
+                observed_generation: row.get(2)?,
+                phase: row.get(3)?,
+                current_version: row.get(4)?,
+                target_version: row.get(5)?,
+                prepared_closure: row.get(6)?,
+                current_generation: row.get(7)?,
+                target_generation: row.get(8)?,
+                requires_reboot: row.get::<_, i32>(9)? != 0,
+                last_error: row.get(10)?,
+                last_transition_at: row.get(11)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn list_cluster_updates_for_reconcile(
+        &self,
+    ) -> Result<Vec<ClusterUpdateRow>, rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        let mut stmt = conn.prepare(
+            "SELECT name, generation, target_version, flake_ref, flake_rev, spec_json,
+                    phase, approval_status, created_at, updated_at
+             FROM cluster_updates
+             WHERE phase IN ('ready', 'rolling_out', 'rolling_back')
+             ORDER BY name ASC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(ClusterUpdateRow {
+                name: row.get(0)?,
+                generation: row.get(1)?,
+                target_version: row.get(2)?,
+                flake_ref: row.get(3)?,
+                flake_rev: row.get(4)?,
+                spec_json: row.get(5)?,
+                phase: row.get(6)?,
+                approval_status: row.get(7)?,
+                created_at: row.get(8)?,
+                updated_at: row.get(9)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn patch_cluster_update_phase(
+        &self,
+        name: &str,
+        phase: &str,
+    ) -> Result<(), rusqlite::Error> {
+        let conn = self.lock_conn()?;
+        conn.execute(
+            "UPDATE cluster_updates SET phase = ?2, updated_at = datetime('now') WHERE name = ?1",
+            params![name, phase],
+        )?;
+        Ok(())
     }
 
     pub fn replace_security_group_rules(

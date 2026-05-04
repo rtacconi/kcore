@@ -90,6 +90,12 @@ service NodeAdmin {
   // InstallToDisk triggers a non-interactive install-to-disk workflow.
   // The implementation enforces disk wipe and reboot at the end.
   rpc InstallToDisk(InstallToDiskRequest) returns (InstallToDiskResponse);
+
+  // Cluster rollouts: prepare / activate pinned flake outputs (see docs/cluster-updates.md).
+  rpc PrepareSystemUpdate(PrepareSystemUpdateRequest) returns (PrepareSystemUpdateResponse);
+  rpc ActivateSystemUpdate(ActivateSystemUpdateRequest) returns (ActivateSystemUpdateResponse);
+  rpc GetSystemUpdateStatus(GetSystemUpdateStatusRequest) returns (GetSystemUpdateStatusResponse);
+  rpc RollbackSystemUpdate(RollbackSystemUpdateRequest) returns (RollbackSystemUpdateResponse);
 }
 
 // VM specification
@@ -670,5 +676,61 @@ message DeleteImageRequest {
 message DeleteImageResponse {
   bool success = 1;
   string message = 2;       // Optional message (e.g., "Image deleted" or "Image in use")
+}
+
+// --- System update (cluster rollouts) --------------------------------------------------------
+
+message PrepareSystemUpdateRequest {
+  string update_name = 1;
+  string flake_ref = 2;
+  string flake_rev = 3;
+  // Reserved for NixOS system attr; MVP uses per-package flake attributes instead.
+  string system_profile = 4;
+  string host_system = 5;
+  int32 timeout_seconds = 6;
+}
+
+message PrepareSystemUpdateResponse {
+  bool success = 1;
+  string message = 2;
+  string prepared_closure = 3;
+  string manifest_path = 4;
+  string current_generation = 5;
+  string target_generation = 6;
+  bool requires_reboot = 7;
+}
+
+message ActivateSystemUpdateRequest {
+  string update_name = 1;
+  string activation_mode = 2;
+  string prepared_closure = 3;
+}
+
+message ActivateSystemUpdateResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message GetSystemUpdateStatusRequest {
+  string update_name = 1;
+}
+
+message GetSystemUpdateStatusResponse {
+  bool success = 1;
+  string message = 2;
+  string phase = 3;
+  string prepared_closure = 4;
+  string systemctl_failed_summary = 5;
+  string booted_generation = 6;
+  string current_generation = 7;
+}
+
+message RollbackSystemUpdateRequest {
+  string update_name = 1;
+}
+
+message RollbackSystemUpdateResponse {
+  bool success = 1;
+  string message = 2;
 }
 

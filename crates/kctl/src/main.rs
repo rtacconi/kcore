@@ -174,6 +174,30 @@ enum Command {
 }
 
 #[derive(Subcommand)]
+enum UpdateClusterCmd {
+    /// Dry-run: resolve nodes and compatibility (reads YAML manifest)
+    Plan {
+        #[arg(short = 'f', long = "filename")]
+        file: String,
+    },
+    /// Create or update a cluster update from YAML manifest
+    Apply {
+        #[arg(short = 'f', long = "filename")]
+        file: String,
+    },
+    /// Show one cluster update and per-node status
+    Get { name: String },
+    /// List cluster updates
+    List,
+    /// Approve a manual cluster update
+    Approve { name: String },
+    /// Cancel a cluster update
+    Cancel { name: String },
+    /// Request rollback on nodes (best-effort)
+    Rollback { name: String },
+}
+
+#[derive(Subcommand)]
 enum RotateResource {
     /// Rotate controller TLS certificate with a new address SAN
     Certs {
@@ -445,6 +469,12 @@ enum UpdateResource {
         /// Target node (optional)
         #[arg(long = "target-node")]
         target_node: Option<String>,
+    },
+    /// Cluster / host OS updates (`ClusterUpdate` resource)
+    #[command(name = "cluster", alias = "os")]
+    Cluster {
+        #[command(subcommand)]
+        action: UpdateClusterCmd,
     },
 }
 
@@ -1123,6 +1153,30 @@ async fn main() {
         } => {
             let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
             commands::vm::update(&info, vm_id, *cpu, memory.clone(), target_node.clone()).await
+        }
+        Command::Update {
+            resource: UpdateResource::Cluster { action },
+        } => {
+            let info = resolve_controller(&cli).unwrap_or_else(|e| fatal(&e));
+            match action {
+                UpdateClusterCmd::Plan { file } => {
+                    commands::cluster_update::plan(&info, file).await
+                }
+                UpdateClusterCmd::Apply { file } => {
+                    commands::cluster_update::apply(&info, file).await
+                }
+                UpdateClusterCmd::Get { name } => commands::cluster_update::get(&info, name).await,
+                UpdateClusterCmd::List => commands::cluster_update::list_cmd(&info).await,
+                UpdateClusterCmd::Approve { name } => {
+                    commands::cluster_update::approve(&info, name).await
+                }
+                UpdateClusterCmd::Cancel { name } => {
+                    commands::cluster_update::cancel(&info, name).await
+                }
+                UpdateClusterCmd::Rollback { name } => {
+                    commands::cluster_update::rollback(&info, name).await
+                }
+            }
         }
 
         Command::Get {

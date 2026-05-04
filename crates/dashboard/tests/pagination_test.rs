@@ -395,6 +395,49 @@ impl Controller for ManyVmsController {
     ) -> Result<Response<ClassifyDiskLayoutResponse>, Status> {
         Err(Status::unimplemented(""))
     }
+
+    async fn create_cluster_update(
+        &self,
+        _: TRequest<CreateClusterUpdateRequest>,
+    ) -> Result<Response<CreateClusterUpdateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn get_cluster_update(
+        &self,
+        _: TRequest<GetClusterUpdateRequest>,
+    ) -> Result<Response<GetClusterUpdateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn list_cluster_updates(
+        &self,
+        _: TRequest<ListClusterUpdatesRequest>,
+    ) -> Result<Response<ListClusterUpdatesResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn plan_cluster_update(
+        &self,
+        _: TRequest<PlanClusterUpdateRequest>,
+    ) -> Result<Response<PlanClusterUpdateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn approve_cluster_update(
+        &self,
+        _: TRequest<ApproveClusterUpdateRequest>,
+    ) -> Result<Response<ApproveClusterUpdateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn cancel_cluster_update(
+        &self,
+        _: TRequest<CancelClusterUpdateRequest>,
+    ) -> Result<Response<CancelClusterUpdateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
+    async fn rollback_cluster_update(
+        &self,
+        _: TRequest<RollbackClusterUpdateRequest>,
+    ) -> Result<Response<RollbackClusterUpdateResponse>, Status> {
+        Err(Status::unimplemented(""))
+    }
 }
 
 async fn spawn_many_vms_controller() -> SocketAddr {

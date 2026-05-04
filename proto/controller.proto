@@ -85,6 +85,15 @@ service Controller {
   // persisting or dispatching to the node. Used by `kctl diff disklayout` so
   // operators can see SAFE/DANGEROUS before applying.
   rpc ClassifyDiskLayout(ClassifyDiskLayoutRequest) returns (ClassifyDiskLayoutResponse);
+
+  // ClusterUpdate — flake-pinned kcore / host OS rollouts across nodes.
+  rpc CreateClusterUpdate(CreateClusterUpdateRequest) returns (CreateClusterUpdateResponse);
+  rpc GetClusterUpdate(GetClusterUpdateRequest) returns (GetClusterUpdateResponse);
+  rpc ListClusterUpdates(ListClusterUpdatesRequest) returns (ListClusterUpdatesResponse);
+  rpc PlanClusterUpdate(PlanClusterUpdateRequest) returns (PlanClusterUpdateResponse);
+  rpc ApproveClusterUpdate(ApproveClusterUpdateRequest) returns (ApproveClusterUpdateResponse);
+  rpc CancelClusterUpdate(CancelClusterUpdateRequest) returns (CancelClusterUpdateResponse);
+  rpc RollbackClusterUpdate(RollbackClusterUpdateRequest) returns (RollbackClusterUpdateResponse);
 }
 
 message RegisterNodeRequest {
@@ -1089,4 +1098,185 @@ message ClassifyDiskLayoutResponse {
   string detail = 3;
   // Target block-device paths the controller extracted from layout_nix.
   repeated string target_devices = 4;
+}
+
+// --- ClusterUpdate ---------------------------------------------------------------------------
+
+message ClusterUpdateTarget {
+  string version = 1;
+  string flake_ref = 2;
+  string flake_rev = 3;
+  string nixpkgs_rev = 4;
+  string system_profile = 5;
+}
+
+message ClusterUpdateSelector {
+  repeated string node_ids = 1;
+  repeated string labels = 2;
+  repeated string datacenters = 3;
+  bool all_nodes = 4;
+  bool controllers_only = 5;
+}
+
+enum ClusterUpdateStrategyType {
+  CLUSTER_UPDATE_STRATEGY_UNSPECIFIED = 0;
+  CLUSTER_UPDATE_STRATEGY_CANARY = 1;
+  CLUSTER_UPDATE_STRATEGY_ONE_AT_A_TIME = 2;
+  CLUSTER_UPDATE_STRATEGY_BATCH = 3;
+  CLUSTER_UPDATE_STRATEGY_PER_DC = 4;
+}
+
+message ClusterUpdateStrategy {
+  ClusterUpdateStrategyType type = 1;
+  int32 max_unavailable = 2;
+  int32 batch_size = 3;
+}
+
+enum ClusterUpdateApprovalPolicy {
+  CLUSTER_UPDATE_APPROVAL_UNSPECIFIED = 0;
+  CLUSTER_UPDATE_APPROVAL_MANUAL = 1;
+  CLUSTER_UPDATE_APPROVAL_AUTO_NON_DISRUPTIVE = 2;
+  CLUSTER_UPDATE_APPROVAL_AUTO = 3;
+}
+
+enum ClusterUpdateActivationMode {
+  CLUSTER_UPDATE_ACTIVATION_UNSPECIFIED = 0;
+  CLUSTER_UPDATE_ACTIVATION_TEST = 1;
+  CLUSTER_UPDATE_ACTIVATION_SWITCH = 2;
+  CLUSTER_UPDATE_ACTIVATION_BOOT = 3;
+  CLUSTER_UPDATE_ACTIVATION_AUTO = 4;
+}
+
+message ClusterUpdateSpec {
+  string name = 1;
+  ClusterUpdateTarget target = 2;
+  ClusterUpdateSelector selector = 3;
+  ClusterUpdateStrategy strategy = 4;
+  bool drain_vms = 5;
+  int32 drain_timeout_seconds = 6;
+  ClusterUpdateActivationMode activation_mode = 7;
+  string reboot_policy = 8;
+  ClusterUpdateApprovalPolicy approval_policy = 9;
+  bool automatic_rollback = 10;
+}
+
+enum ClusterUpdatePhase {
+  CLUSTER_UPDATE_PHASE_UNSPECIFIED = 0;
+  CLUSTER_UPDATE_PHASE_PENDING = 1;
+  CLUSTER_UPDATE_PHASE_READY = 2;
+  CLUSTER_UPDATE_PHASE_ROLLING_OUT = 3;
+  CLUSTER_UPDATE_PHASE_SUCCEEDED = 4;
+  CLUSTER_UPDATE_PHASE_FAILED = 5;
+  CLUSTER_UPDATE_PHASE_CANCELLED = 6;
+  CLUSTER_UPDATE_PHASE_ROLLING_BACK = 7;
+}
+
+enum ClusterUpdateApprovalStatus {
+  CLUSTER_UPDATE_APPROVAL_STATUS_UNSPECIFIED = 0;
+  CLUSTER_UPDATE_APPROVAL_AWAITING = 1;
+  CLUSTER_UPDATE_APPROVAL_APPROVED = 2;
+}
+
+message ClusterUpdate {
+  ClusterUpdateSpec spec = 1;
+  int64 generation = 2;
+  ClusterUpdatePhase phase = 3;
+  ClusterUpdateApprovalStatus approval_status = 4;
+  google.protobuf.Timestamp created_at = 5;
+  google.protobuf.Timestamp updated_at = 6;
+}
+
+enum NodeUpdatePhase {
+  NODE_UPDATE_PHASE_UNSPECIFIED = 0;
+  NODE_UPDATE_PHASE_PENDING = 1;
+  NODE_UPDATE_PHASE_PREPARED = 2;
+  NODE_UPDATE_PHASE_SUCCEEDED = 3;
+  NODE_UPDATE_PHASE_FAILED = 4;
+  NODE_UPDATE_PHASE_CANCELLED = 5;
+  NODE_UPDATE_PHASE_ROLLING_BACK = 6;
+}
+
+message NodeUpdateStatus {
+  string update_name = 1;
+  string node_id = 2;
+  int64 observed_generation = 3;
+  NodeUpdatePhase phase = 4;
+  string current_version = 5;
+  string target_version = 6;
+  string prepared_closure = 7;
+  string current_generation = 8;
+  string target_generation = 9;
+  bool requires_reboot = 10;
+  string last_error = 11;
+  google.protobuf.Timestamp last_transition_at = 12;
+}
+
+message CreateClusterUpdateRequest {
+  ClusterUpdateSpec spec = 1;
+}
+
+message CreateClusterUpdateResponse {
+  bool success = 1;
+  ClusterUpdate cluster_update = 2;
+  ApplyAction action = 3;
+  repeated string changed_fields = 4;
+}
+
+message GetClusterUpdateRequest {
+  string name = 1;
+}
+
+message GetClusterUpdateResponse {
+  ClusterUpdate cluster_update = 1;
+  repeated NodeUpdateStatus node_statuses = 2;
+}
+
+message ListClusterUpdatesRequest {}
+
+message ListClusterUpdatesResponse {
+  repeated ClusterUpdate cluster_updates = 1;
+}
+
+message PlanClusterUpdateRequest {
+  ClusterUpdateSpec spec = 1;
+}
+
+message PlanIssue {
+  string node_id = 1;
+  string reason = 2;
+}
+
+message PlanClusterUpdateResponse {
+  bool viable = 1;
+  repeated string target_node_ids = 2;
+  repeated PlanIssue issues = 3;
+  bool likely_requires_reboot = 4;
+  string detail = 5;
+}
+
+message ApproveClusterUpdateRequest {
+  string name = 1;
+}
+
+message ApproveClusterUpdateResponse {
+  bool success = 1;
+  ClusterUpdate cluster_update = 2;
+}
+
+message CancelClusterUpdateRequest {
+  string name = 1;
+}
+
+message CancelClusterUpdateResponse {
+  bool success = 1;
+  ClusterUpdate cluster_update = 2;
+}
+
+message RollbackClusterUpdateRequest {
+  string name = 1;
+}
+
+message RollbackClusterUpdateResponse {
+  bool success = 1;
+  ClusterUpdate cluster_update = 2;
 }

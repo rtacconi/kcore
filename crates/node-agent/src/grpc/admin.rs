@@ -1548,6 +1548,443 @@ impl proto::node_admin_server::NodeAdmin for AdminService {
 
         resp.map(Response::new)
     }
+
+    async fn prepare_system_update(
+        &self,
+        request: Request<proto::PrepareSystemUpdateRequest>,
+    ) -> Result<Response<proto::PrepareSystemUpdateResponse>, Status> {
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        let update_name = sanitize_update_name(&req.update_name)?;
+        let flake_ref = req.flake_ref.trim();
+        if flake_ref.is_empty() {
+            return Err(Status::invalid_argument("flake_ref is required"));
+        }
+        let flake_rev = req.flake_rev.trim();
+        let timeout_sec = if req.timeout_seconds > 0 {
+            req.timeout_seconds as u64
+        } else {
+            3600u64
+        };
+        let host_system = if req.host_system.trim().is_empty() {
+            "x86_64-linux".to_string()
+        } else {
+            req.host_system.trim().to_string()
+        };
+
+        let flake_url = flake_url_with_rev(flake_ref, flake_rev);
+        let manifest_path = PathBuf::from("/var/lib/kcore/updates")
+            .join(&update_name)
+            .join("manifest.json");
+
+        let result = tokio::time::timeout(
+            std::time::Duration::from_secs(timeout_sec),
+            tokio::task::spawn_blocking(move || {
+                prepare_system_update_blocking(flake_url, host_system, manifest_path)
+            }),
+        )
+        .await;
+
+        match result {
+            Err(_) => Ok(Response::new(proto::PrepareSystemUpdateResponse {
+                success: false,
+                message: "nix prepare timed out".into(),
+                prepared_closure: String::new(),
+                manifest_path: String::new(),
+                current_generation: String::new(),
+                target_generation: String::new(),
+                requires_reboot: false,
+            })),
+            Ok(join_res) => match join_res {
+                Ok(Ok(manifest)) => Ok(Response::new(proto::PrepareSystemUpdateResponse {
+                    success: true,
+                    message: "manifest written".into(),
+                    prepared_closure: manifest.manifest_path.clone(),
+                    manifest_path: manifest.manifest_path,
+                    current_generation: manifest.current_generation,
+                    target_generation: manifest.target_generation,
+                    requires_reboot: manifest.requires_reboot,
+                })),
+                Ok(Err(e)) => Ok(Response::new(proto::PrepareSystemUpdateResponse {
+                    success: false,
+                    message: e,
+                    prepared_closure: String::new(),
+                    manifest_path: String::new(),
+                    current_generation: String::new(),
+                    target_generation: String::new(),
+                    requires_reboot: false,
+                })),
+                Err(join_e) => Err(Status::internal(format!("prepare join: {join_e}"))),
+            },
+        }
+    }
+
+    async fn activate_system_update(
+        &self,
+        request: Request<proto::ActivateSystemUpdateRequest>,
+    ) -> Result<Response<proto::ActivateSystemUpdateResponse>, Status> {
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        let update_name = sanitize_update_name(&req.update_name)?;
+        let manifest_path = if req.prepared_closure.trim().ends_with(".json") {
+            PathBuf::from(req.prepared_closure.trim())
+        } else {
+            PathBuf::from("/var/lib/kcore/updates")
+                .join(&update_name)
+                .join("manifest.json")
+        };
+        let mode = req.activation_mode.trim();
+        if mode != "test"
+            && mode != "switch"
+            && mode != "boot"
+            && mode != "auto"
+            && !mode.is_empty()
+        {
+            return Err(Status::invalid_argument(
+                "activation_mode must be test|switch|boot|auto",
+            ));
+        }
+        let effective_mode: String = if mode.is_empty() || mode == "auto" {
+            "switch".into()
+        } else {
+            mode.to_string()
+        };
+        if effective_mode == "test" {
+            return Ok(Response::new(proto::ActivateSystemUpdateResponse {
+                success: true,
+                message: "test mode: manifest prepared only; no activation performed".into(),
+            }));
+        }
+
+        let manifest_path_clone = manifest_path.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            activate_system_update_blocking(&manifest_path_clone, effective_mode)
+        })
+        .await
+        .map_err(|e| Status::internal(format!("activate join: {e}")))?;
+
+        match res {
+            Ok(msg) => Ok(Response::new(proto::ActivateSystemUpdateResponse {
+                success: true,
+                message: msg,
+            })),
+            Err(e) => Ok(Response::new(proto::ActivateSystemUpdateResponse {
+                success: false,
+                message: e,
+            })),
+        }
+    }
+
+    async fn get_system_update_status(
+        &self,
+        request: Request<proto::GetSystemUpdateStatusRequest>,
+    ) -> Result<Response<proto::GetSystemUpdateStatusResponse>, Status> {
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        let update_name = sanitize_update_name(&req.update_name)?;
+        let manifest_path = PathBuf::from("/var/lib/kcore/updates")
+            .join(&update_name)
+            .join("manifest.json");
+
+        let summary = tokio::task::spawn_blocking(systemctl_failed_summary)
+            .await
+            .map_err(|e| Status::internal(format!("join: {e}")))?;
+
+        let phase = if manifest_path.exists() {
+            "prepared"
+        } else {
+            "unknown"
+        };
+        let closure = manifest_path.display().to_string();
+
+        Ok(Response::new(proto::GetSystemUpdateStatusResponse {
+            success: true,
+            message: String::new(),
+            phase: phase.into(),
+            prepared_closure: closure,
+            systemctl_failed_summary: summary,
+            booted_generation: String::new(),
+            current_generation: String::new(),
+        }))
+    }
+
+    async fn rollback_system_update(
+        &self,
+        request: Request<proto::RollbackSystemUpdateRequest>,
+    ) -> Result<Response<proto::RollbackSystemUpdateResponse>, Status> {
+        auth::require_peer_insecure_ok(&request, &[CN_KCTL, CN_CONTROLLER_PREFIX])?;
+        let req = request.into_inner();
+        let update_name = sanitize_update_name(&req.update_name)?;
+        let rollback_dir = PathBuf::from("/var/lib/kcore/updates")
+            .join(&update_name)
+            .join("rollback_bin");
+
+        let res = tokio::task::spawn_blocking(move || rollback_blocking(&rollback_dir))
+            .await
+            .map_err(|e| Status::internal(format!("rollback join: {e}")))?;
+
+        match res {
+            Ok(msg) => Ok(Response::new(proto::RollbackSystemUpdateResponse {
+                success: true,
+                message: msg,
+            })),
+            Err(e) => Ok(Response::new(proto::RollbackSystemUpdateResponse {
+                success: false,
+                message: e,
+            })),
+        }
+    }
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct UpdateManifest {
+    flake_url: String,
+    host_system: String,
+    bins: std::collections::HashMap<String, String>,
+}
+
+struct PrepareOk {
+    manifest_path: String,
+    current_generation: String,
+    target_generation: String,
+    requires_reboot: bool,
+}
+
+fn sanitize_update_name(name: &str) -> Result<String, Status> {
+    let t = name.trim();
+    if t.is_empty() {
+        return Err(Status::invalid_argument("update_name is required"));
+    }
+    if !t
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
+    {
+        return Err(Status::invalid_argument(
+            "update_name must be alphanumeric with - _ . only",
+        ));
+    }
+    Ok(t.to_string())
+}
+
+fn flake_url_with_rev(flake_ref: &str, flake_rev: &str) -> String {
+    if flake_rev.is_empty() || flake_ref.contains("?rev=") || flake_ref.contains("&rev=") {
+        flake_ref.to_string()
+    } else if flake_ref.contains('?') {
+        format!("{flake_ref}&rev={flake_rev}")
+    } else {
+        format!("{flake_ref}?rev={flake_rev}")
+    }
+}
+
+fn prepare_system_update_blocking(
+    flake_url: String,
+    host_system: String,
+    manifest_path: PathBuf,
+) -> Result<PrepareOk, String> {
+    let pkgs = [
+        "kcore-node-agent",
+        "kcore-controller",
+        "kctl",
+        "kcore-dashboard",
+        "kcore-console",
+    ];
+    let mut bins = std::collections::HashMap::new();
+    for pkg in pkgs {
+        let attr = format!("{flake_url}#packages.{host_system}.{pkg}");
+        let out = std::process::Command::new("nix")
+            .args([
+                "build",
+                &attr,
+                "--no-link",
+                "--accept-flake-config",
+                "--print-out-paths",
+            ])
+            .output()
+            .map_err(|e| format!("nix build {pkg}: {e}"))?;
+        if !out.status.success() {
+            let stderr = String::from_utf8_lossy(&out.stderr);
+            return Err(format!(
+                "nix build failed for {pkg}: {}",
+                stderr.trim().chars().take(500).collect::<String>()
+            ));
+        }
+        let store_path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if store_path.is_empty() {
+            return Err(format!("nix build returned no path for {pkg}"));
+        }
+        let bin_path = Path::new(&store_path).join("bin").join(pkg);
+        if !bin_path.exists() {
+            return Err(format!(
+                "built package has no bin/{pkg} at {}",
+                bin_path.display()
+            ));
+        }
+        bins.insert(pkg.to_string(), bin_path.to_string_lossy().to_string());
+    }
+
+    if let Some(parent) = manifest_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| format!("mkdir updates dir: {e}"))?;
+    }
+    let mf = UpdateManifest {
+        flake_url: flake_url.clone(),
+        host_system: host_system.clone(),
+        bins,
+    };
+    let json = serde_json::to_string_pretty(&mf).map_err(|e| format!("serialize manifest: {e}"))?;
+    std::fs::write(&manifest_path, json).map_err(|e| format!("write manifest: {e}"))?;
+
+    Ok(PrepareOk {
+        manifest_path: manifest_path.to_string_lossy().to_string(),
+        current_generation: String::new(),
+        target_generation: String::new(),
+        requires_reboot: false,
+    })
+}
+
+fn activate_system_update_blocking(manifest_path: &Path, _mode: String) -> Result<String, String> {
+    let raw = std::fs::read_to_string(manifest_path)
+        .map_err(|e| format!("read manifest {}: {e}", manifest_path.display()))?;
+    let mf: UpdateManifest =
+        serde_json::from_str(&raw).map_err(|e| format!("parse manifest: {e}"))?;
+
+    let opt_bin = Path::new("/opt/kcore/bin");
+    std::fs::create_dir_all(opt_bin).map_err(|e| format!("mkdir /opt/kcore/bin: {e}"))?;
+
+    let rollback = manifest_path
+        .parent()
+        .ok_or_else(|| "manifest has no parent".to_string())?
+        .join("rollback_bin");
+    std::fs::create_dir_all(&rollback).map_err(|e| format!("rollback dir: {e}"))?;
+
+    // Replace each binary atomically. We copy the store output into a sibling
+    // tmpfile (same directory as the destination, so `rename(2)` is atomic on
+    // the same filesystem) and then rename it over the destination. This is
+    // critical because `kcore-node-agent` may currently be executing from the
+    // destination path: a naive `std::fs::copy` opens the dest with O_TRUNC,
+    // which would overwrite a running ELF and crash this very process. Using
+    // rename keeps the old inode alive for the running kernel mapping while
+    // the new file takes the path.
+    for (name, store_bin) in &mf.bins {
+        let dest = opt_bin.join(name);
+        if dest.exists() {
+            let bak = rollback.join(name);
+            std::fs::copy(&dest, &bak).map_err(|e| format!("backup {}: {e}", dest.display()))?;
+        }
+        let tmp = opt_bin.join(format!(".{name}.kcore-update-tmp"));
+        if tmp.exists() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        std::fs::copy(store_bin, &tmp)
+            .map_err(|e| format!("copy {} -> {}: {e}", store_bin, tmp.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perm = std::fs::metadata(&tmp)
+                .map_err(|e| format!("meta {}: {e}", tmp.display()))?
+                .permissions();
+            perm.set_mode(0o755);
+            std::fs::set_permissions(&tmp, perm)
+                .map_err(|e| format!("chmod {}: {e}", tmp.display()))?;
+        }
+        std::fs::rename(&tmp, &dest)
+            .map_err(|e| format!("rename {} -> {}: {e}", tmp.display(), dest.display()))?;
+    }
+
+    let status_path = manifest_path
+        .parent()
+        .expect("parent")
+        .join("last_activate.json");
+    let _ = std::fs::write(
+        &status_path,
+        serde_json::json!({ "ok": true, "ts": "now" }).to_string(),
+    );
+
+    // Restart sibling services synchronously (they don't kill us).
+    for unit in ["kcore-controller.service", "kcore-dashboard.service"] {
+        let out = std::process::Command::new("systemctl")
+            .args(["try-restart", unit])
+            .output();
+        if let Ok(o) = out {
+            if !o.status.success() {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                tracing::warn!(unit, stderr = %stderr.trim(), "try-restart failed");
+            }
+        }
+    }
+
+    // Restart the node-agent itself out-of-band, so we can return this RPC
+    // reply BEFORE the kernel sends SIGTERM. `systemd-run --on-active=…` schedules
+    // a transient timer that runs the restart command after a delay.
+    let _ = std::process::Command::new("systemd-run")
+        .args([
+            "--collect",
+            "--unit=kcore-node-agent-restart.service",
+            "--on-active=3sec",
+            "--",
+            "systemctl",
+            "try-restart",
+            "kcore-node-agent.service",
+        ])
+        .output();
+
+    Ok("installed kcore binaries to /opt/kcore/bin and scheduled restarts".into())
+}
+
+fn systemctl_failed_summary() -> String {
+    let out = std::process::Command::new("systemctl")
+        .args(["--failed", "--no-pager", "--plain"])
+        .output();
+    match out {
+        Ok(o) => String::from_utf8_lossy(&o.stdout).trim().to_string(),
+        Err(e) => format!("(systemctl unavailable: {e})"),
+    }
+}
+
+fn rollback_blocking(rollback_dir: &Path) -> Result<String, String> {
+    if !rollback_dir.exists() {
+        return Err("no rollback snapshot (rollback_bin missing)".into());
+    }
+    let opt_bin = Path::new("/opt/kcore/bin");
+    for entry in std::fs::read_dir(rollback_dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        let src = entry.path();
+        let name_str = name.to_string_lossy().to_string();
+        let dest = opt_bin.join(&name);
+        let tmp = opt_bin.join(format!(".{name_str}.kcore-rollback-tmp"));
+        if tmp.exists() {
+            let _ = std::fs::remove_file(&tmp);
+        }
+        std::fs::copy(&src, &tmp).map_err(|e| format!("stage {}: {e}", tmp.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = std::fs::metadata(&tmp) {
+                let mut perm = meta.permissions();
+                perm.set_mode(0o755);
+                let _ = std::fs::set_permissions(&tmp, perm);
+            }
+        }
+        std::fs::rename(&tmp, &dest)
+            .map_err(|e| format!("rename {} -> {}: {e}", tmp.display(), dest.display()))?;
+    }
+    for unit in ["kcore-controller.service", "kcore-dashboard.service"] {
+        let _ = std::process::Command::new("systemctl")
+            .args(["try-restart", unit])
+            .output();
+    }
+    let _ = std::process::Command::new("systemd-run")
+        .args([
+            "--collect",
+            "--unit=kcore-node-agent-rollback-restart.service",
+            "--on-active=3sec",
+            "--",
+            "systemctl",
+            "try-restart",
+            "kcore-node-agent.service",
+        ])
+        .output();
+    Ok("restored prior binaries from rollback_bin and scheduled restarts".into())
 }
 
 #[cfg(test)]
@@ -1696,6 +2133,139 @@ mod tests {
     fn rebuild_sequence_skips_switch_on_test_failure() {
         assert_eq!(rebuild_sequence(false), vec!["test"]);
         assert_eq!(rebuild_sequence(true), vec!["test", "switch"]);
+    }
+
+    #[test]
+    fn flake_url_with_rev_appends_rev_when_missing() {
+        assert_eq!(
+            flake_url_with_rev("github:org/repo", "abc"),
+            "github:org/repo?rev=abc"
+        );
+    }
+
+    #[test]
+    fn flake_url_with_rev_uses_amp_when_query_string_present() {
+        assert_eq!(
+            flake_url_with_rev("github:org/repo?dir=foo", "abc"),
+            "github:org/repo?dir=foo&rev=abc"
+        );
+    }
+
+    #[test]
+    fn flake_url_with_rev_is_noop_when_rev_empty_or_already_pinned() {
+        assert_eq!(flake_url_with_rev("github:org/repo", ""), "github:org/repo");
+        assert_eq!(
+            flake_url_with_rev("github:org/repo?rev=abc", "def"),
+            "github:org/repo?rev=abc"
+        );
+        assert_eq!(
+            flake_url_with_rev("github:org/repo?dir=foo&rev=abc", "def"),
+            "github:org/repo?dir=foo&rev=abc"
+        );
+    }
+
+    #[test]
+    fn sanitize_update_name_accepts_safe_inputs() {
+        assert_eq!(
+            sanitize_update_name("release-0.3.0_rc1").unwrap(),
+            "release-0.3.0_rc1"
+        );
+        assert_eq!(sanitize_update_name("  abc  ").unwrap(), "abc");
+    }
+
+    #[test]
+    fn sanitize_update_name_rejects_dangerous_inputs() {
+        assert!(sanitize_update_name("").is_err(), "empty must fail");
+        assert!(
+            sanitize_update_name("../etc").is_err(),
+            "path traversal must fail"
+        );
+        assert!(sanitize_update_name("foo bar").is_err(), "spaces must fail");
+        assert!(sanitize_update_name("foo/bar").is_err(), "slash must fail");
+        assert!(
+            sanitize_update_name("foo;reboot").is_err(),
+            "shell metacharacters must fail"
+        );
+    }
+
+    #[tokio::test]
+    async fn prepare_system_update_rejects_empty_update_name() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nix_path = temp.path().join("kcore-vms.nix");
+        let svc = AdminService::new(nix_path.display().to_string());
+        let err = <AdminService as proto::node_admin_server::NodeAdmin>::prepare_system_update(
+            &svc,
+            Request::new(proto::PrepareSystemUpdateRequest {
+                update_name: String::new(),
+                flake_ref: "github:foo/bar".into(),
+                flake_rev: "abc".into(),
+                system_profile: String::new(),
+                host_system: String::new(),
+                timeout_seconds: 60,
+            }),
+        )
+        .await
+        .expect_err("empty update_name must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn prepare_system_update_rejects_empty_flake_ref() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nix_path = temp.path().join("kcore-vms.nix");
+        let svc = AdminService::new(nix_path.display().to_string());
+        let err = <AdminService as proto::node_admin_server::NodeAdmin>::prepare_system_update(
+            &svc,
+            Request::new(proto::PrepareSystemUpdateRequest {
+                update_name: "release-0-3-0".into(),
+                flake_ref: String::new(),
+                flake_rev: "abc".into(),
+                system_profile: String::new(),
+                host_system: String::new(),
+                timeout_seconds: 60,
+            }),
+        )
+        .await
+        .expect_err("empty flake_ref must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn activate_system_update_rejects_invalid_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nix_path = temp.path().join("kcore-vms.nix");
+        let svc = AdminService::new(nix_path.display().to_string());
+        let err = <AdminService as proto::node_admin_server::NodeAdmin>::activate_system_update(
+            &svc,
+            Request::new(proto::ActivateSystemUpdateRequest {
+                update_name: "release".into(),
+                activation_mode: "rm-rf".into(),
+                prepared_closure: String::new(),
+            }),
+        )
+        .await
+        .expect_err("bad mode must fail");
+        assert_eq!(err.code(), tonic::Code::InvalidArgument);
+    }
+
+    #[tokio::test]
+    async fn activate_system_update_test_mode_does_not_touch_disk() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let nix_path = temp.path().join("kcore-vms.nix");
+        let svc = AdminService::new(nix_path.display().to_string());
+        let resp = <AdminService as proto::node_admin_server::NodeAdmin>::activate_system_update(
+            &svc,
+            Request::new(proto::ActivateSystemUpdateRequest {
+                update_name: "release".into(),
+                activation_mode: "test".into(),
+                prepared_closure: String::new(),
+            }),
+        )
+        .await
+        .expect("test mode")
+        .into_inner();
+        assert!(resp.success);
+        assert!(resp.message.contains("test mode"));
     }
 
     #[tokio::test]

@@ -112,6 +112,7 @@ kcore-rust/
 │
 └── docs/
     ├── Architecture.md              high-level flow diagrams (Mermaid) and component responsibilities
+    ├── cluster-updates.md           design for NixOS-native rolling node/cluster updates
     ├── ha-crdt-replication.md       HA design plan for multi-controller replication, fallback, and DC topology
     ├── networking.md                VM network model, examples, and operational guidance
     ├── migrations.md                DB/API migration notes and rollout guidance
@@ -267,6 +268,7 @@ For each file: purpose + where it is used in runtime/operator flows.
 ### Documentation
 
 - `docs/Architecture.md` — architecture narrative; explains control/data-plane boundaries and component interaction patterns.
+- `docs/cluster-updates.md` — update architecture design; defines NixOS-native cluster update resources, node-agent update RPCs, rolling rollout semantics, rollback, and kctl/Terraform/Crossplane surfaces.
 - `docs/ha-crdt-replication.md` — HA architecture plan; defines DC defaults, hybrid CRDT replication, reconciler behavior, failover flows, and TLA+ modeling scope.
 - `docs/networking.md` — operator networking guide; covers network creation, topology examples, and runtime behavior details.
 - `docs/migrations.md` — migration operations guide; tracks schema/API changes and upgrade-safe rollout sequencing.
