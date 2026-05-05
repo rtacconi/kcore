@@ -61,7 +61,7 @@ jobs:
   # Each harness in `crates/kcore-sanitize/src/lib.rs` is independent
   # and runs as its own matrix shard on a dedicated runner. This:
   #
-  #   - parallelises wall-clock across GHA runners (~9× speed-up vs
+  #   - parallelises wall-clock across GHA runners vs
   #     a single job running all harnesses sequentially);
   #
   #   - eliminates the OOM risk from `cargo kani --jobs N` (each
@@ -89,19 +89,18 @@ jobs:
       # if one regresses; otherwise GHA cancels the rest and we lose
       # signal on the others.
       fail-fast: false
+      # Too much CBMC parallelism spawns runner cancellations / “shutdown signal”
+      # under GitHub load; keep a small fan-out.
+      max-parallel: 4
       matrix:
         # Fully-qualified harness paths from each crate's
         # `kani_proofs` module. `crate` selects which workspace
         # member `cargo kani -p` operates on.
         include:
           - crate: kcore-sanitize
-            harness: kani_proofs::nix_escape_never_panics
-          - crate: kcore-sanitize
             harness: kani_proofs::nix_escape_output_is_always_safe
           - crate: kcore-sanitize
-            harness: kani_proofs::sanitize_nix_attr_key_preserves_char_count
-          - crate: kcore-sanitize
-            harness: kani_proofs::sanitize_nix_attr_key_charset
+            harness: kani_proofs::sanitize_nix_attr_key_properties
           - crate: kcore-sanitize
             harness: kani_proofs::dot_dot_check_never_panics
           - crate: kcore-sanitize

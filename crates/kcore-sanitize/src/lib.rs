@@ -590,16 +590,10 @@ mod kani_proofs {
 
     // ---- nix_escape ----
 
-    #[kani::proof]
-    #[kani::unwind(9)]
-    fn nix_escape_never_panics() {
-        let mut buf = [0u8; MAX_INPUT_LEN];
-        let s = any_ascii_str(&mut buf);
-        let _ = nix_escape(s);
-    }
-
-    /// **Soundness**: `nix_escape` output is always safe to embed
-    /// in a Nix double-quoted string literal.
+    /// **Total + soundness**: `nix_escape` terminates without panic on ASCII
+    /// inputs up to the bound, and the output is safe inside Nix `"..."`.
+    /// (A single harness keeps CI parallelism lower — parallel CBMC jobs were
+    /// getting preemptively canceled on busy GitHub-hosted runners.)
     #[kani::proof]
     #[kani::unwind(9)]
     fn nix_escape_output_is_always_safe() {
@@ -611,24 +605,14 @@ mod kani_proofs {
 
     // ---- sanitize_nix_attr_key ----
 
+    /// Length preservation + charset, merged for the same CI parallelism reason.
     #[kani::proof]
     #[kani::unwind(9)]
-    fn sanitize_nix_attr_key_preserves_char_count() {
+    fn sanitize_nix_attr_key_properties() {
         let mut buf = [0u8; MAX_INPUT_LEN];
         let s = any_ascii_str(&mut buf);
         let out = sanitize_nix_attr_key(s);
-        // `any_ascii_str` only supplies ASCII, so one byte per char; the sanitizer
-        // never introduces multi-byte UTF-8 for ASCII inputs. Avoid `chars().count()`
-        // in harnesses — Kani/CBMC pays heavily for `core::str::Chars`.
         assert!(out.len() == s.len());
-    }
-
-    #[kani::proof]
-    #[kani::unwind(9)]
-    fn sanitize_nix_attr_key_charset() {
-        let mut buf = [0u8; MAX_INPUT_LEN];
-        let s = any_ascii_str(&mut buf);
-        let out = sanitize_nix_attr_key(s);
         for &b in out.as_bytes() {
             assert!(b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
         }
