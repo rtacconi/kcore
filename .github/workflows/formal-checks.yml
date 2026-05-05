@@ -89,28 +89,15 @@ jobs:
       # if one regresses; otherwise GHA cancels the rest and we lose
       # signal on the others.
       fail-fast: false
-      # Too much CBMC parallelism spawns runner cancellations / “shutdown signal”
-      # under GitHub load; keep a small fan-out.
-      max-parallel: 4
       matrix:
         # Fully-qualified harness paths from each crate's
         # `kani_proofs` module. `crate` selects which workspace
         # member `cargo kani -p` operates on.
+        #
+        # `kcore-sanitize` is verified in a single job (see
+        # `kani-kcore-sanitize`) so we do not run many parallel CBMC
+        # processes and trip hosted-runner preemption.
         include:
-          - crate: kcore-sanitize
-            harness: kani_proofs::nix_escape_output_is_always_safe
-          - crate: kcore-sanitize
-            harness: kani_proofs::sanitize_nix_attr_key_properties
-          - crate: kcore-sanitize
-            harness: kani_proofs::dot_dot_check_never_panics
-          - crate: kcore-sanitize
-            harness: kani_proofs::assert_safe_path_never_panics
-          - crate: kcore-sanitize
-            harness: kani_proofs::assert_safe_path_acceptance_implies_safe
-          - crate: kcore-sanitize
-            harness: kani_proofs::segment_validation_never_panics
-          - crate: kcore-sanitize
-            harness: kani_proofs::segment_acceptance_implies_safe
           # `kcore-disko-types` is the shared, std-only crate used by
           # both the controller pre-flight classifier and the node-
           # agent authoritative classifier. The harnesses below cover
@@ -265,6 +252,79 @@ jobs:
             --harness '${{ matrix.harness }}' \
             --output-format terse
 
+  # Every `kcore-sanitize` harness in one job so CBMC runs back-to-back on a
+  # single runner instead of spawning many parallel shards (GitHub-hosted
+  # workers repeatedly canceled mid-proof with “shutdown signal”).
+  kani-kcore-sanitize:
+    name: kani / kcore-sanitize
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    env:
+      KANI_VERSION: "0.67.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: kani-package-kcore-sanitize
+
+      - name: Restore Kani toolchain cache
+        id: kani-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+            ~/.kani
+          key: kani-toolchain-${{ runner.os }}-v${{ env.KANI_VERSION }}
+          restore-keys: |
+            kani-toolchain-${{ runner.os }}-v
+
+      - name: Install kani-verifier
+        id: kani-install
+        timeout-minutes: 18
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-kani >/dev/null 2>&1; then
+            cargo install --locked kani-verifier --version "${KANI_VERSION}"
+          else
+            installed="$(cargo-kani --version 2>/dev/null | awk '{print $NF}')"
+            if [ "${installed}" != "${KANI_VERSION}" ]; then
+              echo "Cached cargo-kani is ${installed}, want ${KANI_VERSION}; reinstalling."
+              cargo install --locked --force kani-verifier --version "${KANI_VERSION}"
+            else
+              echo "Cached cargo-kani matches pin (${installed})."
+            fi
+          fi
+          if [ ! -d "$HOME/.kani" ] || [ -z "$(ls -A "$HOME/.kani" 2>/dev/null)" ]; then
+            cargo-kani setup
+          else
+            echo "kani toolchain restored from cache, skipping cargo-kani setup"
+          fi
+
+      - name: Save Kani toolchain cache (post-install)
+        if: steps.kani-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+            ~/.kani
+          key: ${{ steps.kani-cache.outputs.cache-primary-key }}
+
+      - name: Run all kcore-sanitize Kani proofs
+        timeout-minutes: 120
+        run: |
+          set -euo pipefail
+          cargo-kani --version
+          cargo kani -p kcore-sanitize --output-format terse
+
   # Single aggregator job that branch-protection / required-status-
   # checks can require by the stable name "formal-checks / kani".
   # Without this, switching the per-harness matrix would force every
@@ -272,7 +332,7 @@ jobs:
   # `main` until they did).
   kani:
     name: kani
-    needs: [kani-shard]
+    needs: [kani-shard, kani-kcore-sanitize]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -280,9 +340,10 @@ jobs:
       - name: Verify all kani shards passed
         run: |
           set -euo pipefail
-          result='${{ needs.kani-shard.result }}'
-          if [[ "${result}" != "success" ]]; then
-            echo "::error::One or more kani shards did not succeed (aggregate result=${result})"
+          shard='${{ needs.kani-shard.result }}'
+          sanitize='${{ needs.kani-kcore-sanitize.result }}'
+          if [[ "${shard}" != "success" || "${sanitize}" != "success" ]]; then
+            echo "::error::kani-shard=${shard} kani-kcore-sanitize=${sanitize}"
             exit 1
           fi
-          echo "All kani matrix shards passed."
+          echo "All kani checks passed."
