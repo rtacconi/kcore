@@ -58,14 +58,14 @@ jobs:
             exit 1
           fi
 
-  # Every `kcore-sanitize` harness in one job so CBMC runs back-to-back on a
-  # single runner instead of spawning many parallel shards (GitHub-hosted
-  # workers repeatedly canceled mid-proof with “shutdown signal”).
-  kani-kcore-sanitize:
-    name: kani / kcore-sanitize
+  # Split path/segment vs nix-string proofs across **two** jobs so each hosted
+  # runner stays well under memory/time limits (one long job repeatedly lost the
+  # VM ~50m in; separate processes alone were not enough).
+  kani-kcore-sanitize-light:
+    name: kani / kcore-sanitize (path + segment)
     needs: [trace-and-tla]
     runs-on: ubuntu-latest
-    timeout-minutes: 150
+    timeout-minutes: 90
     env:
       KANI_VERSION: "0.67.0"
     steps:
@@ -78,7 +78,7 @@ jobs:
       - name: Cache cargo registry + target
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: kani-package-kcore-sanitize
+          shared-key: kani-package-kcore-sanitize-light
 
       - name: Restore Kani toolchain cache
         id: kani-cache
@@ -125,11 +125,8 @@ jobs:
             ~/.kani
           key: ${{ steps.kani-cache.outputs.cache-primary-key }}
 
-      # One CBMC process per harness. A single `cargo kani -p ...` verifying the
-      # whole crate kept CBMC resident long enough that hosted runners lost the
-      # VM (~50m, “lost communication with the server”).
-      - name: Run all kcore-sanitize Kani proofs
-        timeout-minutes: 120
+      - name: Run path + segment Kani proofs
+        timeout-minutes: 60
         run: |
           set -euo pipefail
           cargo-kani --version
@@ -138,18 +135,92 @@ jobs:
             kani_proofs::assert_safe_path_never_panics \
             kani_proofs::assert_safe_path_acceptance_implies_safe \
             kani_proofs::segment_validation_never_panics \
-            kani_proofs::segment_acceptance_implies_safe \
+            kani_proofs::segment_acceptance_implies_safe; do
+            echo "==> ${harness}"
+            cargo kani -p kcore-sanitize --harness "${harness}" --output-format terse
+          done
+
+  kani-kcore-sanitize-heavy:
+    name: kani / kcore-sanitize (nix escape + attr key)
+    needs: [kani-kcore-sanitize-light]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      KANI_VERSION: "0.67.0"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: kani-package-kcore-sanitize-heavy
+
+      - name: Restore Kani toolchain cache
+        id: kani-cache
+        uses: actions/cache/restore@v4
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+            ~/.kani
+          key: kani-toolchain-${{ runner.os }}-v${{ env.KANI_VERSION }}
+          restore-keys: |
+            kani-toolchain-${{ runner.os }}-v
+
+      - name: Install kani-verifier
+        id: kani-install
+        timeout-minutes: 18
+        run: |
+          set -euo pipefail
+          if ! command -v cargo-kani >/dev/null 2>&1; then
+            cargo install --locked kani-verifier --version "${KANI_VERSION}"
+          else
+            installed="$(cargo-kani --version 2>/dev/null | awk '{print $NF}')"
+            if [ "${installed}" != "${KANI_VERSION}" ]; then
+              echo "Cached cargo-kani is ${installed}, want ${KANI_VERSION}; reinstalling."
+              cargo install --locked --force kani-verifier --version "${KANI_VERSION}"
+            else
+              echo "Cached cargo-kani matches pin (${installed})."
+            fi
+          fi
+          if [ ! -d "$HOME/.kani" ] || [ -z "$(ls -A "$HOME/.kani" 2>/dev/null)" ]; then
+            cargo-kani setup
+          else
+            echo "kani toolchain restored from cache, skipping cargo-kani setup"
+          fi
+
+      - name: Save Kani toolchain cache (post-install)
+        if: steps.kani-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        continue-on-error: true
+        with:
+          path: |
+            ~/.cargo/bin/cargo-kani
+            ~/.cargo/bin/kani
+            ~/.kani
+          key: ${{ steps.kani-cache.outputs.cache-primary-key }}
+
+      - name: Run nix escape + attr-key Kani proofs
+        timeout-minutes: 60
+        run: |
+          set -euo pipefail
+          cargo-kani --version
+          for harness in \
             kani_proofs::sanitize_nix_attr_key_properties \
             kani_proofs::nix_escape_output_is_always_safe; do
             echo "==> ${harness}"
             cargo kani -p kcore-sanitize --harness "${harness}" --output-format terse
           done
 
-  # `kani-shard` is disko-only; it waits for `kani-kcore-sanitize` so hosted
-  # runners never execute sanitize CBMC concurrently with disko.shard CBMC.
+  # `kani-shard` is disko-only; it waits for sanitize jobs so hosted runners
+  # never execute sanitize CBMC concurrently with disko.shard CBMC.
   kani-shard:
     name: "kani-shard / ${{ matrix.crate }} :: ${{ matrix.harness }}"
-    needs: [kani-kcore-sanitize]
+    needs: [kani-kcore-sanitize-heavy]
     runs-on: ubuntu-latest
     # Must exceed install + proof step ceilings plus checkout/cache/rust-cache overhead.
     # Cold Kani install + CBMC setup can approach 15 min on busy runners; install+proof
@@ -332,7 +403,10 @@ jobs:
   # `main` until they did).
   kani:
     name: kani
-    needs: [kani-shard, kani-kcore-sanitize]
+    needs:
+      - kani-shard
+      - kani-kcore-sanitize-light
+      - kani-kcore-sanitize-heavy
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 2
@@ -341,9 +415,10 @@ jobs:
         run: |
           set -euo pipefail
           shard='${{ needs.kani-shard.result }}'
-          sanitize='${{ needs.kani-kcore-sanitize.result }}'
-          if [[ "${shard}" != "success" || "${sanitize}" != "success" ]]; then
-            echo "::error::kani-shard=${shard} kani-kcore-sanitize=${sanitize}"
+          light='${{ needs.kani-kcore-sanitize-light.result }}'
+          heavy='${{ needs.kani-kcore-sanitize-heavy.result }}'
+          if [[ "${shard}" != "success" || "${light}" != "success" || "${heavy}" != "success" ]]; then
+            echo "::error::kani-shard=${shard} kani-kcore-sanitize-light=${light} kani-kcore-sanitize-heavy=${heavy}"
             exit 1
           fi
           echo "All kani checks passed."
