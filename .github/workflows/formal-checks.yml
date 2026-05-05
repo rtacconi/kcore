@@ -63,6 +63,7 @@ jobs:
   # workers repeatedly canceled mid-proof with “shutdown signal”).
   kani-kcore-sanitize:
     name: kani / kcore-sanitize
+    needs: [trace-and-tla]
     runs-on: ubuntu-latest
     timeout-minutes: 150
     env:

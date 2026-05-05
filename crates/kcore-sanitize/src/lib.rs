@@ -147,13 +147,26 @@ fn sanitize_nix_attr_key_utf8(s: &str) -> String {
     out
 }
 
+/// ASCII-only predicate matching [`sanitize_nix_attr_key`] for single-byte
+/// chars. Avoid `char::is_ascii_alphanumeric` / `u8::is_ascii_alphanumeric`
+/// under `cfg(kani)` — Rust’s libcore versions can pull SIMD helpers that
+/// explode CBMC runtime (`simd_reduce_all` in Kani’s unsupported-constructs
+/// warning on CI).
+#[cfg(kani)]
+#[inline]
+fn sanitize_attr_byte_allowed(b: u8) -> bool {
+    matches!(
+        b,
+        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'
+    )
+}
+
 #[cfg(kani)]
 fn sanitize_nix_attr_key_for_kani(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for &b in s.as_bytes() {
-        let c = char::from(b);
-        if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
-            out.push(c);
+        if sanitize_attr_byte_allowed(b) {
+            out.push(char::from(b));
         } else {
             out.push('-');
         }
@@ -614,7 +627,7 @@ mod kani_proofs {
         let out = sanitize_nix_attr_key(s);
         assert!(out.len() == s.len());
         for &b in out.as_bytes() {
-            assert!(b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+            assert!(super::sanitize_attr_byte_allowed(b));
         }
     }
 
