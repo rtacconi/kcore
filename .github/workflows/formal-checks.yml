@@ -125,12 +125,25 @@ jobs:
             ~/.kani
           key: ${{ steps.kani-cache.outputs.cache-primary-key }}
 
+      # One CBMC process per harness. A single `cargo kani -p ...` verifying the
+      # whole crate kept CBMC resident long enough that hosted runners lost the
+      # VM (~50m, “lost communication with the server”).
       - name: Run all kcore-sanitize Kani proofs
         timeout-minutes: 120
         run: |
           set -euo pipefail
           cargo-kani --version
-          cargo kani -p kcore-sanitize --output-format terse
+          for harness in \
+            kani_proofs::dot_dot_check_never_panics \
+            kani_proofs::assert_safe_path_never_panics \
+            kani_proofs::assert_safe_path_acceptance_implies_safe \
+            kani_proofs::segment_validation_never_panics \
+            kani_proofs::segment_acceptance_implies_safe \
+            kani_proofs::sanitize_nix_attr_key_properties \
+            kani_proofs::nix_escape_output_is_always_safe; do
+            echo "==> ${harness}"
+            cargo kani -p kcore-sanitize --harness "${harness}" --output-format terse
+          done
 
   # `kani-shard` is disko-only; it waits for `kani-kcore-sanitize` so hosted
   # runners never execute sanitize CBMC concurrently with disko.shard CBMC.
