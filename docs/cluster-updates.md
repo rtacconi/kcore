@@ -1,5 +1,7 @@
 # NixOS-Native Cluster Updates
 
+**Operator-focused procedures:** see [`cluster-and-node-upgrades.md`](./cluster-and-node-upgrades.md).
+
 This document designs the update path for running kcore nodes and whole
 clusters. The goal is to stop treating a new ISO as the only upgrade path and
 instead use NixOS generations, flake-pinned kcore packages, and controller-led

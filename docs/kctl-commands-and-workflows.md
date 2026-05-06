@@ -518,6 +518,7 @@ Top-level commands:
 - `kctl node apply-nix -f ... [--no-rebuild]`
 - `kctl node apply-disk -f ... [--apply] [--timeout-seconds N] [--no-rebuild]` (alias `apply-disko`)
 - `kctl apply -f <DiskLayout>.yaml`, `kctl diff -f <DiskLayout>.yaml`, `kctl get disk-layouts`, `kctl describe disk-layout <name>`, `kctl delete disk-layout <name>`
+- `kctl update cluster plan -f <ClusterUpdate>.yaml`, `kctl update cluster apply -f ...`, `kctl update cluster get <name>`, `kctl update cluster list`, `kctl update cluster approve <name>`, `kctl update cluster cancel <name>`, `kctl update cluster rollback <name>` (host OS rollouts; see [`cluster-and-node-upgrades.md`](./cluster-and-node-upgrades.md))
 - `kctl pull image <uri>` (legacy/manual path)
 - `kctl node approve <NODE_ID>`
 - `kctl node reject <NODE_ID>`
@@ -542,8 +543,9 @@ Day-2 operations:
 3. adjust desired VM running state with `kctl set vm ... --state ...` (or `kctl start/stop vm ...`)
 4. update configs with `kctl node apply-nix ...` or `kctl apply ...`
 5. for day-2 disk layout changes, prefer declarative `kctl apply -f <DiskLayout>.yaml` (use `kctl diff -f` first); for one-off pushes, `kctl node apply-disk ...` (validate first, then `--apply`)
-6. rotate controller cert with `kctl rotate certs --controller <host:port>`
-7. rotate sub-CA with `kctl rotate sub-ca`
+6. for cluster or single-node **host OS** upgrades, use `kctl update cluster plan -f` / `apply -f` with a `kind: ClusterUpdate` manifest (narrow the selector to one node if needed); see [`cluster-and-node-upgrades.md`](./cluster-and-node-upgrades.md)
+7. rotate controller cert with `kctl rotate certs --controller <host:port>`
+8. rotate sub-CA with `kctl rotate sub-ca`
 
 ## 12) Storage backend examples
 

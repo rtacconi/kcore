@@ -9,7 +9,8 @@
 |--------|-----------|
 | Architecture | [Architecture.md](./Architecture.md) |
 | Appliance console | [appliance-console.md](./appliance-console.md) |
-| Cluster updates | [cluster-updates.md](./cluster-updates.md) |
+| Cluster updates (architecture / design) | [cluster-updates.md](./cluster-updates.md) |
+| Cluster and node upgrades (operator guide) | [cluster-and-node-upgrades.md](./cluster-and-node-upgrades.md) |
 | Day-2 filesystem operations | [day-2-filesystem-operations.md](./day-2-filesystem-operations.md) |
 | CRDT / HA replication | [ha-crdt-replication.md](./ha-crdt-replication.md) |
 | File layout | [file-structure.md](./file-structure.md) |
