@@ -1899,6 +1899,9 @@ dependencies = [
 [[package]]
 name = "kcore-sanitize"
 version = "0.2.0"
+dependencies = [
+ "proptest",
+]
 
 [[package]]
 name = "kctl"

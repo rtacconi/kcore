@@ -11,5 +11,8 @@ description = "Pure, std-only sanitizers for operator-supplied paths and Nix exp
 # wall-clock time.
 [dependencies]
 
+[dev-dependencies]
+proptest = "1.11"
+
 [lints]
 workspace = true
