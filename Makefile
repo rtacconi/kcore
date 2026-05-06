@@ -62,6 +62,28 @@ kani:
 		--jobs "$${KANI_JOBS:-2}" \
 		--output-format terse
 
+# Detached, parallel local Kani run intended for the Cursor agent.
+# Runs as a systemd --user unit (kcore-kani-local.service) so the worker
+# survives the agent shell exiting or Cursor crashing. Returns immediately;
+# poll progress with `make kani-local-status`.
+kani-local:
+	bash ./scripts/run-kani-local.sh start
+
+kani-local-status:
+	bash ./scripts/run-kani-local.sh status
+
+kani-local-tail:
+	bash ./scripts/run-kani-local.sh tail
+
+kani-local-wait:
+	bash ./scripts/run-kani-local.sh wait
+
+kani-local-kill:
+	bash ./scripts/run-kani-local.sh kill
+
+kani-local-logs:
+	bash ./scripts/run-kani-local.sh logs
+
 coverage:
 	nix develop -c nix shell nixpkgs#cargo-llvm-cov nixpkgs#cargo nixpkgs#rustc nixpkgs#llvmPackages_21.llvm -c sh -lc 'LLVM_COV="$$(which llvm-cov)" LLVM_PROFDATA="$$(which llvm-profdata)" cargo llvm-cov --workspace --summary-only'
 
@@ -147,7 +169,9 @@ help:
 	@echo "  test-tla    Run bounded TLC model checks in specs/tla"
 	@echo "  test-tla-trace  Run replication trace drift checker"
 	@echo "  test-replication-soak  Run bounded replication resilience soak harness"
-	@echo "  kani        Run Kani bounded model-checking proofs (requires cargo-kani)"
+	@echo "  kani        Run Kani bounded model-checking proofs in foreground (requires cargo-kani)"
+	@echo "  kani-local  Run Kani proofs as a detached systemd --user unit (Cursor-safe)"
+	@echo "  kani-local-status / -tail / -wait / -logs / -kill"
 	@echo "  coverage    Run test coverage via nix develop + cargo-llvm-cov"
 	@echo "  test-controller  Run controller crate tests"
 	@echo "  test-node-agent  Run node-agent crate tests"

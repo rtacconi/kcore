@@ -3,13 +3,29 @@
 //!
 //! Every function in this crate is a *gate* — its callers depend on
 //! the post-conditions being upheld for memory safety, sandbox
-//! integrity, or to stop arbitrary Nix evaluation. The
-//! security-critical post-conditions are proved with Kani in
-//! `mod kani_proofs` below.
+//! integrity, or to stop arbitrary Nix evaluation.
 //!
-//! This crate intentionally has **no non-std dependencies** so that
-//! `cargo kani -p kcore-sanitize` only needs to compile this single
-//! file, keeping the formal-checks CI gate fast and reliable.
+//! ## Verification strategy
+//!
+//! Two layers, applied per function based on what each tool is
+//! actually good at:
+//!
+//! * **Kani** (`mod kani_proofs`, run via `make kani-local`): used
+//!   *only* for the byte-loop path scanners (`assert_safe_path` and
+//!   friends). CBMC enumerates every 4-byte ASCII input
+//!   (≈ 2³² states) in seconds because there's no allocation, no
+//!   iterator chain, and no UTF-8 decoding.
+//!
+//! * **proptest** (`mod prop_tests`, run via `cargo test`): used for
+//!   *everything else* — `nix_escape`, `sanitize_nix_attr_key`, and
+//!   the segment validator. proptest samples real-world-sized inputs
+//!   (up to 200 chars including non-ASCII) and shrinks failures to
+//!   minimal counterexamples. CBMC was tried for these and either
+//!   timed out at 4-byte inputs or had to be neutered to length ≤ 1
+//!   (which proves nothing useful).
+//!
+//! This crate intentionally has **no runtime dependencies** so that
+//! `cargo kani -p kcore-sanitize` only compiles this single file.
 
 // =============================================================
 // Nix string-literal escaping
@@ -20,25 +36,9 @@
 /// interpolation marker.
 ///
 /// Uses a byte index walk instead of a `peekable` char iterator so
-/// Kani does not spend tens of minutes in iterator-heavy `core` code.
-///
-/// Under `cfg(kani)`, only the ASCII-only fast path is compiled: every
-/// harness uses [`kani_proofs::any_ascii_str`], so UTF-8 suffix decoding
-/// never appears in the verification artifact (CBMC was spending most
-/// of its budget there).
+/// the implementation is simple, branch-predictable, and identical
+/// in production and tests (no `cfg(kani)` shim).
 pub fn nix_escape(s: &str) -> String {
-    #[cfg(kani)]
-    {
-        return nix_escape_for_kani(s);
-    }
-    #[cfg(not(kani))]
-    {
-        nix_escape_utf8(s)
-    }
-}
-
-#[cfg(not(kani))]
-fn nix_escape_utf8(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0usize;
@@ -70,61 +70,11 @@ fn nix_escape_utf8(s: &str) -> String {
     out
 }
 
-#[cfg(kani)]
-fn nix_escape_for_kani(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let b = s.as_bytes();
-    let mut i = 0usize;
-    while i < b.len() {
-        match b[i] {
-            b'\\' => {
-                out.push_str("\\\\");
-                i += 1;
-            }
-            b'"' => {
-                out.push_str("\\\"");
-                i += 1;
-            }
-            b'$' if i + 1 < b.len() && b[i + 1] == b'{' => {
-                out.push_str("\\${");
-                i += 2;
-            }
-            _ => {
-                out.push(char::from(b[i]));
-                i += 1;
-            }
-        }
-    }
-    out
-}
-
 /// Strip a Nix attribute key to only safe characters
 /// (alphanumeric, dash, underscore). Every disallowed input
-/// character is replaced by a single `-`, so character count is
-/// preserved.
-///
-/// Implemented as a manual UTF-8 scan (ASCII fast path, non-ASCII
-/// via one `chars().next()` per codepoint) instead of
-/// `chars().map().collect()`.
-/// The iterator chain was orders of magnitude slower for Kani/CBMC
-/// (same story as `path_segments_include_dot_dot` above).
-///
-/// Under `cfg(kani)`, only per-byte ASCII handling is compiled — matching
-/// [`kani_proofs::any_ascii_str`] inputs — so CBMC never pulls UTF-8 decode
-/// machinery into the proof.
+/// *character* (including non-ASCII codepoints) is replaced by a
+/// single `-`, so `chars().count()` is preserved.
 pub fn sanitize_nix_attr_key(s: &str) -> String {
-    #[cfg(kani)]
-    {
-        return sanitize_nix_attr_key_for_kani(s);
-    }
-    #[cfg(not(kani))]
-    {
-        sanitize_nix_attr_key_utf8(s)
-    }
-}
-
-#[cfg(not(kani))]
-fn sanitize_nix_attr_key_utf8(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let b = s.as_bytes();
     let mut i = 0usize;
@@ -140,33 +90,6 @@ fn sanitize_nix_attr_key_utf8(s: &str) -> String {
         };
         if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
             out.push(c);
-        } else {
-            out.push('-');
-        }
-    }
-    out
-}
-
-/// ASCII-only predicate matching [`sanitize_nix_attr_key`] for single-byte
-/// chars. Avoid `char::is_ascii_alphanumeric` / `u8::is_ascii_alphanumeric`
-/// under `cfg(kani)` — Rust’s libcore versions can pull SIMD helpers that
-/// explode CBMC runtime (`simd_reduce_all` in Kani’s unsupported-constructs
-/// warning on CI).
-#[cfg(kani)]
-#[inline]
-fn sanitize_attr_byte_allowed(b: u8) -> bool {
-    matches!(
-        b,
-        b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_'
-    )
-}
-
-#[cfg(kani)]
-fn sanitize_nix_attr_key_for_kani(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for &b in s.as_bytes() {
-        if sanitize_attr_byte_allowed(b) {
-            out.push(char::from(b));
         } else {
             out.push('-');
         }
@@ -532,55 +455,23 @@ mod tests {
 }
 
 // =============================================================
-// Bounded model-checking proofs (Phase 2 — Kani)
+// proptest property tests
 // =============================================================
+//
+// These cover the higher-level sanitizers (`nix_escape`,
+// `sanitize_nix_attr_key`, `validate_safe_segment`) that are
+// pathological for CBMC's SAT solver. proptest samples real-sized
+// inputs (including non-ASCII), shrinks failures, and runs in
+// milliseconds.
 
-/// Bounded model-checking proofs.
-///
-/// Run with:
-///
-/// ```text
-/// cargo install --locked kani-verifier
-/// cargo kani setup
-/// cargo kani -p kcore-sanitize
-/// ```
-///
-/// Bounds (`MAX_INPUT_LEN`) are kept small so each harness finishes
-/// in seconds on the GitHub Actions runner. They are large enough
-/// to cover every interesting alignment of the security-relevant
-/// tokens (`\`, `"`, `${`, `/`, `\`, `.`, `\0`, leading `-`).
-#[cfg(kani)]
-mod kani_proofs {
+#[cfg(test)]
+mod prop_tests {
     use super::*;
+    use proptest::prelude::*;
 
-    /// Maximum input length used by every Kani harness in this
-    /// module. Kani's runtime grows quickly with this bound; 4
-    /// bytes is enough to cover every interesting alignment of the
-    /// security-relevant tokens above.
-    const MAX_INPUT_LEN: usize = 4;
-
-    /// Produce a non-deterministic ASCII string of length ≤
-    /// `MAX_INPUT_LEN` for use in a Kani proof. Restricting to
-    /// ASCII keeps the model small while still covering every byte
-    /// that can appear in any of the escape alphabets we care
-    /// about.
-    fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
-        let len: usize = kani::any();
-        kani::assume(len <= MAX_INPUT_LEN);
-        for slot in buf.iter_mut() {
-            let b: u8 = kani::any();
-            kani::assume(b < 128);
-            *slot = b;
-        }
-        // SAFETY: every byte was constrained to < 128, so the
-        // slice is valid UTF-8.
-        std::str::from_utf8(&buf[..len]).unwrap()
-    }
-
-    /// Returns true iff `s`, when wrapped in `"…"`, is safe to
-    /// embed in a Nix double-quoted string literal: no unescaped
-    /// `"`, no unescaped `\`, and no unescaped `${` interpolation
-    /// marker.
+    /// Returns true iff `s`, wrapped in `"…"`, is safe to embed in
+    /// a Nix double-quoted string literal: no unescaped `"`, `\`,
+    /// or `${`.
     fn is_safely_escaped(s: &str) -> bool {
         let bytes = s.as_bytes();
         let mut i = 0;
@@ -591,7 +482,6 @@ mod kani_proofs {
                         return false;
                     }
                     i += 2;
-                    continue;
                 }
                 b'"' => return false,
                 b'$' if bytes.get(i + 1) == Some(&b'{') => return false,
@@ -601,48 +491,122 @@ mod kani_proofs {
         true
     }
 
-    // ---- nix_escape ----
+    proptest! {
+        // -------- nix_escape --------
 
-    /// **Total + soundness**: `nix_escape` terminates without panic on ASCII
-    /// inputs up to the bound, and the output is safe inside Nix `"..."`.
-    /// (A single harness keeps CI parallelism lower — parallel CBMC jobs were
-    /// getting preemptively canceled on busy GitHub-hosted runners.)
-    #[kani::proof]
-    #[kani::unwind(9)]
-    fn nix_escape_output_is_always_safe() {
-        let mut buf = [0u8; MAX_INPUT_LEN];
-        let s = any_ascii_str(&mut buf);
-        // Keep this harness small for hosted CI; proptest still covers length 4.
-        kani::assume(s.len() <= 1);
-        let escaped = nix_escape(s);
-        assert!(is_safely_escaped(&escaped));
-    }
+        /// `nix_escape` always produces a string that is safe to
+        /// embed inside Nix `"…"`.
+        #[test]
+        fn nix_escape_output_is_always_safe(s in ".{0,200}") {
+            let escaped = nix_escape(&s);
+            prop_assert!(is_safely_escaped(&escaped), "{escaped:?} not safe");
+        }
 
-    // ---- sanitize_nix_attr_key ----
+        /// `nix_escape` is idempotent under wrap+unwrap: applying
+        /// it twice never adds a *new* dangerous token (which would
+        /// indicate the escaper itself emits one).
+        #[test]
+        fn nix_escape_double_apply_stays_safe(s in ".{0,200}") {
+            let once = nix_escape(&s);
+            let twice = nix_escape(&once);
+            prop_assert!(is_safely_escaped(&twice));
+        }
 
-    /// Length preservation + charset, merged for the same CI parallelism reason.
-    #[kani::proof]
-    #[kani::unwind(9)]
-    fn sanitize_nix_attr_key_properties() {
-        let mut buf = [0u8; MAX_INPUT_LEN];
-        let s = any_ascii_str(&mut buf);
-        kani::assume(s.len() <= 1);
-        let out = sanitize_nix_attr_key(s);
-        assert!(out.len() == s.len());
-        for &b in out.as_bytes() {
-            assert!(super::sanitize_attr_byte_allowed(b));
+        // -------- sanitize_nix_attr_key --------
+
+        /// Output character count equals input character count.
+        /// This is what callers depend on to keep diff alignment
+        /// when swapping a key in a generated Nix file.
+        #[test]
+        fn sanitize_nix_attr_key_preserves_char_count(s in ".{0,200}") {
+            let out = sanitize_nix_attr_key(&s);
+            prop_assert_eq!(out.chars().count(), s.chars().count());
+        }
+
+        /// Every output character is in the allowed alphabet
+        /// (ASCII alphanumerics, `-`, `_`).
+        #[test]
+        fn sanitize_nix_attr_key_only_safe_chars(s in ".{0,200}") {
+            let out = sanitize_nix_attr_key(&s);
+            for c in out.chars() {
+                prop_assert!(
+                    c.is_ascii_alphanumeric() || c == '-' || c == '_',
+                    "{c:?} not allowed"
+                );
+            }
+        }
+
+        // -------- validate_safe_segment --------
+
+        /// Any segment `validate_safe_segment` accepts has the
+        /// post-conditions documented on its return type.
+        #[test]
+        fn segment_acceptance_implies_safe(s in ".{0,300}") {
+            if let Ok(out) = validate_safe_segment(&s) {
+                prop_assert!(!out.is_empty());
+                prop_assert!(!out.contains('\0'));
+                prop_assert!(!out.contains('/'));
+                prop_assert!(!out.contains('\\'));
+                prop_assert!(out != "." && out != "..");
+                prop_assert!(!out.starts_with('-'));
+                prop_assert!(out.len() <= MAX_SAFE_SEGMENT_LEN);
+            }
+        }
+
+        /// `validate_safe_segment` never panics — including on
+        /// inputs longer than `MAX_SAFE_SEGMENT_LEN`, which it
+        /// must reject rather than crash.
+        #[test]
+        fn segment_validation_never_panics(s in ".{0,400}") {
+            let _ = validate_safe_segment(&s);
         }
     }
+}
 
-    // ---- path_segments_include_dot_dot / assert_safe_path ----
-    //
-    // These three harnesses exercise the byte-loop path scanner.
-    // With `MAX_INPUT_LEN = 4` the scanning loop iterates at most 5
-    // times (one extra for the trailing `i == n` boundary case),
-    // so `unwind(6)` is sufficient. CBMC will still hard-fail with
-    // an unwinding-assertion violation if a future bound increase
-    // outgrows this, so this is safe to tighten.
+// =============================================================
+// Bounded model-checking proofs (Kani)
+// =============================================================
+//
+// Scope: ONLY the byte-loop path scanners. CBMC enumerates every
+// 4-byte ASCII input (≈ 4 billion states) in seconds because there
+// is no allocation, no iterator chain, and no UTF-8 decoding.
+//
+// Higher-level sanitizers (`nix_escape`, `sanitize_nix_attr_key`,
+// `validate_safe_segment`) live in `mod prop_tests` above —
+// proptest is empirically more useful there, since CBMC times out
+// at 4-byte inputs and its proofs had to be neutered to ≤ 1 byte
+// (which proves nothing).
+//
+// Run with:
+//
+// ```text
+// make kani-local
+// ```
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
 
+    /// 4 bytes is enough to cover every interesting alignment of
+    /// the security-relevant separators (`/`, `\`, `.`, `\0`) inside
+    /// a path component, and CBMC enumerates the resulting ≈ 4 G
+    /// state space in seconds.
+    const MAX_INPUT_LEN: usize = 4;
+
+    fn any_ascii_str(buf: &mut [u8; MAX_INPUT_LEN]) -> &str {
+        let len: usize = kani::any();
+        kani::assume(len <= MAX_INPUT_LEN);
+        for slot in buf.iter_mut() {
+            let b: u8 = kani::any();
+            kani::assume(b < 128);
+            *slot = b;
+        }
+        // SAFETY: every byte was constrained to < 128, so the slice
+        // is valid UTF-8.
+        std::str::from_utf8(&buf[..len]).unwrap()
+    }
+
+    /// **Liveness**: the byte-loop dot-dot scanner never panics
+    /// for any 4-byte ASCII input.
     #[kani::proof]
     #[kani::unwind(6)]
     fn dot_dot_check_never_panics() {
@@ -651,6 +615,8 @@ mod kani_proofs {
         let _ = path_segments_include_dot_dot(s);
     }
 
+    /// **Liveness**: `assert_safe_path` never panics for any
+    /// 4-byte ASCII input.
     #[kani::proof]
     #[kani::unwind(6)]
     fn assert_safe_path_never_panics() {
@@ -671,36 +637,6 @@ mod kani_proofs {
             assert!(!s.is_empty());
             assert!(!s.contains('\0'));
             assert!(!path_segments_include_dot_dot(s));
-        }
-    }
-
-    // ---- validate_safe_segment ----
-
-    #[kani::proof]
-    #[kani::unwind(9)]
-    fn segment_validation_never_panics() {
-        let mut buf = [0u8; MAX_INPUT_LEN];
-        let s = any_ascii_str(&mut buf);
-        let _ = validate_safe_segment(s);
-    }
-
-    /// **Soundness**: any segment `validate_safe_segment` accepts
-    /// is non-empty after trimming, contains no NUL byte, no path
-    /// separator (`/` or `\`), is not `.` or `..`, and does not
-    /// start with `-`.
-    #[kani::proof]
-    #[kani::unwind(9)]
-    fn segment_acceptance_implies_safe() {
-        let mut buf = [0u8; MAX_INPUT_LEN];
-        let s = any_ascii_str(&mut buf);
-        if let Ok(out) = validate_safe_segment(s) {
-            assert!(!out.is_empty());
-            assert!(!out.contains('\0'));
-            assert!(!out.contains('/'));
-            assert!(!out.contains('\\'));
-            assert!(out != "." && out != "..");
-            assert!(!out.starts_with('-'));
-            assert!(out.len() <= MAX_SAFE_SEGMENT_LEN);
         }
     }
 }
